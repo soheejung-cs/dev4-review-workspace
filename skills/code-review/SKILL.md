@@ -48,5 +48,7 @@ description: CUBRID 엔진 C/C++ 변경의 구현 리뷰 — 정확한가, 핫�
 - 비용·선택도의 부동소수점 `==`(FP-01/02), 1회 측정 판정(MEAS-04), 행 루프의 컴파일타임 분기(BR-04).
 
 ## 5. 산출물
+
+**보고서 형식·영문 체크리스트(들여온 것)**: `imports/xmilex-git/skills/cubrid-pr-review/SKILL.md`(한국어 리뷰 보고서 TL;DR/Findings 형식, 예 `imports/xmilex-git/review-reports/`), `imports/xmilex-git/skills/cpp-perf-rules/CHECKLIST.md`(§18 영문 체크리스트, ID 동일). 원 작성자 xmilex-git.
 - 답글: `review-response` 스킬 형식으로 **사용자 검토 후** 게시.
 - 새로 확인한 코드 사실 → `dev4-ai-source/staging/환류대기.md` (`record` 스킬).

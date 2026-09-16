@@ -25,6 +25,7 @@ references/
   저지연패턴-HFT논문.md / -서적.md, 서버사이드-성능검토.md
 members/             팀 명단(GitHub 기준)·가입 템플릿·사람별 공간(컨테이너 사실은 여기에만)
 tools/               roster.json(추적 GitHub ID) · review_board_gen.py(review-to-do 보드)
+imports/xmilex-git/    송일한 워크스페이스에서 들여온 원문(PR 리뷰 스킬·영문 성능 규칙집·설계 어휘·ctp-run·PR 코퍼스) — README 에 대응표
 examples/
   설계리뷰-덱-CBRD-27369.html   13장 덱(비유·락 전후 표·라이브락 그림·결정 요청) — 다음 덱의 틀
   리뷰답글-예시-PR7900.md      엔진 스레드 5 + TC PR 답글 2 — 문체·구조 예시

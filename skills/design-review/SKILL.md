@@ -43,5 +43,7 @@ description: 변경이 있어야 할 자리에 있는가를 묻는 설계 리뷰
 - 리뷰어 질문이 오면 덱을 **고쳐서 재게시**한다(같은 링크) — 답변을 채팅에만 남기지 않는다.
 
 ## 4. 결정 요청은 닫힌 질문으로
+
+어휘: "책임이 맞는 자리에 있나"를 말할 때 `imports/xmilex-git/skills/codebase-design/SKILL.md` 의 깊은 모듈·seam·adapter 용어를 쓴다(원 작성자 xmilex-git).
 "A/B/C 중 어느 것", "수용하고 릴리스 노트에 적을까요" — 각 선택지의 비용과 남는 약점을 함께. 결정되면 덱과
 `projects/CBRD-XXXXX/세션기록-*.md` 의 결정 상태 표를 갱신한다(`record` 스킬).
