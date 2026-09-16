@@ -49,6 +49,7 @@ description: CUBRID 엔진 C/C++ 변경의 구현 리뷰 — 정확한가, 핫�
 - 비용·선택도의 부동소수점 `==`(FP-01/02), 1회 측정 판정(MEAS-04), 행 루프의 컴파일타임 분기(BR-04).
 
 ## 5. 산출물
+**보고서**: `imports/xmilex-git/skills/cubrid-pr-review/SKILL.md` 형식(TL;DR 판정 / Summary / Findings / JIRA / Existing Comments, 80줄 상한, 이모지·화살표 기호 금지, 한 지적 = 파일:라인 + 한 문장 + 근거)을 따르되 **Findings 를 `### [설계 리뷰]` 와 `### [코드 리뷰]` 로 나눈다**(설계 층은 영역 판정 문장으로 시작, 코드 층은 Blocking / Non-blocking / Questions). 끝에 `## 돌릴 것 (제안 -- 확인 후 실행)` 을 붙여 `review-testing` 매트릭스 제안을 적고 요청자 확인을 받는다. 예: `examples/리뷰보고서-예시-PR7899.md`. 보고서는 `claude-workspace/projects/<JIRA>/리뷰보고서-PR<n>.md` 에도 둔다(보드가 찾는다).
 
 **보고서 형식·영문 체크리스트(들여온 것)**: `imports/xmilex-git/skills/cubrid-pr-review/SKILL.md`(한국어 리뷰 보고서 TL;DR/Findings 형식, 예 `imports/xmilex-git/review-reports/`), `imports/xmilex-git/skills/cpp-perf-rules/CHECKLIST.md`(§18 영문 체크리스트, ID 동일). 원 작성자 xmilex-git.
 - 답글: `review-response` 스킬 형식으로 **사용자 검토 후** 게시.
