@@ -55,3 +55,6 @@ description: CUBRID 엔진 C/C++ 변경의 구현 리뷰 — 정확한가, 핫�
 **보고서 형식·영문 체크리스트(들여온 것)**: `imports/xmilex-git/skills/cubrid-pr-review/SKILL.md`(한국어 리뷰 보고서 TL;DR/Findings 형식, 예 `imports/xmilex-git/review-reports/`), `imports/xmilex-git/skills/cpp-perf-rules/CHECKLIST.md`(§18 영문 체크리스트, ID 동일). 원 작성자 xmilex-git.
 - 답글: `review-response` 스킬 형식으로 **사용자 검토 후** 게시.
 - 새로 확인한 코드 사실 → `dev4-ai-source/staging/환류대기.md` (`record` 스킬).
+
+## 하네스로 시작하기 (2026-09-16)
+리뷰 전에 `python3 -m tools.harness.run review --pr <n>` 을 돌려 `out/<pr>/<sha>/context_pack.md`(변경 함수·그래프 증거·관문 짝·경로·규칙 행)를 먼저 읽는다. 지적은 `harness/schemas/finding.json` 형식으로 적고 `run adjudicate --findings` 로 판정한 뒤 보고서에 옮긴다. 설계: `arch.json`/`arch.mmd` 의 계층 간선과 리스크를 인용한다. 상세 `harness/ARCHITECTURE.md`.

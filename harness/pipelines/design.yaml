@@ -1,0 +1,20 @@
+# 설계용 하네스 실행 그래프 — 리뷰용과 initialize/context 를 공유하고, 유추(infer)·리스크·다이어그램이 추가된다
+harness: design
+inputs: { pr: int | doc: path, repo: ~/dev/sources/cubrid }
+stages:
+  initialize: { reuse: review.initialize }
+  context:    { reuse: review.context, extra_priorities: [layer_rules(rules/설계-리뷰-규칙.md §1-§4), invariants(references/cubrid-사전설계문서.md §1)] }
+  infer:                           # Azure 샘플의 smart_parse → components/connections 를 CodeGraph 위에서
+    nodes:
+      arch:       { impl: arch_infer.infer, components: layers(사전설계 §3), connections: cross-layer resolved calls }
+      risks:      { impl: arch_infer.detect_risks, detectors: [layer-cycle, layer-inversion, gate-imbalance, latch-then-lock, hot-shared] }
+      diagram:    { impl: arch_infer.to_mermaid + to_excalidraw }
+    outputs: [arch.json, arch.mmd, arch.excalidraw]
+  review:
+    nodes:
+      llm_design: { skill: skills/design-review, rules: [rules/설계-리뷰-규칙.md], inputs: [context_pack.md, arch.json], output_schema: harness/schemas/finding.json (layer=설계) + decision_requests }
+  adjudicate: { reuse: review.adjudicate, extra: risks_must_cite_arch_json_edge }
+  publish:
+    nodes:
+      deck:       { skill: skills/design-review §산출물, template: examples/설계리뷰-덱-CBRD-27369.html, requires: user_allows_artifact }
+      comments:   { skill: skills/review-response, mode: inline-only, tag: "[설계 리뷰]", requires: user_approval }

@@ -1,0 +1,13 @@
+{ "$schema": "http://json-schema.org/draft-07/schema#", "title": "harness finding", "type": "object",
+  "required": ["id", "layer", "file", "line", "claim", "evidence", "severity"],
+  "properties": {
+    "id": {"type": "string"}, "layer": {"enum": ["설계", "코드"]},
+    "file": {"type": "string"}, "line": {"type": "integer", "minimum": 1},
+    "claim": {"type": "string", "description": "한 문장: 결함 → 원인 → 결과"},
+    "evidence": {"type": "array", "items": {"type": "string", "pattern": "^[^:\\s]+:\\d+"}, "minItems": 1},
+    "rule_ids": {"type": "array", "items": {"type": "string", "pattern": "^[A-Z]{2,5}-\\d{2}$"}},
+    "severity": {"enum": ["blocking", "non-blocking", "question"]},
+    "arch_edge": {"type": "string", "description": "설계 층: arch.json 의 connections[source->target] 또는 risks[kind]"},
+    "status": {"enum": ["valid", "invalid", "inconclusive"], "description": "adjudicate 가 채움"},
+    "obligations": {"type": "object"}, "reasons": {"type": "array", "items": {"type": "string"}}
+  } }

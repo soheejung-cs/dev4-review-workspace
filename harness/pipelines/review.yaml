@@ -1,0 +1,27 @@
+# 리뷰용 하네스 실행 그래프 (Metis execution-graph 형식을 빌려 씀 — YAML 이 "무엇이 돌고 값이 어디로 가나"를 소유한다)
+harness: review
+inputs: { pr: int, repo: ~/dev/sources/cubrid }
+stages:
+  initialize:                      # 결정론 구간 — LLM 없음
+    nodes:
+      worktree:   { impl: tools.harness.run.Worktree }          # PR 헤드 스냅샷(RAII)
+      codegraph:  { scope: changed+1, provider: tree-sitter, fallback: ctags, persist: out/<pr>/<sha>/codegraph.sqlite3 }
+      diff_map:   { impl: context_pack.parse_unified_diff }
+    outputs: [codegraph, changed_functions, manifest]
+  context:                         # 압축 구간 — 예산 안에서만
+    nodes:
+      pack:       { impl: context_pack.build, budget_tokens: 12000, priorities: [changed_fn, graph_evidence, structs, signatures, rule_rows] }
+      batch:      { when: pack.over_budget, split_by: file, order: source }   # Metis 의 same-file batch split
+    outputs: [context_pack.md]
+  review:                          # LLM 구간 — 입력은 context_pack 만, 출력은 findings.json 스키마
+    nodes:
+      llm_review: { skill: skills/code-review, rules: [rules/성능-리뷰-규칙.md], output_schema: harness/schemas/finding.json }
+  adjudicate:                      # 결정론 구간 — 과신 차단
+    nodes:
+      gate:       { impl: adjudicate.adjudicate, obligations: [anchor_exists, anchor_in_diff, evidence_resolves, rule_known, graph_supports] }
+      self_check: { impl: adjudicate.self_check_build, when: any(valid) }     # -fsyntax-only 컴파일
+    outputs: [findings.adjudicated.json]
+  publish:                         # 사람 검토 후에만
+    nodes:
+      report:     { skill: skills/code-review §5, template: examples/리뷰보고서-예시-PR7937.md }
+      comments:   { skill: skills/review-response, mode: inline-only, requires: user_approval }

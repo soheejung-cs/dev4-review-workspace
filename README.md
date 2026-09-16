@@ -10,6 +10,7 @@
 | `dev4-ai-source` | CUBRID 소스 분석 지식(모듈별 §1~§4) + 소스 학습·기록 규약 |
 
 ```
+harness/             설계용·리뷰용 하네스(pipelines/*.yaml, schemas/finding.json, ARCHITECTURE.md, META-REVIEW.md); 구현 tools/harness/
 REVIEW-절차.md       접수→분류→읽기→구현/설계 리뷰→돌릴 것→CI/TC→판정→답글→기록 (스킬을 순서로 잇는 표)
 rules/
   성능-리뷰-규칙.md   성능을 볼 때 여는 한 문서 — 레퍼런스 요약(ID 보존), 벤치 선택표, 측정 계약
@@ -18,8 +19,10 @@ skills/
   code-review/       구현 리뷰 — 성능규칙집 18장 진입, 소스 지식 대조, 재현→수정→재검증
   design-review/     설계 리뷰 — 영역 판정 4단계, 계약 3요소, 대안표, 덱 구조, 결정 요청
   review-response/   리뷰 대응 — 스레드 수집, 재현, 답글 초안(사용자 검토→게시), 봇 resolve, TC PR 답글
-  tc-analysis/       CI 실패 TC 3분류(출력차·코어·미상) — 코드 안 읽고 보고, 승인 후 출력차만 정렬
-  gha-ci/            gha-ci 실패 분석 — collect 요약·failed.list·샤드 test-shell.xml, 코어는 아티팩트 서버(192.168.1.48:30080)+같은 SHA debug 빌드로 해석
+  tc-analysis/       → dev4-tc-workspace 로 분리(포인터)
+  (구)       CI 실패 TC 3분류(출력차·코어·미상) — 코드 안 읽고 보고, 승인 후 출력차만 정렬
+  gha-ci/            → dev4-tc-workspace 로 분리(포인터)
+  (구)            gha-ci 실패 분석 — collect 요약·failed.list·샤드 test-shell.xml, 코어는 아티팩트 서버(192.168.1.48:30080)+같은 SHA debug 빌드로 해석
   record/            기록 규약 — 무엇을 어디에 어떤 형식으로 (판단표)
   review-testing/    리뷰 검증 규율 — 변경 유형별 CTP/동시성/JOB/TPC-H 선택, 컨테이너, 측정 계약
   oracle-reference/  Oracle 스펙 비교 — 요청 시에만, toc.md 매핑 후 해당 절만 읽기

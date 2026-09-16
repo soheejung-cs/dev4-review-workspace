@@ -48,3 +48,6 @@ description: 변경이 있어야 할 자리에 있는가를 묻는 설계 리뷰
 어휘: "책임이 맞는 자리에 있나"를 말할 때 `imports/xmilex-git/skills/codebase-design/SKILL.md` 의 깊은 모듈·seam·adapter 용어를 쓴다(원 작성자 xmilex-git).
 "A/B/C 중 어느 것", "수용하고 릴리스 노트에 적을까요" — 각 선택지의 비용과 남는 약점을 함께. 결정되면 덱과
 `projects/CBRD-XXXXX/세션기록-*.md` 의 결정 상태 표를 갱신한다(`record` 스킬).
+
+## 하네스로 시작하기 (2026-09-16)
+리뷰 전에 `python3 -m tools.harness.run design --pr <n>` 을 돌려 `out/<pr>/<sha>/context_pack.md`(변경 함수·그래프 증거·관문 짝·경로·규칙 행)를 먼저 읽는다. 지적은 `harness/schemas/finding.json` 형식으로 적고 `run adjudicate --findings` 로 판정한 뒤 보고서에 옮긴다. 설계: `arch.json`/`arch.mmd` 의 계층 간선과 리스크를 인용한다. 상세 `harness/ARCHITECTURE.md`.
