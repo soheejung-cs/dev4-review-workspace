@@ -16,6 +16,9 @@ dev4-review-workspace/
 dev4-tc-workspace/            TC 변경·CI 실패 분석(tc-analysis, gha-ci, shell TC 인덱스) — 리뷰 하네스와 분리
 ```
 
+## 슬래시 명령
+Claude Code 에서 **`/harness-review <PR번호>`** — `skills/harness-review/SKILL.md` 가 아래 3단계를 이 세션(LLM)이 수행하게 한다. 컨테이너에 `ln -sfn ~/dev/docs/dev4-review-workspace/skills/harness-review ~/.claude/skills/harness-review` 한 번.
+
 ## 실행 — 통합(권장)
 ```
 cd ~/dev/docs/dev4-review-workspace

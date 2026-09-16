@@ -26,6 +26,7 @@ skills/
   record/            기록 규약 — 무엇을 어디에 어떤 형식으로 (판단표)
   review-testing/    리뷰 검증 규율 — 변경 유형별 CTP/동시성/JOB/TPC-H 선택, 컨테이너, 측정 계약
   oracle-reference/  Oracle 스펙 비교 — 요청 시에만, toc.md 매핑 후 해당 절만 읽기
+  harness-review/    **/harness-review <PR>** — 통합 하네스 슬래시 명령(run full → findings → 판정 → report)
   review-board/      리뷰 보드 갱신 — review-to-do 웹 보드(8827) 생성·호스팅, 추적 ID 관리
 references/
   oracle-manual/     → private 리포 dev4-oracle-manual 포인터(Oracle 문서는 재배포 제한). 읽는 규약 skills/oracle-reference
