@@ -8,7 +8,7 @@
 
 ### [설계 리뷰]
 
-- [설계 리뷰] [설계 판정] 🔴 `src/storage/btree.c:13777` — 팽창의 원인은 '재사용 OID 산포'가 아니라 '아직 vacuum 되지 않은 옛 버전이 자리를 차지한 채 새 버전이 옆에 추가되는 것'이다(btree_insert_object_ordered_by_oid 3966-3973: 같은 OID 를 만나면 'Just add the OID here'). COMPACT 는 그 결과(반 빈 페이지)를 사후에 정리하고, 원인은 그대로 둔다
+- [설계 리뷰] [설계 판정] 🔴 `src/storage/btree.c:12360` — [split 직전 즉석 정리 — 작성자 후속안(vacuum 시 자동 병합)과 별건] 팽창의 원인은 '재사용 OID 산포'가 아니라 '아직 vacuum 되지 않은 옛 버전이 자리를 차지한 채 새 버전이 옆에 추가되는 것'이다(btree_insert_object_ordered_by_oid 3966-3973: 같은 OID 를 만나면 'Just add the OID here'). COMPACT 와 vacuum 시 병합은 둘 다 그 결과(반 빈 페이지)를 사후에 합치고, 원인은 그대로 둔다
   - 왜 문제인가: CBRD-27324 형 워크로드(같은 키에 삭제·재삽입 반복)는 COMPACT 직후 다시 50% 로 갈라지므로 수동 명령은 반복 운영 부담이 되고, 운영자가 언제 돌릴지 판단해야 한다. PG 는 같은 병(버전 churn 인덱스 팽창)을 PG14 bottom-up deletion 으로 '갈라지려는 순간 그 페이지 안의 죽은 항목을 먼저 지우는' 방식으로 예방했고, Oracle 은 인덱스 항목에 버전이 없어 삭제 항목을 블록이 공간을 필요로 할 때 회수한다 — 둘 다 삽입 시점 회수다.
   - 제안: 후속 이슈(이 PR 범위 밖)로 'split 직전 즉석 vacuum': btree_ovf_dir_grow_chain() 진입 직전(btree_ovf_dir_append_object 의 '공간 부족 → grow' 분기)에 새 helper btree_ovf_page_prune_dead(page) 를 호출해, 그 페이지의 객체 중 delete MVCCID 가 있고 MVCC_ID_PRECEDES(delid, log_Gl.mvcc_table.get_global_oldest_visible()) 인 것(= 어떤 활성 스냅샷에도 안 보임, 곧 vacuum 대상)을 한 sysop 으로 물리 제거(RVBT_RECORD_MODIFY_UNDOREDO, 오늘 컴팩션과 같은 로깅)한 뒤 다시 공간을 재고, 그래도 부족할 때만 split. 재사용 OID 의 새 버전은 정렬상 옛 버전 자리에 들어가므로 페이지가 자라지 않는다. 계약 확인: (1) vacuum 은 delete MVCCID 정확 일치로 지우고(btree.c:15343-15347) 못 찾으면 '이미 vacuum 됨' 경고로 지나간다(35325-35345) — 즉 선제 제거가 log-driven vacuum 과 호환되되 경고 로그가 남으므로 prune 한 객체 수를 vacuum 이 알 수 있게 헤더 플래그 하나(예: BTREE_OVF_PAGE_PRUNED) 또는 경고 등급 하향이 필요. (2) separator 불변조건은 '삭제는 절대 separator 를 무효화하지 않는다'(btree.c:12356 주석) 라 라우팅에 영향 없음. (3) 비용은 split 경로(드묾)에서 페이지 1회 스캔 + 로그 1건. (4) 리프 레코드 객체에도 같은 훅을 두면 리프 팽창까지 예방. 대안표: 수동 COMPACT(현 PR, 사후 정리) / vacuum 시 병합(작성자 후속안, C 등급 데몬에 쓰기 추가) / split 시 즉석 vacuum(예방, 삽입 경로 소폭 비용). 권고: 이 PR 은 그대로 머지하고, 즉석 vacuum 을 CBRD 신규 발번으로 — COMPACT 의 역할을 '이미 팽창한 볼륨의 1회 정리'로 문서에 못 박는다.
   - 검증: [static] btree_insert_object_ordered_by_oid 3966-3973 같은 OID 추가 확인; vacuum 매칭 15343-15347 delid 정확 일치; 미발견 관용 35325-35345; 전역 최소 가시 MVCCID API mvcc_table.hpp:90 (vacuum.c:3281 이 같은 임계값 사용); PG16 nbtdedup.c _bt_bottomupdel_pass, nbtree README L567; Oracle SQL Ref 10-90 COALESCE(삭제 항목 회수는 Admin Guide/Concepts 범위 — 매뉴얼 미확인)
@@ -17,7 +17,7 @@
   - 왜 문제인가: 정확성이 성능보다 먼저다 — 회귀 테스트 근거가 없으면 빨라진 코드가 틀린 답을 내는지 아무도 확인하지 않은 상태로 머지된다.
   - 제안: `/run all` 결과 또는 CTP sql/medium 실행 결과(코어 0, NOK 분류)를 본문 Verification 에 한 줄로. 예: "CTP sql 통과, medium NOK 2건은 기존 답안 차이".
   - status **valid**, non-blocking, rules ['MEAS-05']
-- [설계 리뷰] [설계 판정] 🟡 `src/query/execute_schema.c:4403` — CUBRID 의 DDL 은 트랜잭션 안에서 롤백 가능한데 COMPACT 는 병합마다 sysop 을 독립 커밋하는 '되돌릴 수 없는 첫 ALTER INDEX' 다 — 문 뒤에 ROLLBACK 해도 페이지는 돌아오지 않고, 반대로 SCH_S 는 커밋까지 남아 DROP/ALTER INDEX 를 막는다(보호할 것이 없는데). Oracle 은 DDL 이 자동 커밋이라 이 불일치가 없다
+- [설계 리뷰] [설계 판정] 🟡 `src/query/execute_schema.c:4273` — CUBRID 의 DDL 은 트랜잭션 안에서 롤백 가능한데 COMPACT 는 병합마다 sysop 을 독립 커밋하는 '되돌릴 수 없는 첫 ALTER INDEX' 다 — 문 뒤에 ROLLBACK 해도 페이지는 돌아오지 않고, 반대로 SCH_S 는 커밋까지 남아 DROP/ALTER INDEX 를 막는다(보호할 것이 없는데). Oracle 은 DDL 이 자동 커밋이라 이 불일치가 없다
   - 왜 문제인가: 오토커밋 OFF 사용자가 ROLLBACK 을 기대하면 예상과 다르고(REBUILD 는 스키마 트랜잭션이라 롤백된다), 긴 트랜잭션 안에서 COMPACT 를 돌리면 SCH_S 가 불필요하게 오래 남아 DDL 대기를 만든다.
   - 제안: 둘 중 하나: (a) 매뉴얼에 'COMPACT 는 즉시 반영되며 ROLLBACK 으로 되돌릴 수 없다(REBUILD 와 다름)' 명시 + SCH_S 를 문 끝에서 놓는 것을 검토(sysop 이 이미 커밋돼 보호 대상 없음), (b) UPDATE STATISTICS 류처럼 암묵 커밋 대상으로 분류. 어느 쪽이든 문서 한 줄은 필수.
   - 검증: [static] 4273-4274 주석: AU_FETCH_READ SCH_S 는 트랜잭션 끝까지; 14610 log_sysop_commit 은 호출 트랜잭션과 무관히 확정(PR 본문·주석). REBUILD 의 롤백 가능 여부는 확인 질문으로 남김
@@ -72,4 +72,4 @@
 
 - 변경 계층 ['communication', 'parser', 'query', 'storage'] → review-testing 매트릭스로 CTP/동시성/JOB/TPC-H 제안
 
-_manifest: harness b08c8d1, model unset_
+_manifest: harness a4735ef, model unset_
