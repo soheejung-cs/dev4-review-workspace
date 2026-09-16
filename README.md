@@ -17,11 +17,14 @@ skills/
   tc-analysis/       CI 실패 TC 3분류(출력차·코어·미상) — 코드 안 읽고 보고, 승인 후 출력차만 정렬
   ci-coredump/       CI 코어덤프를 그 잡의 build_debug 로 풀어 assert 지점 확정
   record/            기록 규약 — 무엇을 어디에 어떤 형식으로 (판단표)
+  review-board/      리뷰 보드 갱신 — review-to-do 웹 보드(8827) 생성·호스팅, 추적 ID 관리
 references/
   C-Cpp-성능규칙집.md        2568줄, 규칙 ID 로 인용. ~/.claude/성능규칙집.md 는 여기로의 심링크
   cubrid-사전설계문서.md      설계 리뷰 근거 — 불변조건 5·컴포넌트 [A]~[I]·의존·동시성 도메인
   대규모Cpp-물리설계-Lakos.md  PHYS 축 배경
   저지연패턴-HFT논문.md / -서적.md, 서버사이드-성능검토.md
+members/             팀 명단(GitHub 기준)·가입 템플릿·사람별 공간(컨테이너 사실은 여기에만)
+tools/               roster.json(추적 GitHub ID) · review_board_gen.py(review-to-do 보드)
 examples/
   설계리뷰-덱-CBRD-27369.html   13장 덱(비유·락 전후 표·라이브락 그림·결정 요청) — 다음 덱의 틀
   리뷰답글-예시-PR7900.md      엔진 스레드 5 + TC PR 답글 2 — 문체·구조 예시

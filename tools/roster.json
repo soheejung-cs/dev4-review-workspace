@@ -1,0 +1,29 @@
+{
+  "_comment": "추적 기준은 github 로그인(사용자 지정 2026-09-16). 이름·jira 는 본인이 members/_설정-템플릿.md 로 등록할 때만 채운다.",
+  "tracked_github": [
+    "HyunukLee",
+    "shparkcubrid",
+    "youngjinj",
+    "xmilex-git",
+    "Hamkua",
+    "jihyekim-0",
+    "soheejung-cs"
+  ],
+  "members": [
+    {
+      "name": "정소희",
+      "github": "soheejung-cs",
+      "jira": "soheejung",
+      "containers": [
+        ".50",
+        ".51",
+        ".52"
+      ]
+    }
+  ],
+  "repos": [
+    "CUBRID/cubrid",
+    "CUBRID/cubrid-testcases",
+    "CUBRID/cubrid-testcases-private-ex"
+  ]
+}
