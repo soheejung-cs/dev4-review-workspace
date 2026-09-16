@@ -5,6 +5,7 @@
    의존: gh CLI(인증됨). 이 컨테이너의 리뷰 문서(claude-workspace/projects/CBRD-*, dev4-review-workspace/examples|reviews)를 링크한다.
 """
 import json, os, re, subprocess, sys, datetime, html
+from urllib.parse import quote
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROSTER = json.load(open(os.path.join(HERE, 'roster.json'), encoding='utf-8'))
@@ -174,7 +175,7 @@ def render(rows, now, orphans=()):
             rev += ''.join('<span class="pill req">%s 대기</span>' % esc(a) for a in r['requested'])
             rev += '<div class="muted" style="font-size:11px">decision: %s</div>' % esc(r['decision'])
             tcl = ''.join('<div><a href="%s">%s#%d</a> <span class="muted">미해결 %d/%d%s</span></div>' % (esc(t['url']), esc(t['repo'].split('/')[1].replace('cubrid-testcases','tc')), t['number'], t['unresolved'], t['threads_total'], (' · ' + ','.join(esc(a) + ' 대기' for a in t['requested'])) if t['requested'] else '') for t in r['linked_tc']) or '<span class="muted">없음</span>'
-            docs = ''.join('<a href="%s%s">%s</a>' % (DOCS_HTTP_BASE, esc(d), esc(d)) for d in r['docs']) or '<span class="muted">없음</span>'
+            docs = ''.join('<a href="%s%s">%s</a>' % (DOCS_HTTP_BASE, quote(d), esc(d)) for d in r['docs']) or '<span class="muted">없음</span>'
             others = [a for a in r['assignees'] if a != r['tracked'][0]]
             h.append('<tr><td class="n"><a href="%s">%s#%d</a>%s</td><td>%s<div class="meta">%s · by %s%s</div></td><td class="n">%s</td><td>%s</td><td class="n">%s<div class="muted" style="font-size:11px">생성 %s</div></td><td class="docs" style="font-size:12px">%s</td><td class="docs">%s</td></tr>' % (
                 esc(r['url']), esc(r['repo'].split('/')[1]), r['number'], '<div class="muted" style="font-size:11px">%s</div>' % esc(r['tracked'][0]) if len(rs) and who != r['tracked'][0] else '',
