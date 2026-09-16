@@ -19,6 +19,8 @@ LAYERS = [  # (id, dir prefix, 표시 이름)  — 사전설계문서 §3
 ALLOWED_CYCLES = {frozenset({'storage', 'transaction'}), frozenset({'query', 'storage'}), frozenset({'parser', 'optimizer'})}
 HUB = 'object'
 DOWNWARD_OK = {'base', 'compat'}  # 누구나 부를 수 있는 바닥
+# [D] 통신 계층은 요청 디스패처다: x*/s* 서버 함수를 부르는 간선은 3파일 계약(사전설계 §3 [D]) 의 일부이지 사이클이 아니다
+DISPATCH_OK = {('communication', 'storage'), ('communication', 'query'), ('communication', 'transaction'), ('communication', 'object')}
 
 def layer_of(path: str) -> Tuple[str, str]:
     for lid, pfx, name in LAYERS:
@@ -56,7 +58,8 @@ def detect_risks(arch: Dict, g: CodeGraph, changed_fids: List[str]) -> List[Dict
     arch['changed_edges'] = sorted(new_edges.values(), key=lambda e: (e['source'], e['target']))
     # 1) 계층 위반: 변경 함수가 만든 간선이 공식 사이클 밖의 역방향을 닫거나, 바닥(base/compat)이 위를 부르는 것
     for (a, b), c in new_edges.items():
-        if (b, a) in edges and frozenset({a, b}) not in ALLOWED_CYCLES and HUB not in (a, b):
+        if a in DOWNWARD_OK or b in DOWNWARD_OK or HUB in (a, b) or (a, b) in DISPATCH_OK or (b, a) in DISPATCH_OK: continue
+        if (b, a) in edges and frozenset({a, b}) not in ALLOWED_CYCLES:
             risks.append({'kind': 'layer-cycle', 'severity': 'high', 'component': f'{a} <-> {b}', 'issue': f'공식 사이클(사전설계 §4) 밖의 양방향 의존 ({c["calls"]}/{edges[(b,a)]["calls"]} calls)', 'evidence': c['samples'][:2] + edges[(b, a)]['samples'][:1], 'rule': '설계-리뷰-규칙 §3'})
         if a in DOWNWARD_OK and b not in DOWNWARD_OK and b != HUB:
             risks.append({'kind': 'layer-inversion', 'severity': 'high', 'component': f'{a} -> {b}', 'issue': '바닥 계층이 상위를 호출', 'evidence': c['samples'][:2], 'rule': '설계-리뷰-규칙 §3'})
