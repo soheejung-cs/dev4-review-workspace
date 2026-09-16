@@ -35,6 +35,9 @@ python3 -m tools.harness.run adjudicate --pr 7937 --findings findings.json   # �
 ```
 전제: `~/dev/utils/tree-sitter/langs.so` (tree-sitter-c v0.20.6 + tree-sitter-cpp v0.20.3, `Language.build_library`), `pip3 install --user "tree_sitter<0.21"`. 없으면 ctags 폴백(호출 그래프 없음, `codegraph_complete=false`).
 
+## Oracle 매뉴얼 원문
+재배포 금지라 이 공개 리포에는 없다 → private `soheejung-cs/dev4-oracle-manual` / 내부망 http://192.168.6.51:8827/docs/dev4-oracle-manual/ (`references/oracle-manual/README.md`).
+
 ## LLM 이 하는 일 / 하지 않는 일
 - 한다: `context_pack.md`(+ `arch.json`)만 읽고 `finding.json` 스키마로 지적을 낸다. 규칙은 ID 로 인용한다.
 - 하지 않는다: 저장소 전체 검색, 줄 번호 추측, 판정. 판정은 `adjudicate` 가 결정론적으로 한다(anchor·evidence·rule·graph 의무).
