@@ -5,7 +5,7 @@ description: Oracle 과 스펙·동작 비교가 **요청됐을 때만** — 매
 
 # Oracle 참조 규약 (oracle-reference)
 
-원문: **`references/oracle-manual/<책>/`** (이 리포). 현재 있는 책: `sql-reference-10gR1/` (Oracle Database SQL Reference 10g R1, `b10759.pdf` 1808쪽) — `toc.md`(북마크 673항목·쪽수), `요약.md`(목차 기반 개요 + 리뷰 주제→절 매핑), `ch-*.txt`(장별 텍스트, `=== p.N ===` 쪽 구분). 새 책을 올리면 `tools/oracle_manual_index.py <디렉터리>` 로 같은 산출물을 만든다.
+원문: **private 리포 `soheejung-cs/dev4-oracle-manual`** (로컬 `~/dev/docs/dev4-oracle-manual/<책>/`; 이 리포의 `references/oracle-manual/README.md` 는 포인터). 현재 있는 책: `sql-reference-10gR1/` (Oracle Database SQL Reference 10g R1, `b10759.pdf` 1808쪽) — `toc.md`(북마크 673항목·쪽수), `요약.md`(목차 기반 개요 + 리뷰 주제→절 매핑), `ch-*.txt`(장별 텍스트, `=== p.N ===` 쪽 구분). 새 책을 올리면 그 리포의 `tools/oracle_manual_index.py <디렉터리>` 로 같은 산출물을 만든다.
 **요청이 없으면 이 스킬은 열지 않는다.** 리뷰 중 "Oracle 도 이런가?"가 궁금해도 사용자에게 한 줄로 묻고 멈춘다.
 
 ## 절차
