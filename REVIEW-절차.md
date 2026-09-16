@@ -13,6 +13,6 @@
 | 6 | **CI·TC** | gha-ci 실패는 collect 요약→3분류; 코어는 아티팩트 서버+debug 빌드로 해석; TC 답안 변경은 의도 기준·사유 코멘트 | `skills/gha-ci`, `skills/tc-analysis`, `tools/tc_relevance.py` | 분류표 |
 | 7 | **판정** | 코어 0 · 시나리오 PASS · 측정 계약 준수 · 의무 체크리스트 통과 · 설계 결정 요청 답변 → 승인/변경요청/설계 재검토 | 위 규칙 문서 두 개 | 판정 한 줄 + 근거 |
 | 8 | **답글** | "N번 코멘트 — 본문" 초안 → **사용자 검토** → 게시. 봇만 resolve. 사람처럼, 서술형, 원문 용어 유지, CTP 수치 금지 | `skills/review-response` | 게시된 답글 |
-| 9 | **기록** | 리뷰 산출물→`claude-workspace/projects/<JIRA>/`, 코드 사실→`dev4-ai-source/staging/<이름>-<JIRA>.md`, 방식→스킬, 보드 코멘트+worklog, **본인 이름으로 커밋** | `skills/record`, `CONTRIBUTING.md` | 세션기록, 대기소 파일 |
+| 9 | **기록** | 리뷰 산출물→`claude-workspace/projects/<JIRA>/`, 코드 사실→`dev4-ai-source/staging/<이름>-<JIRA>.md`, 방식→스킬, 보드 코멘트+worklog, **본인 이름으로 커밋** → 세션 전용 메모리 삭제 → 사용자에게 `/clear` 안내(`skills/record` §5) | `skills/record`, `CONTRIBUTING.md` | 세션기록, 대기소 파일 |
 
 원칙 셋: **재현 없이 결함이라 하지 않는다 · 측정 없이 빠르다/느리다 하지 않는다 · 사용자 검토 없이 게시하지 않는다.**

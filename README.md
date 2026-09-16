@@ -46,3 +46,5 @@ examples/
 
 ## 규칙 변경
 이 리포에 커밋 → 다른 컨테이너 pull. 리뷰 방식에 대한 사용자 지시는 해당 SKILL.md 에 **날짜와 함께** 적는다.
+
+- `tests/shell-tc-index/` shell TC 분류·인덱스 — 생성 `tools/tc_index_build.py`, 판정 `tools/tc_relevance.py --pr <n> --failed <케이스…>`
