@@ -14,6 +14,7 @@ OUT = sys.argv[1] if len(sys.argv) > 1 else os.path.expanduser('~/dev/utils/revi
 DOCS = [os.path.expanduser('~/dev/docs/claude-workspace/projects'),
         os.path.expanduser('~/dev/docs/dev4-review-workspace/examples'),
         os.path.expanduser('~/dev/docs/dev4-review-workspace/reviews')]
+DOCS_HTTP_BASE = 'http://192.168.6.51:8827/docs/'   # site/docs -> ~/dev/docs 심링크; 컨테이너 주소로 접근 (사용자 요청 2026-09-16)
 BOTS = {'greptile-apps', 'chatgpt-codex-connector', 'github-actions', 'cubrid-submodule-bot'}
 
 def sh(*a):
@@ -173,7 +174,7 @@ def render(rows, now, orphans=()):
             rev += ''.join('<span class="pill req">%s 대기</span>' % esc(a) for a in r['requested'])
             rev += '<div class="muted" style="font-size:11px">decision: %s</div>' % esc(r['decision'])
             tcl = ''.join('<div><a href="%s">%s#%d</a> <span class="muted">미해결 %d/%d%s</span></div>' % (esc(t['url']), esc(t['repo'].split('/')[1].replace('cubrid-testcases','tc')), t['number'], t['unresolved'], t['threads_total'], (' · ' + ','.join(esc(a) + ' 대기' for a in t['requested'])) if t['requested'] else '') for t in r['linked_tc']) or '<span class="muted">없음</span>'
-            docs = ''.join('<a href="file://%s">%s</a>' % (esc(os.path.expanduser('~/dev/docs/') + d), esc(d)) for d in r['docs']) or '<span class="muted">없음</span>'
+            docs = ''.join('<a href="%s%s">%s</a>' % (DOCS_HTTP_BASE, esc(d), esc(d)) for d in r['docs']) or '<span class="muted">없음</span>'
             others = [a for a in r['assignees'] if a != r['tracked'][0]]
             h.append('<tr><td class="n"><a href="%s">%s#%d</a>%s</td><td>%s<div class="meta">%s · by %s%s</div></td><td class="n">%s</td><td>%s</td><td class="n">%s<div class="muted" style="font-size:11px">생성 %s</div></td><td class="docs" style="font-size:12px">%s</td><td class="docs">%s</td></tr>' % (
                 esc(r['url']), esc(r['repo'].split('/')[1]), r['number'], '<div class="muted" style="font-size:11px">%s</div>' % esc(r['tracked'][0]) if len(rs) and who != r['tracked'][0] else '',

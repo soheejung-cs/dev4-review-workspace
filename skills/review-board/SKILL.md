@@ -35,4 +35,4 @@ python3 ~/dev/docs/dev4-review-workspace/tools/review_board_gen.py [out_dir]   #
 
 ## 한계
 - assignee 가 비어 있는 PR 은 잡히지 않는다(작성자만으로는 추적하지 않음 — 사용자 지시).
-- 리뷰 문서 링크는 `file://` 이라 이 컨테이너(.51)에서 열 때만 유효하다.
+- 리뷰 문서는 `http://192.168.6.51:8827/docs/<리포>/…` 로 열린다(`site/docs → ~/dev/docs` 심링크, `.md`/`.sh` 는 text/plain 으로 바로 표시). 내부망 어디서든 접근 가능.
