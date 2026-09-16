@@ -98,7 +98,8 @@ def n_review_request(c, a):
 3. 모든 지적에 **`why`(왜 문제가 되는지)** 를 쓴다 — 이대로 두면 누가/무엇이 어떻게 되는지(오답·정지·회복 불가·비결정성·발견 가능성), 근거(수치·규칙 ID·스펙 절). why 없는 지적은 판정에서 거절된다.
 3-1. 모든 지적에 **`proposal`(제안 + 예시)** 를 쓴다 — 주석 관련이면 그대로 붙일 수 있는 확정 문구(게시 시 ```suggestion 블록), 코드면 스케치, 문서면 문구, 테스트면 TC 시나리오. "고쳐 달라"만 있는 지적은 판정에서 거절된다.
 3-2. **에러 우려**(데드락·크래시·누수·오답·UB·경합) 지적은 `verification` 을 채운다 — 하네스/이 세션이 무엇을 어떻게 확인했나(`static`: 관련 함수를 직접 읽어 순서·초기화 등을 확정 / `dynamic`: 빌드·재현 스크립트 실행 결과). 확인 없이 우려만 있으면 severity 를 `question` 으로 내린다.
-3-3. 산출은 `findings.json`(스키마 아래) 하나. `layer` 는 '코드'|'설계', `evidence` 는 `file:line`(팩 안의 줄) 또는 `pr-body:N`, 성능 지적은 `rule_ids` 필수. 설계 지적은 `arch_edge` 인용.
+3-3. 모든 지적에 `category`(버그 가능성 / 성능 검토 / 설계 판정 / 주석 제안 / 문서 제안 / 테스트 제안 / 측정 요청 / 확인 질문)를 붙이고 `importance`(높음 🔴 / 중간 🟡 / 낮음 🟢)를 판단한다 — 주석·문서 제안은 낮음, 확인된 버그·머지 차단은 높음. 게시 첫 줄은 `[층] [카테고리] 이모지`.
+3-4. 산출은 `findings.json`(스키마 아래) 하나. `layer` 는 '코드'|'설계', `evidence` 는 `file:line`(팩 안의 줄) 또는 `pr-body:N`, 성능 지적은 `rule_ids` 필수. 설계 지적은 `arch_edge` 인용.
 4. 자동 finding(MEAS)이 있으면 그대로 두고 필요하면 `claim` 만 보강한다. 게시 문장은 사람처럼, 첫 줄에 층 표기 — 게시는 판정(adjudicate) 뒤 사용자 승인 후.
 
 ## 의무 항목 (매 리뷰 확인)
@@ -131,9 +132,11 @@ def n_report(c, a):
     res = c.get('adjudicated') or []
     def fmt(r):
         v = r.get('verification') or {}
-        return (f"- `{r.get('file')}:{r.get('line')}` — {r.get('claim')}\n  - 왜 문제인가: {r.get('why', '(없음)')}\n  - 제안: {r.get('proposal', '(없음)')}"
+        return (f"- {AD.comment_header(r)} `{r.get('file')}:{r.get('line')}` — {r.get('claim')}\n  - 왜 문제인가: {r.get('why', '(없음)')}\n  - 제안: {r.get('proposal', '(없음)')}"
                 + (f"\n  - 검증: [{v.get('method')}] {v.get('result')}" + (f" ({v.get('artifact')})" if v.get('artifact') else '') if v else '')
                 + f"\n  - status **{r.get('status')}**, {r.get('severity')}, rules {r.get('rule_ids') or '-'}" + (f"; {'; '.join(r.get('reasons'))}" if r.get('reasons') else ''))
+    ORDER = {'높음': 0, '중간': 1, '낮음': 2}
+    res = sorted(res, key=lambda r: ORDER.get(r.get('importance', '중간'), 1))
     valid = [r for r in res if r['status'] == 'valid']; inc = [r for r in res if r['status'] != 'valid']
     blocking = [r for r in valid if r.get('severity') == 'blocking']
     tl = 'Blocking' if blocking else ('Non-blocking' if valid else '작성자 확인 필요')

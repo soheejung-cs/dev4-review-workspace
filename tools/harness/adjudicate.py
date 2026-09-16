@@ -65,7 +65,7 @@ def adjudicate(repo: str, g: CodeGraph, changed: Dict[str, List[int]], findings:
             status = 'valid'
         elif obligations['graph_supports'] is False or not obligations['anchor_exists']:
             status = 'invalid' if not obligations['anchor_exists'] else 'inconclusive'
-        out.append(dict(f, status=status, obligations=obligations, reasons=reasons))
+        out.append(fill_importance(dict(f, status=status, obligations=obligations, reasons=reasons)))
     return out
 
 def self_check_build(repo: str, files: List[str], timeout: int = 900) -> Dict:
@@ -124,3 +124,23 @@ def requery(bad: List[Dict], adjudicated: List[Dict], out_path: str) -> int:
     items += [{'id': a.get('id'), 'why': a.get('reasons'), 'finding': {k: v for k, v in a.items() if k not in ('obligations', 'reasons', 'status')}} for a in adjudicated if a.get('status') == 'inconclusive']
     json.dump(items, open(out_path, 'w', encoding='utf-8'), ensure_ascii=False, indent=1)
     return len(items)
+
+
+# ---- 중요도·헤더 ----
+IMPORTANCE_EMOJI = {'높음': '🔴', '중간': '🟡', '낮음': '🟢'}
+LOW_CATEGORIES = {'주석 제안', '문서 제안'}
+
+def fill_importance(f: Dict) -> Dict:
+    """비어 있으면 severity·category 로 채운다: blocking → 높음, 주석/문서 → 낮음, 그 외 → 중간. 버그 가능성은 verification 이 있고 사실로 확인됐을 때만 높음."""
+    if f.get('importance'): return f
+    cat = f.get('category', ''); sev = f.get('severity', '')
+    if sev == 'blocking': f['importance'] = '높음'
+    elif cat in LOW_CATEGORIES: f['importance'] = '낮음'
+    elif cat == '버그 가능성' and (f.get('verification') or {}).get('method') in ('static', 'dynamic') and re.search(r'확인|재현|reproduc', (f.get('verification') or {}).get('result', '')): f['importance'] = '높음' if sev != 'question' else '중간'
+    else: f['importance'] = '중간'
+    return f
+
+def comment_header(f: Dict) -> str:
+    """게시 코멘트 첫 줄: [층] [카테고리] 이모지 — 예) [코드 리뷰] [주석 제안] 🟢"""
+    layer = '설계 리뷰' if f.get('layer') == '설계' else '코드 리뷰'
+    return f"[{layer}] [{f.get('category', '확인 질문')}] {IMPORTANCE_EMOJI.get(f.get('importance', '중간'), '🟡')}"

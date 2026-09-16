@@ -1,5 +1,5 @@
 { "$schema": "http://json-schema.org/draft-07/schema#", "title": "harness finding", "type": "object",
-  "required": ["id", "layer", "file", "line", "claim", "why", "proposal", "evidence", "severity"],
+  "required": ["id", "layer", "file", "line", "claim", "why", "proposal", "evidence", "severity", "category"],
   "properties": {
     "id": {"type": "string"}, "layer": {"enum": ["설계", "코드"]},
     "file": {"type": "string"}, "line": {"type": "integer", "minimum": 1},
@@ -10,6 +10,8 @@
     "evidence": {"type": "array", "items": {"type": "string", "pattern": "^([^:\\s]+|pr-body):\\d+"}, "minItems": 1},
     "rule_ids": {"type": "array", "items": {"type": "string", "pattern": "^[A-Z]{2,5}-\\d{2}$"}},
     "severity": {"enum": ["blocking", "non-blocking", "question"]},
+    "category": {"enum": ["버그 가능성", "성능 검토", "설계 판정", "주석 제안", "문서 제안", "테스트 제안", "측정 요청", "확인 질문"], "description": "코멘트 첫 줄 두 번째 태그"},
+    "importance": {"enum": ["높음", "중간", "낮음"], "description": "🔴 높음(오답·정지·회복 불가·머지 차단) / 🟡 중간(수정 권고, 회귀·비결정성) / 🟢 낮음(주석·문서·표기). 비우면 판정기가 severity·category 로 채운다"},
     "arch_edge": {"type": "string", "description": "설계 층: arch.json 의 connections[source->target] 또는 risks[kind]"},
     "status": {"enum": ["valid", "invalid", "inconclusive"], "description": "adjudicate 가 채움"},
     "obligations": {"type": "object"}, "reasons": {"type": "array", "items": {"type": "string"}}

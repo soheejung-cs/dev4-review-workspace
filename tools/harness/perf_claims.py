@@ -25,7 +25,7 @@ def analyze(body: str, anchor_file: str, anchor_line: int) -> List[Dict]:
             'MEAS-05': '`/run all` 결과 또는 CTP sql/medium 실행 결과(코어 0, NOK 분류)를 본문 Verification 에 한 줄로. 예: "CTP sql 통과, medium NOK 2건은 기존 답안 차이".',
             'MEAS-07': '표에 MAD(또는 표준편차/rep 별 값) 열을 추가한다. 예: `| q7 | 7.04 (MAD 0.05) | 7.75 (MAD 0.07) | 1.10 |` — 산포가 있어야 1.10 이 잡음 밖임이 보인다.'}
     def F(fid, rule, claim, ev):
-        return {'id': fid, 'layer': '설계', 'file': anchor_file, 'line': anchor_line, 'claim': claim, 'why': WHY[rule], 'proposal': PROP[rule], 'evidence': [f'pr-body:{ev or 1}'], 'rule_ids': [rule], 'severity': 'non-blocking', 'auto': True}
+        return {'id': fid, 'layer': '설계', 'file': anchor_file, 'line': anchor_line, 'claim': claim, 'why': WHY[rule], 'proposal': PROP[rule], 'category': '측정 요청', 'importance': '중간', 'evidence': [f'pr-body:{ev or 1}'], 'rule_ids': [rule], 'severity': 'non-blocking', 'auto': True}
     if perf_claim and not table: out.append(F('MEAS-01-auto', 'MEAS-01', '성능 주장은 있는데 측정 표(타이밍/프로파일)가 본문에 없다 — 측정 먼저', perf_claim))
     if median and not disp: out.append(F('MEAS-07-auto', 'MEAS-07', '중앙값만 있고 산포(MAD/표준편차/rep 별 값)가 없다 — 개선폭이 잡음 범위 안인지 판정 불가', median))
     if table and not reps: out.append(F('MEAS-04-auto', 'MEAS-04', '측정 표에 반복 횟수(min-of-N/median-of-N/warmup) 언급이 없다 — 1회 실행값이면 기준선 오염을 구분 못 한다', table))
