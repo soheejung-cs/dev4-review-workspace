@@ -5,7 +5,10 @@ description: 통합 리뷰 하네스 실행 — `/harness-review <PR번호>`. �
 
 # /harness-review <PR>
 
-인자: PR 번호 하나(`$ARGUMENTS`). 저장소는 `CUBRID/cubrid`.
+인자: PR 번호 또는 PR 제목/브랜치/JIRA 키(`$ARGUMENTS`). 저장소는 `CUBRID/cubrid`.
+
+## 0. 번호 확정
+숫자가 아니면 `gh pr list -R CUBRID/cubrid --state open --search "<인자>" --json number,title,author -q '.[]|"\(.number) \(.title) \(.author.login)"'` 로 찾는다. 후보가 둘 이상이면 표로 보이고 사용자에게 고르게 한다(추측 금지). 0건이면 `--state all` 로 한 번 더.
 
 ## 절차 (LLM 호출 = 이 세션의 나)
 1. `cd ~/dev/docs/dev4-review-workspace && python3 -m tools.harness.run full --pr <PR>` → 마지막 줄이 산출 디렉터리 `OUT`.
