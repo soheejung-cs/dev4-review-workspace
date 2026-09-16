@@ -45,8 +45,17 @@ def infer(g: CodeGraph, changed_fids: List[str]) -> Dict:
 def detect_risks(arch: Dict, g: CodeGraph, changed_fids: List[str]) -> List[Dict]:
     risks = []
     edges = {(c['source'], c['target']): c for c in arch['connections']}
-    # 1) 계층 위반: 공식 사이클 밖의 양방향 의존, 바닥(base/compat)이 위를 부르는 것
-    for (a, b), c in edges.items():
+    # 이 PR 이 도입한 계층 간선만 리스크로 올린다 — 변경 함수가 caller 인 해석 호출. 저장소에 원래 있던 사이클은 리뷰 대상이 아니다(context 로만 arch.json 에 남는다).
+    changed = set(changed_fids); new_edges = {}
+    for caller, resolved in g.db.execute('SELECT caller, resolved FROM calls WHERE resolved IS NOT NULL'):
+        if caller not in changed: continue
+        a = layer_of(caller.split(':', 1)[0])[1]; b = layer_of(resolved.split(':', 1)[0])[1]
+        if a != b:
+            e = new_edges.setdefault((a, b), {'source': a, 'target': b, 'calls': 0, 'samples': []}); e['calls'] += 1
+            if len(e['samples']) < 3: e['samples'].append(f'{caller} -> {resolved}')
+    arch['changed_edges'] = sorted(new_edges.values(), key=lambda e: (e['source'], e['target']))
+    # 1) 계층 위반: 변경 함수가 만든 간선이 공식 사이클 밖의 역방향을 닫거나, 바닥(base/compat)이 위를 부르는 것
+    for (a, b), c in new_edges.items():
         if (b, a) in edges and frozenset({a, b}) not in ALLOWED_CYCLES and HUB not in (a, b):
             risks.append({'kind': 'layer-cycle', 'severity': 'high', 'component': f'{a} <-> {b}', 'issue': f'공식 사이클(사전설계 §4) 밖의 양방향 의존 ({c["calls"]}/{edges[(b,a)]["calls"]} calls)', 'evidence': c['samples'][:2] + edges[(b, a)]['samples'][:1], 'rule': '설계-리뷰-규칙 §3'})
         if a in DOWNWARD_OK and b not in DOWNWARD_OK and b != HUB:
