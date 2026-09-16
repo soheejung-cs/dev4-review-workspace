@@ -104,26 +104,38 @@ def main():
     prs = []
     for repo in REPOS:
         prs += list_prs(repo)
-    rows = []
+    rows, tcs = [], []
     for p in prs:
         d = details(p['repo'], p['number'])
         key = jira_key(p['title'])
-        rows.append({
-            'repo': p['repo'], 'number': p['number'], 'title': p['title'], 'url': p['url'], 'author': p['author']['login'],
-            'assignees': p['assignee_logins'], 'tracked': p['tracked'], 'created': p['createdAt'][:10], 'updated': p['updatedAt'][:10],
-            'jira': key, 'ci': ci_summary(p.get('statusCheckRollup')), 'docs': local_docs(key, p['number']),
-            'tc_prs': tc_prs(p['number']) if p['repo'] == 'CUBRID/cubrid' else [], **d})
+        rec = {'repo': p['repo'], 'number': p['number'], 'title': p['title'], 'url': p['url'], 'author': p['author']['login'],
+               'assignees': p['assignee_logins'], 'tracked': p['tracked'], 'created': p['createdAt'][:10], 'updated': p['updatedAt'][:10],
+               'jira': key, 'docs': local_docs(key, p['number']), 'linked_tc': [], **d}
+        if p['repo'] == 'CUBRID/cubrid':
+            rows.append(rec)
+        else:
+            m = re.search(r'cubrid#(\d+)', p['title'])
+            rec['engine_pr'] = int(m.group(1)) if m else None
+            tcs.append(rec)
+    # 연동: JIRA 키가 같거나 제목이 cubrid#<n> 을 가리키는 TC PR 을 엔진 PR 하위에 붙인다 (사용자 지시 2026-09-16)
+    for t in tcs:
+        home = next((r for r in rows if (t['engine_pr'] and r['number'] == t['engine_pr']) or (t['jira'] and t['jira'] == r['jira'])), None)
+        if home is not None:
+            home['linked_tc'].append(t); t['linked'] = True
+        else:
+            t['linked'] = False
+    orphans = [t for t in tcs if not t.get('linked')]
     rows.sort(key=lambda r: (r['tracked'][0], -r['unresolved'], r['updated']))
     now = datetime.datetime.now().strftime('%Y-%m-%d %H:%M KST')
     os.makedirs(OUT, exist_ok=True)
-    json.dump({'generated': now, 'tracked': TRACKED, 'prs': rows}, open(os.path.join(OUT, 'board.json'), 'w', encoding='utf-8'), ensure_ascii=False, indent=1)
-    open(os.path.join(OUT, 'index.html'), 'w', encoding='utf-8').write(render(rows, now))
+    json.dump({'generated': now, 'tracked': TRACKED, 'prs': rows, 'unlinked_tc_prs': orphans}, open(os.path.join(OUT, 'board.json'), 'w', encoding='utf-8'), ensure_ascii=False, indent=1)
+    open(os.path.join(OUT, 'index.html'), 'w', encoding='utf-8').write(render(rows, now, orphans))
     print('%s review board: %d PRs (tracked %d ids) -> %s/index.html' % (now, len(rows), len(TRACKED), OUT))
 
 def esc(s):
     return html.escape(str(s))
 
-def render(rows, now):
+def render(rows, now, orphans=()):
     by = {}
     for r in rows:
         by.setdefault(r['tracked'][0], []).append(r)
@@ -145,14 +157,14 @@ def render(rows, now):
     a{color:inherit} .docs a{display:block;font-size:12px;font-family:"IBM Plex Mono",monospace;color:var(--gate)} .muted{color:var(--muted)}
     """
     h = ['<!doctype html><html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>review-to-do</title><style>%s</style></head><body><div class="wrap">' % css]
-    h.append('<h1>review-to-do</h1><div class="meta">스냅샷 %s · assignee ∈ {%s} · open · non-draft · 미해결 스레드는 리뷰 코멘트 기준 · CI 의 Check TC PRs 는 규약상 무시</div>' % (now, ', '.join(TRACKED)))
+    h.append('<h1>review-to-do</h1><div class="meta">스냅샷 %s · assignee ∈ {%s} · open · non-draft · 미해결 스레드는 리뷰 코멘트 기준 · CI 는 보지 않음(사용자 지시) · TC PR 은 JIRA 키/cubrid#n 으로 엔진 PR 하위에 연동</div>' % (now, ', '.join(TRACKED)))
     h.append('<div class="facts"><div class="fact"><b>%d</b><span>추적 PR</span></div><div class="fact"><b class="%s">%d</b><span>미해결 스레드 합</span></div><div class="fact"><b>%d</b><span>리뷰어 응답 대기 PR</span></div></div>' % (len(rows), 'warn' if tot_unres else 'ok', tot_unres, tot_wait))
     for who in TRACKED:
         rs = by.get(who, [])
         h.append('<h2>@%s <span class="meta">%d PR</span></h2>' % (esc(who), len(rs)))
         if not rs:
             h.append('<div class="muted">추적 대상 없음 (open·non-draft·assignee 기준)</div>'); continue
-        h.append('<table><tr><th>PR</th><th>제목 / JIRA</th><th>미해결</th><th>리뷰어</th><th>CI</th><th>갱신</th><th>리뷰 문서(이 컨테이너)</th></tr>')
+        h.append('<table><tr><th>PR</th><th>제목 / JIRA</th><th>미해결</th><th>리뷰어</th><th>갱신</th><th>연동된 테스트케이스</th><th>리뷰 문서(이 컨테이너)</th></tr>')
         for r in rs:
             unres = ('<span class="%s">%d</span> / %d' % ('bad' if r['unresolved'] else 'ok', r['unresolved'], r['threads_total']))
             if r['unresolved_by']:
@@ -160,14 +172,18 @@ def render(rows, now):
             rev = ''.join('<span class="pill %s">%s %s</span>' % (esc(st), esc(a), {'APPROVED': '✓', 'CHANGES_REQUESTED': '✗', 'COMMENTED': '…', 'DISMISSED': '–'}.get(st, st)) for a, st, _ in r['latest_reviews'] if a not in BOTS)
             rev += ''.join('<span class="pill req">%s 대기</span>' % esc(a) for a in r['requested'])
             rev += '<div class="muted" style="font-size:11px">decision: %s</div>' % esc(r['decision'])
-            ci = r['ci']; cic = 'bad' if ci.startswith('FAIL') else ('warn' if ci.startswith('pending') else 'ok')
+            tcl = ''.join('<div><a href="%s">%s#%d</a> <span class="muted">미해결 %d/%d%s</span></div>' % (esc(t['url']), esc(t['repo'].split('/')[1].replace('cubrid-testcases','tc')), t['number'], t['unresolved'], t['threads_total'], (' · ' + ','.join(esc(a) + ' 대기' for a in t['requested'])) if t['requested'] else '') for t in r['linked_tc']) or '<span class="muted">없음</span>'
             docs = ''.join('<a href="file://%s">%s</a>' % (esc(os.path.expanduser('~/dev/docs/') + d), esc(d)) for d in r['docs']) or '<span class="muted">없음</span>'
-            tc = ''.join('<div class="muted" style="font-size:11px">TC %s#%d%s</div>' % (esc(rp), n, ' (draft)' if dr else '') for rp, n, _, dr in r['tc_prs'])
             others = [a for a in r['assignees'] if a != r['tracked'][0]]
-            h.append('<tr><td class="n"><a href="%s">%s#%d</a>%s</td><td>%s<div class="meta">%s · by %s%s</div></td><td class="n">%s</td><td>%s</td><td class="n %s">%s</td><td class="n">%s<div class="muted" style="font-size:11px">생성 %s</div></td><td class="docs">%s%s</td></tr>' % (
+            h.append('<tr><td class="n"><a href="%s">%s#%d</a>%s</td><td>%s<div class="meta">%s · by %s%s</div></td><td class="n">%s</td><td>%s</td><td class="n">%s<div class="muted" style="font-size:11px">생성 %s</div></td><td class="docs" style="font-size:12px">%s</td><td class="docs">%s</td></tr>' % (
                 esc(r['url']), esc(r['repo'].split('/')[1]), r['number'], '<div class="muted" style="font-size:11px">%s</div>' % esc(r['tracked'][0]) if len(rs) and who != r['tracked'][0] else '',
                 esc(r['title']), esc(r['jira'] or '-'), esc(r['author']), (' · assignees +' + ','.join(others)) if others else '',
-                unres, rev, cic, esc(ci), esc(r['updated']), esc(r['created']), docs, tc))
+                unres, rev, esc(r['updated']), esc(r['created']), tcl, docs))
+        h.append('</table>')
+    if orphans:
+        h.append('<h2>연동 대상 없는 TC PR <span class="meta">%d</span></h2><table><tr><th>PR</th><th>제목</th><th>미해결</th><th>리뷰어 대기</th></tr>' % len(orphans))
+        for t in orphans:
+            h.append('<tr><td class="n"><a href="%s">%s#%d</a></td><td>%s</td><td class="n">%d/%d</td><td>%s</td></tr>' % (esc(t['url']), esc(t['repo'].split('/')[1]), t['number'], esc(t['title']), t['unresolved'], t['threads_total'], esc(','.join(t['requested'])) or '-'))
         h.append('</table>')
     h.append('<p class="meta" style="margin-top:26px">생성기 dev4-review-workspace/tools/review_board_gen.py · 갱신 규약 skills/review-board/SKILL.md · 추적 ID 는 tools/roster.json</p></div></body></html>')
     return '\n'.join(h)

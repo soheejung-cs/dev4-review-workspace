@@ -40,6 +40,7 @@ gh pr view <n> --json reviews,comments,statusCheckRollup     # 리뷰 요약·�
 - 제안을 받지 않을 때는 이유를 락 그래프·계약 수준에서 설명하고 대안(예: 릴리스 노트 기재)을 제시한다.
   "다르게 보시면 그대로 반영하겠습니다"로 닫는다.
 - 재현·수정에 리뷰어의 확인이 도움됐으면 그 사실을 적는다.
+- **번역하기 어려운 용어는 원문 그대로**(`SCH_S`, `prev_version_lsa`, `ShareUpdateExclusiveLock`…) — 억지 한국어 번역 금지, 필요하면 괄호 설명. (2026-09-16)
 
 ## 4. 게시
 ```

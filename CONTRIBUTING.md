@@ -7,3 +7,4 @@
 4. **규약을 바꾸면 그 줄에 이름과 지시 날짜.** 스킬(`skills/*/SKILL.md`)이 곧 규약이다 — 채팅에만 남긴 지시는 없는 것과 같다.
 5. push 전에 `git pull --rebase`. 세 컨테이너·여러 사람이 같은 리포에 push 한다.
 6. 프라이빗 리포다 — 초대는 `members/README.md` 명단 기준으로 owner(정소희)가 한다.
+7. **번역하기 어려운 용어는 번역하지 않는다.** 락 모드(`SCH_S`, `IX`), MVCC/WAL/latch/vacuum/snapshot, 함수·구조체·에러 코드·파라미터 이름, PG/Oracle 고유 용어(`ShareUpdateExclusiveLock`, `recalc pool`, `DBMS_STATS`)는 **원문 그대로** 쓴다. 억지 번역(예: "공유 갱신 배타 잠금")은 검색도 안 되고 뜻도 흐려진다. 한국어 설명은 원문 뒤에 괄호로 붙인다. (사용자 지시 2026-09-16)

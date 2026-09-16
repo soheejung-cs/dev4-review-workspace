@@ -15,7 +15,7 @@ skills/
   design-review/     설계 리뷰 — 영역 판정 4단계, 계약 3요소, 대안표, 덱 구조, 결정 요청
   review-response/   리뷰 대응 — 스레드 수집, 재현, 답글 초안(사용자 검토→게시), 봇 resolve, TC PR 답글
   tc-analysis/       CI 실패 TC 3분류(출력차·코어·미상) — 코드 안 읽고 보고, 승인 후 출력차만 정렬
-  ci-coredump/       CI 코어덤프를 그 잡의 build_debug 로 풀어 assert 지점 확정
+  gha-ci/            gha-ci 실패 분석 — collect 요약·failed.list·샤드 test-shell.xml, 코어는 아티팩트 서버(192.168.1.48:30080)+같은 SHA debug 빌드로 해석
   record/            기록 규약 — 무엇을 어디에 어떤 형식으로 (판단표)
   review-board/      리뷰 보드 갱신 — review-to-do 웹 보드(8827) 생성·호스팅, 추적 ID 관리
 references/
