@@ -66,11 +66,39 @@ def _rule_rows(rules_dir: str, axes: Set[str]) -> str:
 
 AXIS_BY_FACT = {'latch_fix': {'PAR', 'COH', 'MEM'}, 'lock_acquire': {'PAR', 'CC'}, 'log_append': {'SER', 'SYS'}, 'alloc': {'ALLOC', 'MEM'}, 'sysop_start': {'CC'}}
 
-def build(repo: str, g: CodeGraph, diff_text: str, rules_dir: str, budget: int = 12000) -> ContextPack:
+def _invariants(rules_dir: str, repo: str, touched_dirs: Set[str]) -> str:
+    """항상 들어가는 불변조건: 설계-리뷰-규칙 §2 INV 표 + 손대는 디렉터리 AGENTS.md 의 latch/lock 규칙 줄."""
+    rows = []
+    p = os.path.join(rules_dir, '설계-리뷰-규칙.md')
+    if os.path.isfile(p):
+        rows += [l.rstrip() for l in open(p, encoding='utf-8') if re.match(r'\|\s*INV-\d', l)]
+    for d in sorted(touched_dirs):
+        ag = os.path.join(repo, d, 'AGENTS.md')
+        if os.path.isfile(ag):
+            hits = [l.strip() for l in open(ag, encoding='utf-8', errors='replace') if re.search(r'latch|\bpage lock|\block order|lock(ing)? (order|protocol)|fix.*unfix|must not|never|deadlock', l, re.I) and not l.startswith('|') and not re.search(r'lockfree|lock_free|lock-free', l, re.I)]
+            rows += [f'- ({d}/AGENTS.md) {h[:200]}' for h in hits[:8]]
+    return '\n'.join(rows)
+
+def _episodic(examples_dir: str, files: Set[str]) -> str:
+    """과거 리뷰 결과(episodic memory): examples/episodic/PR-*.json 중 같은 파일을 건드린 항목."""
+    d = os.path.join(examples_dir, 'episodic'); rows = []
+    if not os.path.isdir(d): return ''
+    import json
+    for fn in sorted(os.listdir(d)):
+        if not fn.endswith('.json'): continue
+        for e in json.load(open(os.path.join(d, fn), encoding='utf-8')):
+            if e.get('file') in files:
+                rows.append(f"- [{e.get('outcome','open')}] PR#{e.get('pr')} {e['file']}:{e.get('line')} — {e.get('claim','')[:160]}")
+    return '\n'.join(rows[:20])
+
+def build(repo: str, g: CodeGraph, diff_text: str, rules_dir: str, budget: int = 12000, examples_dir: str = '') -> ContextPack:
     changed = parse_unified_diff(diff_text)
     pack = ContextPack(budget=budget)
     seen_text: Set[str] = set()
     struct_refs: Set[str] = set(); axes: Set[str] = set(); sigs: List[str] = []
+    touched_dirs = {os.path.dirname(f) for f in changed}
+    inv = _invariants(rules_dir, repo, touched_dirs)
+    if inv: pack.sections.append(Section('invariants (always included)', inv, 2))
     for file in sorted(changed):
         if not file.endswith(('.c', '.cpp', '.h', '.hpp', '.cc')): continue
         for fn in g.functions_in(file, changed[file]):
@@ -81,17 +109,18 @@ def build(repo: str, g: CodeGraph, diff_text: str, rules_dir: str, budget: int =
                 ls = [l for l in changed[file] if fn.start_line <= l <= fn.end_line]
                 body = _slice(repo, fn.file, min(ls) - 40, max(ls) + 40) + f'\n      ... ({fn.end_line-fn.start_line} lines total, showing changed window)'
             pack.sections.append(Section(f'changed function {fn.fid} [{fn.start_line}-{fn.end_line}]', '```c\n' + body + '\n```', 1))
-            facts = g.facts(fn.fid); pair = R.latch_pairing(g, fn.fid)
+            facts = g.facts(fn.fid); pair = R.latch_pairing(g, fn.fid); byvar = R.latch_pairing_by_var(g, fn.fid)
             for k, _, _ in facts: axes |= AXIS_BY_FACT.get(k, set())
             gates = R.paths_to_gates(g, fn.fid, ('latch_fix', 'lock_acquire', 'log_append', 'sysop_start'))
             entries = R.paths_from_entrypoints(g, fn.fid)
             fb = ['domain facts: ' + (', '.join(f'{k}:{c}@{l}' for k, c, l in facts) or 'none'),
-                  'pairing (calls in this function only): ' + ', '.join(f'{k}={v:+d}' for k, v in pair.items() if v) or 'pairing: balanced/none',
+                  'pairing (calls in this function only): ' + (', '.join(f'{k}={v:+d}' for k, v in pair.items() if v) or 'balanced/none'),
+                  'pairing by variable (opened but never closed by name, ownership-transfer excluded): ' + (', '.join(f'{k}:{v}' for k, v in byvar.items()) or 'none'),
                   'unresolved callees: ' + (', '.join(g.unresolved(fn.fid)[:12]) or 'none'),
                   'paths to gates: ' + ('; '.join(' -> '.join(p.nodes) + f' [{p.reason}{"" if p.complete else ", incomplete"}]' for p in gates) or 'none within 8 hops'),
                   'entry paths: ' + ('; '.join(' -> '.join(p.nodes) + f' [{p.reason}]' for p in entries) or 'none resolved')]
             pack.sections.append(Section(f'graph evidence {fn.fid}', '\n'.join('- ' + x for x in fb), 2))
-            for m in re.finditer(r'\b([A-Z][A-Z0-9_]{3,})\s*\*?\s*\w', body): struct_refs.add(m.group(1))
+            struct_refs |= set(g.types(fn.fid))           # tree-sitter type_identifier: 실제 참조 타입
             for c in g.callers(fn.fid)[:8] + g.callees(fn.fid)[:8]:
                 f2 = g.function(c)
                 if f2: sigs.append(f'{f2.fid}{f2.params}  [{f2.file}:{f2.start_line}]')
@@ -102,6 +131,8 @@ def build(repo: str, g: CodeGraph, diff_text: str, rules_dir: str, budget: int =
     if sigs: pack.sections.append(Section('direct callers/callees (signatures)', '\n'.join('- ' + s for s in sorted(set(sigs))), 4))
     rows = _rule_rows(rules_dir, axes or {'MEAS'})
     if rows: pack.sections.append(Section(f'rules for touched axes {sorted(axes)}', rows, 5))
+    epi = _episodic(examples_dir, set(changed)) if examples_dir else ''
+    if epi: pack.sections.append(Section('episodic memory (past findings on these files)', epi, 6))
     # 예산 적용: 우선순위 낮은 것부터 잘라낸다
     total = sum(s.tokens for s in pack.sections)
     for s in sorted([s for s in pack.sections], key=lambda s: (-s.priority, -s.tokens)):
@@ -109,3 +140,39 @@ def build(repo: str, g: CodeGraph, diff_text: str, rules_dir: str, budget: int =
         if s.priority <= 2: continue
         pack.sections.remove(s); pack.dropped.append(f'{s.title} ({s.tokens} tok)'); total -= s.tokens
     return pack
+
+
+def batches(pack: ContextPack, budget: int) -> List[ContextPack]:
+    """예산 초과 팩을 파일 단위 배치로 나눈다(Metis same-file batch split). 공유 절(invariants·rules·episodic)은 배치마다 들어간다.
+    한 파일의 함수 묶음이 그 자체로 예산을 넘으면 함수 단위로 더 쪼갠다. 결정론: 파일명·함수 시작 순."""
+    total = sum(s.tokens for s in pack.sections)
+    if total <= budget: return [pack]
+    shared = [s for s in pack.sections if s.priority >= 5 or s.title.startswith('invariants')]
+    per_fn: Dict[str, List[Section]] = {}
+    order: List[str] = []
+    for s in pack.sections:
+        if s in shared: continue
+        m = re.match(r'(?:changed function|graph evidence) (\S+?)(?: \[|$)', s.title)   # 함수(fid) 단위 키
+        key = m.group(1) if m else '_other'
+        if key not in per_fn: per_fn[key] = []; order.append(key)
+        per_fn[key].append(s)
+    shared_tok = sum(s.tokens for s in shared)
+    out: List[ContextPack] = []; cur: List[Section] = []; cur_tok = shared_tok; cur_files: Set[str] = set()
+    def flush():
+        if cur:
+            b = ContextPack(budget=budget); b.sections = list(shared) + list(cur); out.append(b)
+    for key in order:
+        secs = per_fn[key]; tok = sum(s.tokens for s in secs)
+        if tok + shared_tok > budget:
+            for sec in secs:   # 한 함수가 혼자 예산을 넘는다: 본문을 앞뒤 절반씩 잘라 표시하고 LLM 에 알린다
+                if sec.title.startswith('changed function') and sec.tokens > budget // 2:
+                    keep = int(len(sec.body) * (budget // 2) / sec.tokens)
+                    sec.body = sec.body[:keep] + f'\n      ... (truncated to fit batch budget: {sec.tokens} tok; ask for the rest by line range)\n```'
+                    sec.tokens = est_tokens(sec.body)
+            tok = sum(s.tokens for s in secs)
+        if cur and (cur_tok + tok > budget or (cur_files and key not in cur_files and len(cur_files) >= 1 and cur_tok + tok > budget * 0.7)):
+            flush(); cur = []; cur_tok = shared_tok; cur_files = set()
+        cur += secs; cur_tok += tok; cur_files.add(key)
+    flush()
+    for i, b in enumerate(out): b.sections.insert(0, Section(f'batch {i+1}/{len(out)}', f'이 배치는 전체 diff 의 일부다. 다른 배치의 함수는 여기 없다 — 없는 것을 추측하지 말고 "다른 배치 참조" 로 적는다.', 0))
+    return out

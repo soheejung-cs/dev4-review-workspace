@@ -4,7 +4,7 @@
     "id": {"type": "string"}, "layer": {"enum": ["설계", "코드"]},
     "file": {"type": "string"}, "line": {"type": "integer", "minimum": 1},
     "claim": {"type": "string", "description": "한 문장: 결함 → 원인 → 결과"},
-    "evidence": {"type": "array", "items": {"type": "string", "pattern": "^[^:\\s]+:\\d+"}, "minItems": 1},
+    "evidence": {"type": "array", "items": {"type": "string", "pattern": "^([^:\\s]+|pr-body):\\d+"}, "minItems": 1},
     "rule_ids": {"type": "array", "items": {"type": "string", "pattern": "^[A-Z]{2,5}-\\d{2}$"}},
     "severity": {"enum": ["blocking", "non-blocking", "question"]},
     "arch_edge": {"type": "string", "description": "설계 층: arch.json 의 connections[source->target] 또는 risks[kind]"},

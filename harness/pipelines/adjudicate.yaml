@@ -1,0 +1,13 @@
+harness: adjudicate                 # LLM 산출물(--findings) 의 결정론 판정 + 자기 보정 루프
+executor: ".51"
+stages:
+  initialize:
+    worktree:   { impl: worktree }
+    diff_map:   { impl: diff_map }
+    codegraph:  { impl: codegraph, scope: changed+1 }
+  verify:
+    validate:   { impl: validate, merge_auto: true }     # finding.json 스키마 → 실패는 requery.json 으로
+    gate:       { impl: gate }                           # 의무 5개 → valid/invalid/inconclusive, repro 의무로 blocking 강등
+    self_check: { impl: self_check }                     # valid 가 있으면 변경 파일 -fsyntax-only
+  memory:
+    episodic:   { impl: episodic, reviewer: soheejung-cs }   # 게시된 코멘트·작성자 응답 → examples/episodic/PR-<n>.json

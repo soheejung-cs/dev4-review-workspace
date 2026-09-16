@@ -28,11 +28,13 @@ class CallSite:
 
 @dataclass(frozen=True)
 class DomainFact:
-    """언어 파생 사실: 락/latch/로그 관문 호출. 사전설계 13장 P3 의 '관문' 목록이 프로파일이다."""
+    """언어 파생 사실: 락/latch/로그 관문 호출. 사전설계 13장 P3 의 '관문' 목록이 프로파일이다.
+    var: 관문이 다루는 변수 — fix/alloc 은 대입의 좌변, unfix/free 는 (thread_p 다음) 첫 인자. 변수 단위 짝 검사에 쓴다."""
     fid: str
     kind: str         # latch_fix | latch_unfix | lock_acquire | lock_release | log_append | sysop_start | sysop_end | alloc | free
     callee: str
     line: int
+    var: str = ''
 
 # 사전설계문서 13장(관문)과 성능규칙집 MEM/ALLOC 축에서 뽑은 DB 도메인 프로파일
 DOMAIN_PROFILE = {
@@ -65,7 +67,7 @@ class TreeSitterProvider:
         lang = 'cpp' if rel.endswith(('.cpp', '.hpp', '.cc', '.cxx')) else 'c'
         src = open(os.path.join(repo, rel), 'rb').read()
         tree = self._parsers[lang].parse(src)
-        funcs, calls, facts, structs = [], [], [], []
+        funcs, calls, facts, structs, types = [], [], [], [], []
 
         def text(n): return src[n.start_byte:n.end_byte].decode('utf-8', 'replace')
 
@@ -98,7 +100,22 @@ class TreeSitterProvider:
                 line = node.start_point[0] + 1
                 calls.append(CallSite(cur_fid, callee, line, text(args)[:120] if args is not None else ''))
                 k = _KIND_BY_CALLEE.get(callee)
-                if k: facts.append(DomainFact(cur_fid, k, callee, line))
+                if k:
+                    var = ''
+                    if k in ('latch_fix', 'alloc', 'lock_acquire'):
+                        par = node.parent
+                        while par is not None and par.type not in ('assignment_expression', 'init_declarator', 'function_definition', 'expression_statement'):
+                            par = par.parent
+                        if par is not None and par.type in ('assignment_expression', 'init_declarator'):
+                            lhs = par.child_by_field_name('left') if par.type == 'assignment_expression' else par.child_by_field_name('declarator')
+                            var = text(lhs).replace('*', '').strip() if lhs is not None else ''
+                    elif k in ('latch_unfix', 'free', 'lock_release') and args is not None:
+                        ids = [text(c) for c in args.children if c.type not in ('(', ')', ',')]
+                        ids = [i for i in ids if i not in ('thread_p', 'thread_ref', '&thread_ref')]
+                        var = ids[0].replace('&', '').replace('*', '').strip() if ids else ''
+                    facts.append(DomainFact(cur_fid, k, callee, line, var))
+            elif t == 'type_identifier' and cur_fid is not None:
+                types.append((cur_fid, text(node)))
             elif t in ('struct_specifier', 'class_specifier') and node.child_by_field_name('body') is not None:
                 nm = node.child_by_field_name('name')
                 if nm is not None:
@@ -106,7 +123,7 @@ class TreeSitterProvider:
             for c in node.children:
                 walk(c, cur_fid)
         walk(tree.root_node, None)
-        return funcs, calls, facts, structs
+        return funcs, calls, facts, structs, sorted(set(types))
 
 class CtagsProvider:
     """폴백: 함수 정의만(호출 없음). 그래프는 '불완전' 표지가 붙고 reachability 는 fail-open 으로 돈다."""
@@ -117,16 +134,25 @@ class CtagsProvider:
             parts = ln.split(None, 3)
             if len(parts) >= 3:
                 funcs.append(FunctionNode(f'{rel}:{parts[0]}', parts[0], rel, int(parts[2]), int(parts[2]), '', False))
-        return funcs, [], [], []
+        return funcs, [], [], [], []
 
 class CodeGraph:
-    def __init__(self, db_path: str):
+    SCHEMA_VERSION = '2'
+    def __init__(self, db_path: str, repo_root: str = ''):
+        self.repo_root = repo_root
         self.db = sqlite3.connect(db_path)
+        # 스키마 버전이 다르면 통째로 버린다(캐시일 뿐이고, 부분 마이그레이션은 결정론을 해친다)
+        try:
+            v = self.db.execute("SELECT v FROM meta WHERE k='schema_version'").fetchone()
+        except sqlite3.OperationalError: v = None
+        if v is None or v[0] != self.SCHEMA_VERSION:
+            for t in ('functions', 'calls', 'facts', 'structs', 'fn_types', 'meta'): self.db.execute(f'DROP TABLE IF EXISTS {t}')
         self.db.executescript('''
         CREATE TABLE IF NOT EXISTS meta(k TEXT PRIMARY KEY, v TEXT);
         CREATE TABLE IF NOT EXISTS functions(fid TEXT PRIMARY KEY, name TEXT, file TEXT, start_line INT, end_line INT, params TEXT, is_static INT);
         CREATE TABLE IF NOT EXISTS calls(caller TEXT, callee TEXT, line INT, args TEXT, resolved TEXT);
-        CREATE TABLE IF NOT EXISTS facts(fid TEXT, kind TEXT, callee TEXT, line INT);
+        CREATE TABLE IF NOT EXISTS facts(fid TEXT, kind TEXT, callee TEXT, line INT, var TEXT);
+        CREATE TABLE IF NOT EXISTS fn_types(fid TEXT, type TEXT);
         CREATE TABLE IF NOT EXISTS structs(name TEXT, file TEXT, start_line INT, end_line INT);
         CREATE INDEX IF NOT EXISTS ix_calls_caller ON calls(caller); CREATE INDEX IF NOT EXISTS ix_calls_resolved ON calls(resolved);
         CREATE INDEX IF NOT EXISTS ix_fn_name ON functions(name);''')
@@ -135,8 +161,8 @@ class CodeGraph:
     def build(cls, repo: str, files: Iterable[str], db_path: str, provider=None, log=print) -> 'CodeGraph':
         files = sorted(set(files))  # 결정론: 입력 순서 무관
         fp = repo_fingerprint(repo)
-        key = hashlib.sha1((fp + '\n'.join(files)).encode()).hexdigest()
-        g = cls(db_path)
+        key = hashlib.sha1(('v2|' + fp + '\n'.join(files)).encode()).hexdigest()
+        g = cls(db_path, repo)
         cur = g.db.execute("SELECT v FROM meta WHERE k='input_fingerprint'").fetchone()
         if cur and cur[0] == key:
             log(f'codegraph: cache hit ({len(files)} files)'); return g
@@ -145,16 +171,17 @@ class CodeGraph:
             except Exception as e: log(f'codegraph: tree-sitter unavailable ({e}); ctags fallback'); provider = CtagsProvider(); complete = False
         else: complete = not isinstance(provider, CtagsProvider)
         with g.db:
-            for t in ('functions', 'calls', 'facts', 'structs', 'meta'): g.db.execute(f'DELETE FROM {t}')
+            for t in ('functions', 'calls', 'facts', 'structs', 'fn_types', 'meta'): g.db.execute(f'DELETE FROM {t}')
             for rel in files:
                 if not os.path.isfile(os.path.join(repo, rel)): continue
-                fs, cs, fa, st = provider.parse_file(repo, rel)
+                fs, cs, fa, st, ty = provider.parse_file(repo, rel)
                 g.db.executemany('INSERT OR REPLACE INTO functions VALUES(?,?,?,?,?,?,?)', [(f.fid, f.name, f.file, f.start_line, f.end_line, f.params, int(f.is_static)) for f in fs])
                 g.db.executemany('INSERT INTO calls VALUES(?,?,?,?,NULL)', [(c.caller, c.callee, c.line, c.args) for c in cs])
-                g.db.executemany('INSERT INTO facts VALUES(?,?,?,?)', [(x.fid, x.kind, x.callee, x.line) for x in fa])
+                g.db.executemany('INSERT INTO facts VALUES(?,?,?,?,?)', [(x.fid, x.kind, x.callee, x.line, x.var) for x in fa])
+                g.db.executemany('INSERT INTO fn_types VALUES(?,?)', ty)
                 g.db.executemany('INSERT INTO structs VALUES(?,?,?,?)', [(s['name'], s['file'], s['start_line'], s['end_line']) for s in st])
             g._resolve()
-            g.db.executemany('INSERT OR REPLACE INTO meta VALUES(?,?)', [('input_fingerprint', key), ('repo_fingerprint', fp), ('complete', '1' if complete else '0'), ('n_files', str(len(files)))])
+            g.db.executemany('INSERT OR REPLACE INTO meta VALUES(?,?)', [('input_fingerprint', key), ('repo_fingerprint', fp), ('complete', '1' if complete else '0'), ('n_files', str(len(files))), ('schema_version', cls.SCHEMA_VERSION)])
         log(f'codegraph: built {g.count("functions")} functions, {g.count("calls")} calls, {g.count("facts")} domain facts from {len(files)} files')
         return g
 
@@ -186,6 +213,8 @@ class CodeGraph:
     def callees(self, fid): return [r[0] for r in self.db.execute('SELECT DISTINCT resolved FROM calls WHERE caller=? AND resolved IS NOT NULL ORDER BY resolved', (fid,))]
     def unresolved(self, fid): return [r[0] for r in self.db.execute('SELECT DISTINCT callee FROM calls WHERE caller=? AND resolved IS NULL ORDER BY callee', (fid,))]
     def facts(self, fid): return self.db.execute('SELECT kind,callee,line FROM facts WHERE fid=? ORDER BY line', (fid,)).fetchall()
+    def facts_v(self, fid): return self.db.execute('SELECT kind,callee,line,var FROM facts WHERE fid=? ORDER BY line', (fid,)).fetchall()
+    def types(self, fid): return [r[0] for r in self.db.execute('SELECT DISTINCT type FROM fn_types WHERE fid=? ORDER BY type', (fid,))]
     def function(self, fid):
         r = self.db.execute('SELECT fid,name,file,start_line,end_line,params,is_static FROM functions WHERE fid=?', (fid,)).fetchone()
         return FunctionNode(*r[:6], bool(r[6])) if r else None

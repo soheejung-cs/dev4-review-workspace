@@ -4,7 +4,7 @@ finding 형식(JSON): {id, layer:'설계'|'코드', file, line, claim, evidence:
 판정: valid | invalid | inconclusive. 과신 금지 — 의무 증거가 없으면 valid 로 올리지 않는다.
 """
 import os, re, subprocess
-from typing import Dict, List
+from typing import Dict, List, Tuple
 from .codegraph import CodeGraph
 
 def _line_exists(repo: str, file: str, line: int) -> bool:
@@ -31,7 +31,7 @@ def adjudicate(repo: str, g: CodeGraph, changed: Dict[str, List[int]], findings:
         ok = 0
         for e in ev:
             m = re.match(r'([^:\s]+):(\d+)', e)
-            if m and _line_exists(repo, m.group(1), int(m.group(2))): ok += 1
+            if m and (m.group(1) == 'pr-body' or _line_exists(repo, m.group(1), int(m.group(2)))): ok += 1
         obligations['evidence_resolves'] = bool(ev) and ok == len(ev)
         if not obligations['evidence_resolves']: reasons.append(f'evidence {ok}/{len(ev)} 해석됨')
         rids = set(f.get('rule_ids') or [])
@@ -57,16 +57,57 @@ def adjudicate(repo: str, g: CodeGraph, changed: Dict[str, List[int]], findings:
 
 def self_check_build(repo: str, files: List[str], timeout: int = 900) -> Dict:
     """자기 보정 루프의 정적 단계: 변경 파일만 컴파일(빌드 디렉터리의 compile_commands.json 사용). 실패 = finding 이 아니라 하네스가 멈춘다."""
-    cc = os.path.join(repo, '..', '..', 'build', 'build_x86_64_release', 'compile_commands.json')
-    if not os.path.isfile(cc): return {'ran': False, 'reason': 'compile_commands.json 없음'}
+    cc = os.environ.get('HARNESS_COMPILE_COMMANDS', os.path.expanduser('~/dev/build/build_x86_64_release/compile_commands.json'))
+    if not os.path.isfile(cc): return {'ran': False, 'reason': f'compile_commands.json 없음 ({cc})'}
     import json
-    cmds = {os.path.relpath(e['file'], repo): e for e in json.load(open(cc)) if e['file'].startswith(repo)}
+    src_root = os.path.expanduser('~/dev/sources/cubrid')   # compile_commands 는 원본 소스 경로 기준; 워크트리 파일로 치환해 컴파일한다
+    cmds = {os.path.relpath(e['file'], src_root): e for e in json.load(open(cc)) if e['file'].startswith(src_root)}
     res = {}
     for f in files:
         e = cmds.get(f)
         if not e: res[f] = 'no-compile-command'; continue
         cmd = e.get('command') or ' '.join(e.get('arguments', []))
-        cmd = re.sub(r'\s-o\s+\S+', ' -o /dev/null', cmd) + ' -fsyntax-only'
+        cmd = re.sub(r'\s-o\s+\S+', ' -o /dev/null', cmd).replace(e['file'], os.path.join(repo, f)) + ' -fsyntax-only'
         r = subprocess.run(cmd, shell=True, cwd=e['directory'], stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True, timeout=timeout)
         res[f] = 'ok' if r.returncode == 0 else r.stderr[-800:]
     return {'ran': True, 'results': res}
+
+# ---- 자기 보정 루프 ----
+import json, hashlib, glob
+
+def validate_findings(findings: List[Dict], schema_path: str) -> Tuple[List[Dict], List[Dict]]:
+    """finding.json 스키마 검증. 통과/실패로 나누고 실패 이유를 붙인다(재질의 입력)."""
+    import jsonschema
+    schema = json.load(open(schema_path, encoding='utf-8'))
+    ok, bad = [], []
+    for f in findings:
+        errs = sorted(jsonschema.Draft7Validator(schema).iter_errors(f), key=lambda e: list(e.path))
+        if errs: bad.append(dict(f, schema_errors=[f'{"/".join(map(str, e.path)) or "<root>"}: {e.message}' for e in errs]))
+        else: ok.append(f)
+    return ok, bad
+
+def dedup(findings: List[Dict]) -> List[Dict]:
+    """배치 간 중복 제거(Metis finding_dedup 의 결정론 부분): 같은 file:line(±2) + claim 앞 40자."""
+    seen = {}; out = []
+    for f in sorted(findings, key=lambda x: (x.get('file', ''), int(x.get('line') or 0), x.get('claim', ''))):
+        key = (f.get('file'), int(f.get('line') or 0) // 3, (f.get('claim') or '')[:40])
+        if key in seen: continue
+        seen[key] = True; out.append(f)
+    return out
+
+def repro_obligation(repo_docs: str, findings: List[Dict], jira: str = '') -> List[Dict]:
+    """valid + blocking 인 코드 finding 은 재현 스크립트(projects/<JIRA>/repro/*) 또는 graph_supports=True 가 있어야 blocking 을 유지한다.
+    없으면 non-blocking 으로 강등하고 이유를 남긴다 — '재현 없이 결함이라 하지 않는다'."""
+    repros = glob.glob(os.path.join(repo_docs, 'projects', jira or '*', 'repro', '*')) if repo_docs else []
+    for f in findings:
+        if f.get('status') == 'valid' and f.get('severity') == 'blocking' and f.get('layer') == '코드':
+            if not repros and not f.get('obligations', {}).get('graph_supports'):
+                f['severity'] = 'non-blocking'; f.setdefault('reasons', []).append('재현 스크립트도 그래프 증거도 없어 blocking 을 유지할 수 없음 → non-blocking 강등')
+    return findings
+
+def requery(bad: List[Dict], adjudicated: List[Dict], out_path: str) -> int:
+    """LLM 재질의 입력: 스키마 실패 + inconclusive 를 이유와 함께 한 파일로. 러너가 이 파일이 비어 있지 않으면 1회 재질의한다."""
+    items = [{'id': b.get('id'), 'why': b['schema_errors'], 'finding': b} for b in bad]
+    items += [{'id': a.get('id'), 'why': a.get('reasons'), 'finding': {k: v for k, v in a.items() if k not in ('obligations', 'reasons', 'status')}} for a in adjudicated if a.get('status') == 'inconclusive']
+    json.dump(items, open(out_path, 'w', encoding='utf-8'), ensure_ascii=False, indent=1)
+    return len(items)

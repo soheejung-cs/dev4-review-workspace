@@ -64,3 +64,25 @@ def latch_pairing(g: CodeGraph, fid: str) -> Dict[str, int]:
     c = lambda k: sum(1 for kind, _, _ in facts if kind == k)
     return {'latch_fix-unfix': c('latch_fix') - c('latch_unfix'), 'lock_acquire-release': c('lock_acquire') - c('lock_release'),
             'sysop_start-end': c('sysop_start') - c('sysop_end'), 'alloc-free': c('alloc') - c('free')}
+
+def latch_pairing_by_var(g: CodeGraph, fid: str) -> Dict[str, List[str]]:
+    """변수 단위 짝(카운트보다 정확): fix/alloc 된 변수 이름이 같은 함수 안에서 unfix/free 되지 않으면 후보.
+    반환값으로 넘기는 변수(return X / *out = X)는 소유권 이전이라 제외한다. CFG 를 다 보지는 않으므로 '후보'다."""
+    facts = g.facts_v(fid)
+    fn = g.function(fid)
+    src = ''
+    try:
+        import os
+        with open(os.path.join(g.repo_root, fn.file), encoding='utf-8', errors='replace') as f:
+            src = '\n'.join(f.read().split('\n')[fn.start_line - 1:fn.end_line])
+    except Exception: pass
+    pairs = {('latch_fix', 'latch_unfix'), ('alloc', 'free'), ('lock_acquire', 'lock_release')}
+    out: Dict[str, List[str]] = {}
+    for a, b in pairs:
+        opened = {v for k, _, _, v in facts if k == a and v}
+        closed = {v for k, _, _, v in facts if k == b and v}
+        import re
+        escaped = {v for v in opened if re.search(r'\breturn\s+\(?\s*' + re.escape(v) + r'\b', src) or re.search(r'\*\s*\w+\s*=\s*' + re.escape(v) + r'\s*;', src) or re.search(r'->\w+\s*=\s*' + re.escape(v) + r'\s*;', src)}
+        leak = sorted(opened - closed - escaped)
+        if leak: out[f'{a}->{b}'] = leak
+    return out

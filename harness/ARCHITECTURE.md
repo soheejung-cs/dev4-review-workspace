@@ -90,7 +90,18 @@ DB 서버·CTP 는 이 CLI 가 띄우지 않는다(`review-testing` 스킬의 �
 | 산출물 | 보고서 + 인라인 코멘트 | 대안표·결정 요청 Q + 덱 + 다이어그램 |
 | 공유 | Worktree · CodeGraph · ContextPack · Adjudicate · `references/` · `rules/` · `examples/` | |
 
-## 6. 알려진 한계 (META-REVIEW 에서 채점 근거)
+## 6. v2 에서 추가된 모듈
+| 모듈 | 역할 |
+|---|---|
+| `pipeline.py` | YAML 러너 — `harness/pipelines/{review,design,adjudicate}.yaml` 의 stage/node 를 레지스트리로 실행, `manifest.json` 결정론 기록 |
+| `perf_claims.py` | PR 본문 성능 주장 → MEAS-01/04/05/07 자동 finding |
+| `episodic.py` | 게시된 리뷰 코멘트 + 작성자 응답 → `examples/episodic/PR-<n>.json` (accepted/rebutted/open) |
+| `session.py` | `ServerSession` RAII(conf·databases.txt 복원, 종료 보장), `cleanup_leftovers()` |
+| `harness/templates/repro.sh` | trap 정리·격리 포트·산출물 판정 템플릿 |
+| `context_pack.batches()` / `_invariants()` / `_episodic()` | 배치 분할 · 불변조건 상시 주입 · 과거 지적 주입 |
+| `reachability.latch_pairing_by_var()` | 변수 단위 관문 짝 |
+| `adjudicate.validate_findings/dedup/repro_obligation/requery` | 스키마 검증 → 재질의 파일, 중복 제거, repro 의무 |
+
+## 7. 알려진 한계 (META-REVIEW v2 참조)
 - 매크로(`NET_SERVER_REQUEST_ITEM`)가 함수로 잡힌다; 함수 포인터·가상 호출 미해석; `changed+1` 범위 밖 호출은 `root(no caller resolved)`.
-- 예산 초과 시 파일 단위 배치 분할은 YAML 에만 있고 코드 미구현(29k 팩이 그대로 나감 — PR#7899 실측).
-- 리스크 `gate-imbalance` 는 함수 단위 카운트라 "반환값으로 소유권 이전"(예: `qo_env_new` 의 malloc)을 오탐한다 — adjudicate 가 `inconclusive` 로 막지만 탐지기 자체는 조건 분기·소유권 이전을 모른다.
+- `gate-imbalance`(카운트)는 여전히 오탐 가능; 팩에는 변수 단위 짝(`pairing by variable`)이 함께 실려 LLM 이 대조할 수 있다. CFG 경로별 검사는 미구현.

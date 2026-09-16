@@ -4,3 +4,4 @@ tests/shell-tc-index/by-tag.md
 references/oracle-manual/*/
 __pycache__/
 tools/harness/__pycache__/
+examples/episodic/
