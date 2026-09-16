@@ -16,8 +16,12 @@ def analyze(body: str, anchor_file: str, anchor_line: int) -> List[Dict]:
     disp = ln(r'\bMAD\b|표준편차|stddev|σ|rep\s*별|편차')
     reps = ln(r'\d+\s*회|min-of-|median-of-|warm-?up|\d+\s*runs?')
     ctp = ln(r'\bCTP\b|/run all|test_sql|test_shell|sql\s*/\s*medium|regression suite')
+    WHY = {'MEAS-01': '측정 없는 성능 주장은 머지 뒤 회귀가 나도 기준선이 없어 원인을 되짚을 수 없고, 리뷰어가 코드만 읽고 "빨라 보인다"에 동의하는 것은 근거가 아니다.',
+           'MEAS-04': '1회 실행값은 캐시·호스트 부하 같은 기준선 오염과 개선을 구분할 수 없어, 개선이 잡음일 가능성을 배제하지 못한다.',
+           'MEAS-05': '정확성이 성능보다 먼저다 — 회귀 테스트 근거가 없으면 빨라진 코드가 틀린 답을 내는지 아무도 확인하지 않은 상태로 머지된다.',
+           'MEAS-07': '산포 없이는 0.9 배 개선과 1.1 배 회귀가 같은 잡음 폭 안일 수 있어, 표의 방향 자체를 믿을 수 없다.'}
     def F(fid, rule, claim, ev):
-        return {'id': fid, 'layer': '설계', 'file': anchor_file, 'line': anchor_line, 'claim': claim, 'evidence': [f'pr-body:{ev or 1}'], 'rule_ids': [rule], 'severity': 'non-blocking', 'auto': True}
+        return {'id': fid, 'layer': '설계', 'file': anchor_file, 'line': anchor_line, 'claim': claim, 'why': WHY[rule], 'evidence': [f'pr-body:{ev or 1}'], 'rule_ids': [rule], 'severity': 'non-blocking', 'auto': True}
     if perf_claim and not table: out.append(F('MEAS-01-auto', 'MEAS-01', '성능 주장은 있는데 측정 표(타이밍/프로파일)가 본문에 없다 — 측정 먼저', perf_claim))
     if median and not disp: out.append(F('MEAS-07-auto', 'MEAS-07', '중앙값만 있고 산포(MAD/표준편차/rep 별 값)가 없다 — 개선폭이 잡음 범위 안인지 판정 불가', median))
     if table and not reps: out.append(F('MEAS-04-auto', 'MEAS-04', '측정 표에 반복 횟수(min-of-N/median-of-N/warmup) 언급이 없다 — 1회 실행값이면 기준선 오염을 구분 못 한다', table))

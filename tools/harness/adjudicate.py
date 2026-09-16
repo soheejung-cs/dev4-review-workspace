@@ -20,9 +20,12 @@ def adjudicate(repo: str, g: CodeGraph, changed: Dict[str, List[int]], findings:
     out = []
     rule_ids = set(re.findall(r'\b([A-Z]{2,5}-\d{2})\b', rules_text))
     for f in findings:
-        obligations = {'anchor_exists': False, 'anchor_in_diff': False, 'evidence_resolves': False, 'rule_known': False, 'graph_supports': None}
+        obligations = {'anchor_exists': False, 'anchor_in_diff': False, 'evidence_resolves': False, 'rule_known': False, 'graph_supports': None, 'why_present': False}
         status = 'inconclusive'; reasons = []
         file, line = f.get('file'), int(f.get('line') or 0)
+        why = (f.get('why') or '').strip()
+        obligations['why_present'] = len(why) >= 40 and not why.startswith(f.get('claim', '')[:20])
+        if not obligations['why_present']: reasons.append('why(왜 문제가 되는지) 가 없거나 claim 반복 — 결과·영향·근거를 적어야 한다')
         if file and line and _line_exists(repo, file, line): obligations['anchor_exists'] = True
         else: reasons.append('anchor file:line 이 저장소에 없다')
         if obligations['anchor_exists'] and _in_diff(changed, file, line): obligations['anchor_in_diff'] = True
@@ -48,7 +51,7 @@ def adjudicate(repo: str, g: CodeGraph, changed: Dict[str, List[int]], findings:
                     obligations['graph_supports'] = any(v > 0 for v in pair.values())
                     if obligations['graph_supports'] is False: reasons.append(f'그래프 상 관문 짝은 균형({pair}) — 주장과 모순(조건 분기 확인 필요)')
         # 결정론적 게이트
-        if obligations['anchor_exists'] and obligations['evidence_resolves'] and obligations['graph_supports'] is not False and (f.get('layer') != '코드' or obligations['anchor_in_diff']):
+        if obligations['why_present'] and obligations['anchor_exists'] and obligations['evidence_resolves'] and obligations['graph_supports'] is not False and (f.get('layer') != '코드' or obligations['anchor_in_diff']):
             status = 'valid'
         elif obligations['graph_supports'] is False or not obligations['anchor_exists']:
             status = 'invalid' if not obligations['anchor_exists'] else 'inconclusive'

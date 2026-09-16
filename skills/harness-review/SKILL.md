@@ -13,7 +13,7 @@ description: 통합 리뷰 하네스 실행 — `/harness-review <PR번호>`. �
 ## 절차 (LLM 호출 = 이 세션의 나)
 1. `cd ~/dev/docs/dev4-review-workspace && python3 -m tools.harness.run full --pr <PR>` → 마지막 줄이 산출 디렉터리 `OUT`.
 2. `OUT/review_request*.md` 를 **배치 순서대로 전부** 읽는다(다른 파일은 열지 않는다 — 팩에 없는 코드는 "없음"). `manifest.json` 의 `codegraph_complete` 가 false 면 보고서에 적는다.
-3. 지적을 `OUT/findings.json` 으로 쓴다 — 스키마 `harness/schemas/finding.json`. `layer` 코드/설계, `evidence` 는 팩 안의 `file:line` 또는 `pr-body:N`, 성능 지적은 `rule_ids`, 설계 지적은 `arch_edge`. `findings.auto.json`(MEAS) 은 건드리지 않는다(러너가 합친다).
+3. 지적을 `OUT/findings.json` 으로 쓴다 — 스키마 `harness/schemas/finding.json`. **모든 지적에 `why`(왜 문제가 되는지: 이대로 두면 누가/무엇이 어떻게 되나 + 근거)** 를 쓴다. 게시 코멘트에도 그 문단을 `왜 문제가 되는지:` 로 붙인다 — 지적만 있고 결과가 없는 코멘트는 작성자가 우선순위를 판단할 수 없다(사용자 지시 2026-09-17). `layer` 코드/설계, `evidence` 는 팩 안의 `file:line` 또는 `pr-body:N`, 성능 지적은 `rule_ids`, 설계 지적은 `arch_edge`. `findings.auto.json`(MEAS) 은 건드리지 않는다(러너가 합친다).
 4. `python3 -m tools.harness.run full --pr <PR> --findings OUT/findings.json` → `findings.adjudicated.json`, `requery.json`, `report.md`.
 5. `requery.json` 이 비어 있지 않으면 **한 번만** 그 항목을 다시 검토해 findings.json 을 고치고 4 를 재실행한다(그래도 inconclusive 면 보고서 "판정 보류"에 남긴다).
 6. `report.md` 를 사람 말투로 다듬어 `examples/리뷰보고서-예시-PR<PR>.md` 와 `claude-workspace/projects/<JIRA>/리뷰보고서-PR<PR>.md` 에 둔다. **게시는 하지 않는다** — 사용자에게 "N번 코멘트 — [층] 본문" 초안을 보이고 승인 후 `review-response` 규약(인라인)으로 게시.
