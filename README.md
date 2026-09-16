@@ -25,6 +25,8 @@ skills/
   oracle-reference/  Oracle 스펙 비교 — 요청 시에만, toc.md 매핑 후 해당 절만 읽기
   review-board/      리뷰 보드 갱신 — review-to-do 웹 보드(8827) 생성·호스팅, 추적 ID 관리
 references/
+  oracle-manual/     Oracle 공식 매뉴얼 원문(PDF)+toc.md+요약.md+장별 txt — 요청 시 절 단위로만 읽는다(skills/oracle-reference). 리포 private 유지
+
   C-Cpp-성능규칙집.md        2568줄, 규칙 ID 로 인용. ~/.claude/성능규칙집.md 는 여기로의 심링크
   cubrid-사전설계문서.md      설계 리뷰 근거 — 불변조건 5·컴포넌트 [A]~[I]·의존·동시성 도메인
   대규모Cpp-물리설계-Lakos.md  PHYS 축 배경
