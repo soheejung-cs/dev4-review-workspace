@@ -20,12 +20,23 @@ def adjudicate(repo: str, g: CodeGraph, changed: Dict[str, List[int]], findings:
     out = []
     rule_ids = set(re.findall(r'\b([A-Z]{2,5}-\d{2})\b', rules_text))
     for f in findings:
-        obligations = {'anchor_exists': False, 'anchor_in_diff': False, 'evidence_resolves': False, 'rule_known': False, 'graph_supports': None, 'why_present': False}
+        obligations = {'anchor_exists': False, 'anchor_in_diff': False, 'evidence_resolves': False, 'rule_known': False, 'graph_supports': None, 'why_present': False, 'proposal_present': False, 'verified_if_error': True}
         status = 'inconclusive'; reasons = []
         file, line = f.get('file'), int(f.get('line') or 0)
+        claim = (f.get('claim') or '')
         why = (f.get('why') or '').strip()
         obligations['why_present'] = len(why) >= 40 and not why.startswith(f.get('claim', '')[:20])
         if not obligations['why_present']: reasons.append('why(왜 문제가 되는지) 가 없거나 claim 반복 — 결과·영향·근거를 적어야 한다')
+        prop = (f.get('proposal') or '').strip()
+        obligations['proposal_present'] = len(prop) >= 20
+        if not obligations['proposal_present']: reasons.append('proposal(제안+예시) 없음 — 무엇을 어떻게 고치라는지와 예시를 적어야 한다')
+        ERROR_WORDS = r'데드락|deadlock|크래시|crash|SIGSEGV|누수|leak|오답|wrong|silently|UB|undefined|경합|race|double free|use-after-free|미초기화|uninitializ|무한|hang'
+        if re.search(ERROR_WORDS, claim + ' ' + (f.get('why') or ''), re.I):
+            v = f.get('verification') or {}
+            obligations['verified_if_error'] = v.get('method') in ('static', 'dynamic') and bool((v.get('result') or '').strip())
+            if not obligations['verified_if_error']:
+                reasons.append('에러 우려인데 verification(static/dynamic 확인 결과) 없음 → severity 를 question 으로 내림')
+                f['severity'] = 'question'
         if file and line and _line_exists(repo, file, line): obligations['anchor_exists'] = True
         else: reasons.append('anchor file:line 이 저장소에 없다')
         if obligations['anchor_exists'] and _in_diff(changed, file, line): obligations['anchor_in_diff'] = True
@@ -41,7 +52,6 @@ def adjudicate(repo: str, g: CodeGraph, changed: Dict[str, List[int]], findings:
         obligations['rule_known'] = bool(rids) and rids <= rule_ids
         if rids and not obligations['rule_known']: reasons.append(f'모르는 규칙 ID {sorted(rids - rule_ids)}')
         # 그래프 검증: 짝 불균형/경로 주장을 사실과 대조
-        claim = (f.get('claim') or '')
         if file and line:
             fns = g.functions_in(file, [line])
             if fns:
@@ -51,7 +61,7 @@ def adjudicate(repo: str, g: CodeGraph, changed: Dict[str, List[int]], findings:
                     obligations['graph_supports'] = any(v > 0 for v in pair.values())
                     if obligations['graph_supports'] is False: reasons.append(f'그래프 상 관문 짝은 균형({pair}) — 주장과 모순(조건 분기 확인 필요)')
         # 결정론적 게이트
-        if obligations['why_present'] and obligations['anchor_exists'] and obligations['evidence_resolves'] and obligations['graph_supports'] is not False and (f.get('layer') != '코드' or obligations['anchor_in_diff']):
+        if obligations['why_present'] and obligations['proposal_present'] and obligations['anchor_exists'] and obligations['evidence_resolves'] and obligations['graph_supports'] is not False and (f.get('layer') != '코드' or obligations['anchor_in_diff']):
             status = 'valid'
         elif obligations['graph_supports'] is False or not obligations['anchor_exists']:
             status = 'invalid' if not obligations['anchor_exists'] else 'inconclusive'

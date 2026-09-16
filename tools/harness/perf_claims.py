@@ -20,8 +20,12 @@ def analyze(body: str, anchor_file: str, anchor_line: int) -> List[Dict]:
            'MEAS-04': '1회 실행값은 캐시·호스트 부하 같은 기준선 오염과 개선을 구분할 수 없어, 개선이 잡음일 가능성을 배제하지 못한다.',
            'MEAS-05': '정확성이 성능보다 먼저다 — 회귀 테스트 근거가 없으면 빨라진 코드가 틀린 답을 내는지 아무도 확인하지 않은 상태로 머지된다.',
            'MEAS-07': '산포 없이는 0.9 배 개선과 1.1 배 회귀가 같은 잡음 폭 안일 수 있어, 표의 방향 자체를 믿을 수 없다.'}
+    PROP = {'MEAS-01': '본문에 측정 표를 추가: 워크로드·계약(버퍼/병렬도/핀)·warmup·반복 수·median·MAD. 예: `| q1 | before 32.2s (MAD 0.3) | after 15.3s (MAD 0.2) | 0.47 |`',
+            'MEAS-04': '반복 실행(최소 3회, median-of-N)으로 다시 재고 표에 N 을 적는다. 예: "warmup 1 + 5회 중앙값".',
+            'MEAS-05': '`/run all` 결과 또는 CTP sql/medium 실행 결과(코어 0, NOK 분류)를 본문 Verification 에 한 줄로. 예: "CTP sql 통과, medium NOK 2건은 기존 답안 차이".',
+            'MEAS-07': '표에 MAD(또는 표준편차/rep 별 값) 열을 추가한다. 예: `| q7 | 7.04 (MAD 0.05) | 7.75 (MAD 0.07) | 1.10 |` — 산포가 있어야 1.10 이 잡음 밖임이 보인다.'}
     def F(fid, rule, claim, ev):
-        return {'id': fid, 'layer': '설계', 'file': anchor_file, 'line': anchor_line, 'claim': claim, 'why': WHY[rule], 'evidence': [f'pr-body:{ev or 1}'], 'rule_ids': [rule], 'severity': 'non-blocking', 'auto': True}
+        return {'id': fid, 'layer': '설계', 'file': anchor_file, 'line': anchor_line, 'claim': claim, 'why': WHY[rule], 'proposal': PROP[rule], 'evidence': [f'pr-body:{ev or 1}'], 'rule_ids': [rule], 'severity': 'non-blocking', 'auto': True}
     if perf_claim and not table: out.append(F('MEAS-01-auto', 'MEAS-01', '성능 주장은 있는데 측정 표(타이밍/프로파일)가 본문에 없다 — 측정 먼저', perf_claim))
     if median and not disp: out.append(F('MEAS-07-auto', 'MEAS-07', '중앙값만 있고 산포(MAD/표준편차/rep 별 값)가 없다 — 개선폭이 잡음 범위 안인지 판정 불가', median))
     if table and not reps: out.append(F('MEAS-04-auto', 'MEAS-04', '측정 표에 반복 횟수(min-of-N/median-of-N/warmup) 언급이 없다 — 1회 실행값이면 기준선 오염을 구분 못 한다', table))

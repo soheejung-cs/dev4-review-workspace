@@ -96,7 +96,9 @@ def n_review_request(c, a):
 1. 아래 컨텍스트 팩만 읽는다. 팩에 없는 코드는 "없음"으로 적고 추측하지 않는다(다른 배치 참조 가능).
 2. 지적은 두 층으로 낸다 — **[코드 리뷰]**: 정확성·관문 짝·에러 경로·핫패스 비용(성능 규칙 ID 인용). **[설계 리뷰]**: 아래 불변조건·계층 간선(arch.json)·공유 자원 계약(설계 규칙 §4)·대안표·결정 요청 Q.
 3. 모든 지적에 **`why`(왜 문제가 되는지)** 를 쓴다 — 이대로 두면 누가/무엇이 어떻게 되는지(오답·정지·회복 불가·비결정성·발견 가능성), 근거(수치·규칙 ID·스펙 절). why 없는 지적은 판정에서 거절된다.
-3-1. 산출은 `findings.json`(스키마 아래) 하나. `layer` 는 '코드'|'설계', `evidence` 는 `file:line`(팩 안의 줄) 또는 `pr-body:N`, 성능 지적은 `rule_ids` 필수. 설계 지적은 `arch_edge` 인용.
+3-1. 모든 지적에 **`proposal`(제안 + 예시)** 를 쓴다 — 주석 관련이면 그대로 붙일 수 있는 확정 문구(게시 시 ```suggestion 블록), 코드면 스케치, 문서면 문구, 테스트면 TC 시나리오. "고쳐 달라"만 있는 지적은 판정에서 거절된다.
+3-2. **에러 우려**(데드락·크래시·누수·오답·UB·경합) 지적은 `verification` 을 채운다 — 하네스/이 세션이 무엇을 어떻게 확인했나(`static`: 관련 함수를 직접 읽어 순서·초기화 등을 확정 / `dynamic`: 빌드·재현 스크립트 실행 결과). 확인 없이 우려만 있으면 severity 를 `question` 으로 내린다.
+3-3. 산출은 `findings.json`(스키마 아래) 하나. `layer` 는 '코드'|'설계', `evidence` 는 `file:line`(팩 안의 줄) 또는 `pr-body:N`, 성능 지적은 `rule_ids` 필수. 설계 지적은 `arch_edge` 인용.
 4. 자동 finding(MEAS)이 있으면 그대로 두고 필요하면 `claim` 만 보강한다. 게시 문장은 사람처럼, 첫 줄에 층 표기 — 게시는 판정(adjudicate) 뒤 사용자 승인 후.
 
 ## 의무 항목 (매 리뷰 확인)
@@ -127,7 +129,11 @@ def n_review_request(c, a):
 def n_report(c, a):
     """findings.adjudicated.json → report.md (skills/code-review §5 형식의 골격: TL;DR·[설계 리뷰]·[코드 리뷰]·돌릴 것)."""
     res = c.get('adjudicated') or []
-    def fmt(r): return f"- `{r.get('file')}:{r.get('line')}` — {r.get('claim')}\n  - 왜 문제인가: {r.get('why', '(없음)')}\n  - status **{r.get('status')}**, {r.get('severity')}, rules {r.get('rule_ids') or '-'}" + (f"; {'; '.join(r.get('reasons'))}" if r.get('reasons') else '')
+    def fmt(r):
+        v = r.get('verification') or {}
+        return (f"- `{r.get('file')}:{r.get('line')}` — {r.get('claim')}\n  - 왜 문제인가: {r.get('why', '(없음)')}\n  - 제안: {r.get('proposal', '(없음)')}"
+                + (f"\n  - 검증: [{v.get('method')}] {v.get('result')}" + (f" ({v.get('artifact')})" if v.get('artifact') else '') if v else '')
+                + f"\n  - status **{r.get('status')}**, {r.get('severity')}, rules {r.get('rule_ids') or '-'}" + (f"; {'; '.join(r.get('reasons'))}" if r.get('reasons') else ''))
     valid = [r for r in res if r['status'] == 'valid']; inc = [r for r in res if r['status'] != 'valid']
     blocking = [r for r in valid if r.get('severity') == 'blocking']
     tl = 'Blocking' if blocking else ('Non-blocking' if valid else '작성자 확인 필요')

@@ -1,10 +1,12 @@
 { "$schema": "http://json-schema.org/draft-07/schema#", "title": "harness finding", "type": "object",
-  "required": ["id", "layer", "file", "line", "claim", "why", "evidence", "severity"],
+  "required": ["id", "layer", "file", "line", "claim", "why", "proposal", "evidence", "severity"],
   "properties": {
     "id": {"type": "string"}, "layer": {"enum": ["설계", "코드"]},
     "file": {"type": "string"}, "line": {"type": "integer", "minimum": 1},
     "claim": {"type": "string", "description": "한 문장: 결함 → 원인"},
     "why": {"type": "string", "minLength": 40, "description": "왜 문제가 되는지 — 이대로 두면 누가/무엇이 어떻게 되나(결과·영향 범위·발견 가능성). 근거(수치·규칙·스펙 절)를 함께"},
+    "proposal": {"type": "string", "minLength": 20, "description": "무엇을 어떻게 고치라는 제안 + 예시(주석 제안이면 확정 문구, 코드면 스케치, 문서면 문구, 테스트면 TC 시나리오). 주석 관련은 GitHub suggestion 으로 바로 적용 가능한 형태"},
+    "verification": {"type": "object", "description": "에러 우려(데드락·크래시·누수·오답·UB) 지적은 필수: 하네스가 확인한 방법과 결과", "properties": {"method": {"enum": ["static", "dynamic", "none"]}, "result": {"type": "string"}, "artifact": {"type": "string"}}, "required": ["method", "result"]},
     "evidence": {"type": "array", "items": {"type": "string", "pattern": "^([^:\\s]+|pr-body):\\d+"}, "minItems": 1},
     "rule_ids": {"type": "array", "items": {"type": "string", "pattern": "^[A-Z]{2,5}-\\d{2}$"}},
     "severity": {"enum": ["blocking", "non-blocking", "question"]},
