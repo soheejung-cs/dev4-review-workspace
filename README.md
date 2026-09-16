@@ -10,6 +10,10 @@
 | `dev4-ai-source` | CUBRID 소스 분석 지식(모듈별 §1~§4) + 소스 학습·기록 규약 |
 
 ```
+REVIEW-절차.md       접수→분류→읽기→구현/설계 리뷰→돌릴 것→CI/TC→판정→답글→기록 (스킬을 순서로 잇는 표)
+rules/
+  성능-리뷰-규칙.md   성능을 볼 때 여는 한 문서 — 레퍼런스 요약(ID 보존), 벤치 선택표, 측정 계약
+  설계-리뷰-규칙.md   설계를 볼 때 여는 한 문서 — 불변조건 5·컴포넌트·의존·동시성 등급·산출물 형식
 skills/
   code-review/       구현 리뷰 — 성능규칙집 18장 진입, 소스 지식 대조, 재현→수정→재검증
   design-review/     설계 리뷰 — 영역 판정 4단계, 계약 3요소, 대안표, 덱 구조, 결정 요청
@@ -17,6 +21,7 @@ skills/
   tc-analysis/       CI 실패 TC 3분류(출력차·코어·미상) — 코드 안 읽고 보고, 승인 후 출력차만 정렬
   gha-ci/            gha-ci 실패 분석 — collect 요약·failed.list·샤드 test-shell.xml, 코어는 아티팩트 서버(192.168.1.48:30080)+같은 SHA debug 빌드로 해석
   record/            기록 규약 — 무엇을 어디에 어떤 형식으로 (판단표)
+  review-testing/    리뷰 검증 규율 — 변경 유형별 CTP/동시성/JOB/TPC-H 선택, 컨테이너, 측정 계약
   review-board/      리뷰 보드 갱신 — review-to-do 웹 보드(8827) 생성·호스팅, 추적 ID 관리
 references/
   C-Cpp-성능규칙집.md        2568줄, 규칙 ID 로 인용. ~/.claude/성능규칙집.md 는 여기로의 심링크
