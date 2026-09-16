@@ -68,3 +68,9 @@ PR 본문 갱신은 `gh api -X PATCH repos/CUBRID/cubrid/pulls/<n> -F body=@file
 - `[코드 리뷰]` -- 정확성·메모리/래치 짝·로깅·에러 경로·핫패스 비용. 근거는 `파일:라인` + 규칙 ID.
 - 초안 형식: `N번 코멘트 -- [층] 본문`. 사용자 검토 후 게시.
 예: `examples/리뷰보고서-예시-PR7899.md` (Findings 를 두 층으로 나눈 보고서).
+
+## 게시 형태 (사용자 지시 2026-09-16)
+- **보고서는 게시하지 않는다.** 보고서(`리뷰보고서-PR<n>.md`)는 로컬·보드용이다.
+- 코멘트는 **코드 줄에 각각 인라인**으로 단다 — `POST /repos/CUBRID/cubrid/pulls/<n>/reviews` 에 `event: COMMENT`, `body: ""`, `comments[{path,line,side:RIGHT,body}]`. 설계 층 코멘트도 관련 코드 줄(구조체 필드·상수 정의·호출 지점)에 앵커한다.
+- 줄 번호는 diff 의 헌크 헤더로 계산한다(diff 줄 → 새 파일 줄). 예 스크립트: `examples/리뷰보고서-예시-PR7937.md` 의 게시 기록 참조.
+- 게시 후 스킬 `record` 대로 보고서·코멘트 기록.
