@@ -22,6 +22,7 @@ skills/
   gha-ci/            gha-ci 실패 분석 — collect 요약·failed.list·샤드 test-shell.xml, 코어는 아티팩트 서버(192.168.1.48:30080)+같은 SHA debug 빌드로 해석
   record/            기록 규약 — 무엇을 어디에 어떤 형식으로 (판단표)
   review-testing/    리뷰 검증 규율 — 변경 유형별 CTP/동시성/JOB/TPC-H 선택, 컨테이너, 측정 계약
+  oracle-reference/  Oracle 스펙 비교 — 요청 시에만, toc.md 매핑 후 해당 절만 읽기
   review-board/      리뷰 보드 갱신 — review-to-do 웹 보드(8827) 생성·호스팅, 추적 ID 관리
 references/
   C-Cpp-성능규칙집.md        2568줄, 규칙 ID 로 인용. ~/.claude/성능규칙집.md 는 여기로의 심링크
