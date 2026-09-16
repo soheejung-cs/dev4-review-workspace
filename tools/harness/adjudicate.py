@@ -136,8 +136,7 @@ def fill_importance(f: Dict) -> Dict:
     cat = f.get('category', ''); sev = f.get('severity', '')
     if sev == 'blocking': f['importance'] = '높음'
     elif cat in LOW_CATEGORIES: f['importance'] = '낮음'
-    elif cat == '버그 가능성' and (f.get('verification') or {}).get('method') in ('static', 'dynamic') and re.search(r'확인|재현|reproduc', (f.get('verification') or {}).get('result', '')): f['importance'] = '높음' if sev != 'question' else '중간'
-    else: f['importance'] = '중간'
+    else: f['importance'] = '중간'   # 확인된 버그라도 non-blocking(조용한 무동작·비결정성)이면 중간; 높음은 blocking 만
     return f
 
 def comment_header(f: Dict) -> str:
