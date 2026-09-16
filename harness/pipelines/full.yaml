@@ -1,0 +1,26 @@
+# 통합 하네스 — 한 번의 실행으로 코드 리뷰(성능 규칙) + 설계 리뷰(불변조건·계층·리스크) 입력을 만들고,
+# LLM 산출물(findings.json)이 오면 같은 명령이 판정·자기 보정·메모리 적재까지 이어간다.
+#   1) python3 -m tools.harness.run full --pr N                 → out/<pr>/<sha>/review_request.md (LLM 에 줄 단일 입력)
+#   2) LLM(이 에이전트)이 review_request.md 를 읽고 findings.json 을 쓴다 (harness/schemas/finding.json)
+#   3) python3 -m tools.harness.run full --pr N --findings out/<pr>/<sha>/findings.json → findings.adjudicated.json, requery.json, report
+harness: full
+executor: ".51"
+stages:
+  initialize:
+    worktree:    { impl: worktree }
+    diff_map:    { impl: diff_map }
+    codegraph:   { impl: codegraph, scope: changed+1 }
+  context:
+    pack:        { impl: pack, budget_tokens: 12000 }        # 변경 함수·그래프 증거·불변조건(설계)·규칙 행(성능)·episodic
+    perf_claims: { impl: perf_claims }                       # PR 본문 → MEAS 자동 finding
+  infer:
+    arch:        { impl: arch }                              # 계층 유추·리스크·다이어그램 (설계 층 입력)
+  request:
+    review_request: { impl: review_request }                 # 위 전부 + 두 규칙의 §2 의무 항목 + 산출 스키마 → review_request.md (배치별)
+  verify:                                                    # --findings 가 있을 때만
+    validate:    { impl: validate, when: findings, merge_auto: true }
+    gate:        { impl: gate, when: findings }
+    self_check:  { impl: self_check, when: findings }
+    report:      { impl: report, when: findings }            # findings.adjudicated.json → report.md (TL;DR·[설계 리뷰]/[코드 리뷰]·돌릴 것)
+  memory:
+    episodic:    { impl: episodic, when: findings, reviewer: soheejung-cs }

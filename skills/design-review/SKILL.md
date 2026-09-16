@@ -50,4 +50,4 @@ description: 변경이 있어야 할 자리에 있는가를 묻는 설계 리뷰
 `projects/CBRD-XXXXX/세션기록-*.md` 의 결정 상태 표를 갱신한다(`record` 스킬).
 
 ## 하네스로 시작하기 (2026-09-16)
-리뷰 전에 `python3 -m tools.harness.run design --pr <n>` 을 돌려 `out/<pr>/<sha>/context_pack.md`(변경 함수·그래프 증거·관문 짝·경로·규칙 행)를 먼저 읽는다. 지적은 `harness/schemas/finding.json` 형식으로 적고 `run adjudicate --findings` 로 판정한 뒤 보고서에 옮긴다. 설계: `arch.json`/`arch.mmd` 의 계층 간선과 리스크를 인용한다. 상세 `harness/ARCHITECTURE.md`.
+리뷰 전에 `python3 -m tools.harness.run full --pr <n>` 을 돌려 `out/<pr>/<sha>/review_request[.batchN].md` 를 읽는다(코드+설계+성능 입력이 한 파일: 지시·의무 항목·자동 MEAS·arch 요약·팩). 지적은 `findings.json`(스키마 `harness/schemas/finding.json`, `layer` 로 코드/설계 구분) 으로 쓰고 `run full --pr <n> --findings <파일>` 로 판정·report.md·episodic 까지 이어간 뒤 보고서를 다듬는다. 설계: `arch.json`/`arch.mmd` 의 계층 간선과 리스크를 인용한다. 상세 `harness/ARCHITECTURE.md`.

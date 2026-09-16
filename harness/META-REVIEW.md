@@ -11,6 +11,9 @@
 | 3. DB Lifecycle & Resource Management | 2.5 | **3.9** | `session.ServerSession`(with): conf 디렉터리·`databases.txt` 스냅샷 → 격리 포트 → 기동, `__exit__` 에서 stop·복원·`cleanup_leftovers()`(고아 `cub_cas/cub_server` 만, `pgrep -x`). `harness/templates/repro.sh`: 버릴 DB·랜덤 포트·`trap cleanup EXIT INT TERM`(stop·deletedb·conf 복원)·판정은 `$OUT` 파일. `reachability.latch_pairing_by_var()`: **변수 단위** fix/unfix·alloc/free·lock/unlock 짝, 반환·out-param 소유권 이전 제외 → 카운트 방식의 `qo_env_new` 오탐 제거. | 7899 `btree_compact_fix_leaf`: `page`/`child_page` 각각 fix→unfix 대응 확인(facts.var). **−0.1**: 조건 분기(CFG) 를 따라가진 않음 — 후보 표시까지 |
 | 4. Verification & Self-Correction Loop | 1.5 | **3.8** | `adjudicate.validate_findings()`(jsonschema, `finding.json`) → 실패는 `requery.json` 으로(이유 포함); `dedup()`; `adjudicate()` 의무 5개; `repro_obligation()`: valid+blocking 코드 finding 은 `projects/<JIRA>/repro/*` 또는 `graph_supports=True` 없으면 **non-blocking 강등**; `self_check_build()`(-fsyntax-only, compile_commands 경로 환경변수); `perf_claims.analyze()`: PR 본문에서 MEAS-01/04/05/07 자동 finding(layer=설계, evidence `pr-body:N`); `episodic.collect()`: 게시된 코멘트·작성자 응답을 accepted/rebutted/open 으로 적재 → 다음 팩에 주입. | 7937 adjudicate: 3 ok/0 schema fail, F2(diff 밖 anchor+미지 규칙 ID) → inconclusive → `requery.json` 1건; 7658 본문 → `MEAS-07-auto`(중앙값만, 산포 없음) 정확히 1건(v1 정규식은 MEAS-01 오탐). **−0.2**: 재질의 자체(LLM 호출)는 러너 밖; self_check 는 이 컨테이너에 compile_commands 가 없어 `ran=False` |
 
+## v2.1 — 통합(full)
+`run full` 하나가 리뷰+설계+성능+판정+메모리를 잇는다. 사용자 질문 "리뷰용 하네스가 된 게 맞나 / 설계·성능도 같이 되나"에 대한 답: v2 까지는 세 명령이 따로였고 LLM 단계가 밖이었다. v2.1 은 LLM 에 줄 입력(`review_request.md`)을 러너가 만들고 산출물을 같은 명령이 받아 판정·보고서까지 만든다. LLM 호출 자체는 여전히 이 에이전트가 수행한다(러너 안에 API 호출 없음 — 의도적: 결정론 기록과 사람 승인 지점을 지키기 위해).
+
 ## 남은 한계 (정직하게)
 - LLM 호출은 여전히 하네스 밖 — 러너는 산출물 파일로만 소통한다. 결정론은 "입력이 같으면 같은 팩·같은 판정"까지고, 모델 출력의 재현은 `model_id` 기록으로 추적만 한다.
 - `gate-imbalance`/`latch_pairing_by_var` 는 함수 내 선형 근사. `if/goto` 경로별 검사(CFG)는 다음 단계.

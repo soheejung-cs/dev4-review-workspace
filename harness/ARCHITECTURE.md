@@ -80,7 +80,10 @@ with Worktree(repo, sha, base) as wt:      # git worktree add --detach; __exit__
 ```
 DB 서버·CTP 는 이 CLI 가 띄우지 않는다(`review-testing` 스킬의 요청자 확인 절차). 띄우게 되면 같은 패턴의 `ServerSession` 컨텍스트 매니저로 기동/정지·`databases.txt` 복원·conf 복원을 묶는다(META-REVIEW §3 의 리팩토링 항목).
 
-## 5. 두 하네스의 경계
+## 5. 통합 실행(full) 과 두 층의 경계
+`run full --pr N` 은 리뷰용·설계용을 **한 번**에 돈다: initialize → context(성능 규칙 행 + 설계 불변조건 + episodic) → infer(arch) → **review_request.md**(LLM 단일 입력: 지시·두 규칙의 의무 항목·자동 MEAS finding·arch 요약·finding 스키마·컨텍스트 팩, 배치별) → [LLM 이 findings.json 작성] → `--findings` 로 verify(validate→gate→self_check→report.md) → memory(episodic). 층 구분은 finding 의 `layer` 필드와 게시 코멘트 첫 줄 태그로만 남는다. review/design/adjudicate yaml 은 이 그래프의 부분집합이다(디버그용).
+
+### 두 층의 경계(finding 단위)
 | | 리뷰용(review) | 설계용(design) |
 |---|---|---|
 | 입력 | PR diff | PR diff 또는 설계 문서(`--doc`, Azure 식 텍스트 유추는 후속) |

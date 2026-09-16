@@ -3,7 +3,8 @@
 ```
 dev4-review-workspace/
   harness/
-    pipelines/review.yaml     리뷰용 실행 그래프 (initialize → context → review(LLM) → adjudicate → publish)
+    pipelines/full.yaml       **통합** 실행 그래프 — 리뷰(성능 규칙)+설계(불변조건·계층·리스크)+판정·메모리를 한 명령으로
+    pipelines/review.yaml     (부분집합) 리뷰용 실행 그래프 (initialize → context → review(LLM) → adjudicate → publish)
     pipelines/design.yaml     설계용 실행 그래프 (+ infer: 아키텍처 유추·리스크·다이어그램)
     pipelines/adjudicate.yaml LLM 산출물 판정 + 자기 보정(validate→gate→self_check→episodic)
     templates/repro.sh        재현 스크립트 템플릿(trap 정리·격리 포트)
@@ -15,9 +16,15 @@ dev4-review-workspace/
 dev4-tc-workspace/            TC 변경·CI 실패 분석(tc-analysis, gha-ci, shell TC 인덱스) — 리뷰 하네스와 분리
 ```
 
-## 실행
+## 실행 — 통합(권장)
 ```
 cd ~/dev/docs/dev4-review-workspace
+python3 -m tools.harness.run full --pr 7937                        # 1) 코드+설계+성능 입력 한 번에: review_request[.batchN].md, arch.json, findings.auto.json
+#   2) LLM(이 에이전트)이 review_request*.md 를 읽고 out/<pr>/<sha>/findings.json 을 쓴다 (스키마 harness/schemas/finding.json)
+python3 -m tools.harness.run full --pr 7937 --findings <out>/findings.json   # 3) 검증→판정→requery.json→report.md→episodic
+```
+부분 실행(디버그용):
+```
 python3 -m tools.harness.run review --pr 7937            # out/<pr>/<sha>/{codegraph.sqlite3, context_pack.md, manifest.json}
 python3 -m tools.harness.run design --pr 7899            # + arch.json, arch.mmd, arch.excalidraw
 python3 -m tools.harness.run adjudicate --pr 7937 --findings findings.json   # 스키마 검증→판정→requery.json→episodic 적재

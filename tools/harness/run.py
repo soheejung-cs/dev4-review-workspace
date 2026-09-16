@@ -4,7 +4,7 @@ import argparse, os
 from . import pipeline
 
 def main(argv=None):
-    ap = argparse.ArgumentParser(); ap.add_argument('mode', choices=['review', 'design', 'adjudicate'])
+    ap = argparse.ArgumentParser(); ap.add_argument('mode', choices=['full', 'review', 'design', 'adjudicate'], help='full = 리뷰+설계+성능 통합(권장); 나머지는 부분집합')
     ap.add_argument('--pr', type=int, required=True); ap.add_argument('--repo', default=os.path.expanduser('~/dev/sources/cubrid'))
     ap.add_argument('--out', default=os.path.expanduser('~/dev/utils/harness-out')); ap.add_argument('--findings'); ap.add_argument('--model')
     a = ap.parse_args(argv)
