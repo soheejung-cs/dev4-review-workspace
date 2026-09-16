@@ -25,5 +25,10 @@
     "CUBRID/cubrid",
     "CUBRID/cubrid-testcases",
     "CUBRID/cubrid-testcases-private-ex"
-  ]
+  ],
+  "agent_github": [
+    "soheejung-cs"
+  ],
+  "agent_marker": "Claude-Session:|Generated with \\[Claude Code\\]|session_01[0-9A-Za-z]{6,}",
+  "_comment_agent": "agent_github: 이 에이전트(Claude 세션)가 리뷰를 게시하는 GitHub 로그인. 팀 공유 계정으로 바꾸면 여기만 고친다. agent_marker: 본문에 이 정규식이 있으면 로그인이 달라도 에이전트 리뷰로 센다."
 }

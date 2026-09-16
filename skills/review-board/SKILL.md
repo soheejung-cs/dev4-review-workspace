@@ -12,7 +12,8 @@ description: 리뷰 보드 갱신 — review-to-do 웹 보드(http://192.168.6.5
 - 리뷰어: 최신 리뷰 상태(✓ APPROVED · ✗ CHANGES_REQUESTED · … COMMENTED), **응답 대기(요청됐지만 아직 리뷰 안 함)**, reviewDecision
 - CI 요약(`Check TC PRs` 는 규약상 무시), 갱신·생성일
 - **이 컨테이너에 있는 리뷰 문서**: `claude-workspace/projects/<JIRA키>/`, `dev4-review-workspace/examples|reviews` 에서 JIRA 키·PR 번호로 찾은 것(file:// 링크)
-- 연결된 TC PR(`cubrid#<n> in:title`, draft 표시)
+- **에이전트 리뷰 여부**: `roster.json` 의 `agent_github` 로그인(또는 본문에 `agent_marker` 정규식)이 남긴 리뷰·인라인 코멘트·이슈 코멘트 건수와 마지막 날짜. **팀 공유 계정으로 돌리면 `agent_github` 만 그 계정으로** 바꾼다. 지금은 `soheejung-cs` 라 사용자 본인의 코멘트도 함께 세어진다(공유 계정 전환 전 한계).
+- 연동된 TC PR: JIRA 키(또는 제목의 `cubrid#<n>`)가 같은 testcases / private-ex PR 을 엔진 PR 하위에 붙인다 — 미해결 수·대기 리뷰어 포함
 
 ## 갱신
 ```bash
@@ -31,6 +32,7 @@ python3 ~/dev/docs/dev4-review-workspace/tools/review_board_gen.py [out_dir]   #
 - 미해결 > 0 이고 마지막 리뷰가 CHANGES_REQUESTED → **작성자가 움직일 차례**.
 - 미해결 = 0 이고 "대기" 필이 있으면 → **리뷰어가 움직일 차례**(응답 재촉 대상).
 - CI FAIL 은 `build/test_*` 만 실제 문제, `Check TC PRs` 는 무시(PR브랜치-규칙 §5).
+- "에이전트 리뷰: 아직" 이면서 리뷰어 대기에 에이전트 계정이 있으면 → **이 세션이 움직일 차례**(`code-review` → `review-response`).
 - 리뷰 문서가 "없음"인 PR 을 리뷰하게 되면 먼저 `record` 스킬대로 `projects/<JIRA키>/` 를 만든다.
 
 ## 한계
