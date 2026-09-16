@@ -9,7 +9,7 @@
 | 2 | **읽을 것** | 손대는 모듈의 `dev4-ai-source/modules/<모듈>.md` §2·§3 + `AGENTS.md`(pull 먼저). 성능 경로면 `rules/성능-리뷰-규칙.md` §2 의무 항목·해당 축 표. 필요 시 `references/`·`imports/xmilex-git/` | `skills/code-review` §1 | 이미 아는 함정 목록 |
 | 3 | **구현 리뷰** | 재현 → 원인 → 수정(내 PR) → 재검증(release·debug). 반대 방향도 묻는다. 규칙은 ID 로 인용 | `skills/code-review` | 재현 스크립트, 지적 목록 |
 | 4 | **설계 리뷰** (신호 있을 때) | 영역 판정 4단계 → 불변조건·의존 방향·3요소 계약 → 대안표 → 결정 요청 | `rules/설계-리뷰-규칙.md`, `skills/design-review` | 판정 문장, 대안표, (필요 시) 덱 |
-| 5 | **돌릴 것** | 변경 유형 매트릭스로 CTP/동시성/JOB/TPC-H 선택, 어느 컨테이너·계약으로 | `skills/review-testing` | 결과 표(시나리오/전/후) |
+| 5 | **돌릴 것** | 변경 유형 매트릭스로 CTP/동시성/JOB/TPC-H 를 **제안** → 리뷰 요청자 확인 후 실행(어느 컨테이너·계약으로) | `skills/review-testing` | 결과 표(시나리오/전/후) |
 | 6 | **CI·TC** | gha-ci 실패는 collect 요약→3분류; 코어는 아티팩트 서버+debug 빌드로 해석; TC 답안 변경은 의도 기준·사유 코멘트 | `skills/gha-ci`, `skills/tc-analysis`, `tools/tc_relevance.py` | 분류표 |
 | 7 | **판정** | 코어 0 · 시나리오 PASS · 측정 계약 준수 · 의무 체크리스트 통과 · 설계 결정 요청 답변 → 승인/변경요청/설계 재검토 | 위 규칙 문서 두 개 | 판정 한 줄 + 근거 |
 | 8 | **답글** | "N번 코멘트 — 본문" 초안 → **사용자 검토** → 게시. 봇만 resolve. 사람처럼, 서술형, 원문 용어 유지, CTP 수치 금지 | `skills/review-response` | 게시된 답글 |
