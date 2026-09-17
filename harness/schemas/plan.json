@@ -1,0 +1,17 @@
+{ "$schema": "http://json-schema.org/draft-07/schema#", "title": "harness implementation plan", "type": "object",
+  "required": ["key", "area", "invariants", "tier", "sharing", "summary", "alternatives", "changes", "tests"],
+  "properties": {
+    "key": {"type": "string", "description": "CBRD-n"},
+    "area": {"type": "string", "description": "이건 [X] 영역 작업이므로 ~를 고려해야 한다 — 한 문단"},
+    "invariants": {"type": "array", "items": {"type": "object", "required": ["id", "touched", "why"], "properties": {"id": {"enum": ["INV-1", "INV-2", "INV-3", "INV-4", "INV-5"]}, "touched": {"type": "boolean"}, "why": {"type": "string"}}}, "minItems": 5},
+    "tier": {"enum": ["Tier-0", "Tier-1", "Tier-2", "n/a"]},
+    "sharing": {"type": "object", "required": ["kind"], "properties": {"kind": {"enum": ["isolated", "shared"]}, "grade": {"enum": ["S", "A", "B", "C"]}, "invariant": {"type": "string"}, "allowed_concurrency": {"type": "string"}, "relaxation": {"type": "string"}}},
+    "summary": {"type": "string", "minLength": 40, "description": "무엇을 어떻게 고치나 + 비유 한 줄"},
+    "alternatives": {"type": "array", "minItems": 2, "items": {"type": "object", "required": ["name", "pros", "why_not_or_chosen"], "properties": {"name": {"type": "string"}, "pros": {"type": "string"}, "why_not_or_chosen": {"type": "string"}, "chosen": {"type": "boolean"}}}},
+    "external": {"type": "string", "description": "PG/InnoDB/Oracle 은 같은 문제를 어떻게 하나"},
+    "changes": {"type": "array", "minItems": 1, "items": {"type": "object", "required": ["file", "function", "what", "why"], "properties": {"file": {"type": "string"}, "function": {"type": "string"}, "what": {"type": "string"}, "why": {"type": "string"}, "gate_contract": {"type": "string", "description": "잡는 것/놓는 곳/에러 경로 — 관문(latch·lock·log·alloc)을 건드리면 필수"}, "rule_ids": {"type": "array", "items": {"type": "string", "pattern": "^[A-Z]{2,5}-\\d{2}$"}}}}},
+    "tests": {"type": "array", "minItems": 1, "items": {"type": "object", "required": ["name", "scenario", "expect"], "properties": {"name": {"type": "string"}, "scenario": {"type": "string"}, "expect": {"type": "string"}, "kind": {"enum": ["sql", "shell", "medium", "concurrency", "bench"]}}}},
+    "regression_risks": {"type": "array", "items": {"type": "string"}},
+    "needs_more_context": {"type": "array", "items": {"type": "string"}, "description": "팩 밖이라 봐야 하는 함수/파일 — 비어 있지 않으면 구현으로 가지 않는다"},
+    "questions": {"type": "array", "items": {"type": "string"}, "description": "사용자 결정이 필요한 닫힌 질문"}
+  } }

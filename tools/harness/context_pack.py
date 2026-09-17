@@ -91,8 +91,10 @@ def _episodic(examples_dir: str, files: Set[str]) -> str:
                 rows.append(f"- [{e.get('outcome','open')}] PR#{e.get('pr')} {e['file']}:{e.get('line')} — {e.get('claim','')[:160]}")
     return '\n'.join(rows[:20])
 
-def build(repo: str, g: CodeGraph, diff_text: str, rules_dir: str, budget: int = 12000, examples_dir: str = '') -> ContextPack:
-    changed = parse_unified_diff(diff_text)
+def build(repo: str, g: CodeGraph, diff_text: str, rules_dir: str, budget: int = 12000, examples_dir: str = '',
+          changed: Dict[str, List[int]] = None, label: str = 'changed function') -> ContextPack:
+    """changed: 미리 계산한 {file: [lines]} (구현 팩처럼 diff 가 없을 때). 없으면 diff_text 를 파싱한다."""
+    changed = changed if changed is not None else parse_unified_diff(diff_text)
     pack = ContextPack(budget=budget)
     seen_text: Set[str] = set()
     struct_refs: Set[str] = set(); axes: Set[str] = set(); sigs: List[str] = []
@@ -108,7 +110,7 @@ def build(repo: str, g: CodeGraph, diff_text: str, rules_dir: str, budget: int =
             if fn.end_line - fn.start_line > 400:   # 거대 함수: 변경 줄 ±40 만
                 ls = [l for l in changed[file] if fn.start_line <= l <= fn.end_line]
                 body = _slice(repo, fn.file, min(ls) - 40, max(ls) + 40) + f'\n      ... ({fn.end_line-fn.start_line} lines total, showing changed window)'
-            pack.sections.append(Section(f'changed function {fn.fid} [{fn.start_line}-{fn.end_line}]', '```c\n' + body + '\n```', 1))
+            pack.sections.append(Section(f'{label} {fn.fid} [{fn.start_line}-{fn.end_line}]', '```c\n' + body + '\n```', 1))
             facts = g.facts(fn.fid); pair = R.latch_pairing(g, fn.fid); byvar = R.latch_pairing_by_var(g, fn.fid)
             for k, _, _ in facts: axes |= AXIS_BY_FACT.get(k, set())
             gates = R.paths_to_gates(g, fn.fid, ('latch_fix', 'lock_acquire', 'log_append', 'sysop_start'))
