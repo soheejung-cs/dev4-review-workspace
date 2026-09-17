@@ -15,7 +15,11 @@ def analyze(body: str, anchor_file: str, anchor_line: int) -> List[Dict]:
     median = ln(r'median|중앙값')
     disp = ln(r'\bMAD\b|표준편차|stddev|σ|rep\s*별|편차')
     reps = ln(r'\d+\s*회|min-of-|median-of-|warm-?up|\d+\s*runs?|\d+\s*반복|반복\s*\d+')
-    ctp = ln(r'\bCTP\b|/run all|test_sql|test_medium|test_shell|sql\s*/\s*medium|regression suite|회귀 테스트|회귀 검증')
+    def ln_unless(pat, deferral):   # 같은 줄에 유보 표현("별도 실행합니다", "예정")이 있으면 근거로 치지 않는다 (.52 2026-09-17, PR#7900 본문)
+        for i, l in enumerate(lines, 1):
+            if re.search(pat, l, re.I) and not re.search(deferral, l): return i
+        return 0
+    ctp = ln_unless(r'\bCTP\b|/run all|test_sql|test_medium|test_shell|sql\s*/\s*medium|regression suite|회귀 테스트|회귀 검증', r'별도\s*실행|예정|아직|미실행|추후|나중에|돌릴')
     WHY = {'MEAS-01': '측정 없는 성능 주장은 머지 뒤 회귀가 나도 기준선이 없어 원인을 되짚을 수 없고, 리뷰어가 코드만 읽고 "빨라 보인다"에 동의하는 것은 근거가 아니다.',
            'MEAS-04': '1회 실행값은 캐시·호스트 부하 같은 기준선 오염과 개선을 구분할 수 없어, 개선이 잡음일 가능성을 배제하지 못한다.',
            'MEAS-05': '정확성이 성능보다 먼저다 — 회귀 테스트 근거가 없으면 빨라진 코드가 틀린 답을 내는지 아무도 확인하지 않은 상태로 머지된다.',
