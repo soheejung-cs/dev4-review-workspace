@@ -10,12 +10,12 @@ def analyze(body: str, anchor_file: str, anchor_line: int) -> List[Dict]:
         for i, l in enumerate(lines, 1):
             if re.search(pat, l, re.I): return i
         return 0
-    perf_claim = ln(r'빠르|느리|개선|회귀|speed|faster|slower|regress|wall[- ]?time|throughput|tps')
-    table = ln(r'^\|.*(median|중앙값|ms|초|s\b).*\|') or ln(r'\d+(\.\d+)?\s*(초|ms|s\b|sec)')   # 표 또는 단위 붙은 수치
+    perf_claim = ln(r'빠르|빨라|느리|느려|개선|회귀|향상|단축|처리율|성능|붕괴|회복|병목|경합|\d+\s*배|speed|faster|slower|regress|wall[- ]?time|throughput|tps|latency|timeout')   # 한국어 활용형(빨라·느려)·성능 명사도 잡는다 (.52 2026-09-17)
+    table = ln(r'^\|.*(median|중앙값|ms|초|s\b|배|%).*\|') or ln(r'\d+(\.\d+)?\s*(초|ms|s\b|sec|분\b|시간|배|%|건/초|rows?/s)')   # 표 또는 단위 붙은 수치 (한국어 단위 배·%·건/초·분·시간 포함)
     median = ln(r'median|중앙값')
     disp = ln(r'\bMAD\b|표준편차|stddev|σ|rep\s*별|편차')
-    reps = ln(r'\d+\s*회|min-of-|median-of-|warm-?up|\d+\s*runs?')
-    ctp = ln(r'\bCTP\b|/run all|test_sql|test_shell|sql\s*/\s*medium|regression suite')
+    reps = ln(r'\d+\s*회|min-of-|median-of-|warm-?up|\d+\s*runs?|\d+\s*반복|반복\s*\d+')
+    ctp = ln(r'\bCTP\b|/run all|test_sql|test_medium|test_shell|sql\s*/\s*medium|regression suite|회귀 테스트|회귀 검증')
     WHY = {'MEAS-01': '측정 없는 성능 주장은 머지 뒤 회귀가 나도 기준선이 없어 원인을 되짚을 수 없고, 리뷰어가 코드만 읽고 "빨라 보인다"에 동의하는 것은 근거가 아니다.',
            'MEAS-04': '1회 실행값은 캐시·호스트 부하 같은 기준선 오염과 개선을 구분할 수 없어, 개선이 잡음일 가능성을 배제하지 못한다.',
            'MEAS-05': '정확성이 성능보다 먼저다 — 회귀 테스트 근거가 없으면 빨라진 코드가 틀린 답을 내는지 아무도 확인하지 않은 상태로 머지된다.',
