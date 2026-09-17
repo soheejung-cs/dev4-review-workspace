@@ -32,6 +32,7 @@ skills/
   harness-implement/ **/harness-implement <CBRD-n>** — 구현 하네스(implement_pack → plan.json 승인 → 구현 → implement_gate → 자기 리뷰 → PR)
   design-doc/        **/design-doc <CBRD-n|증상>** — 증상 인터뷰 5라운드로 설계문서를 함께 쓴다(영역 판정·대안표·결정 Q)
   review-board/      리뷰 보드 갱신 — review-to-do 웹 보드(8827) 생성·호스팅, 추적 ID 관리
+  review-recommend/  리뷰어 추천 — 머지 PR 모듈 관심도 × 난이도(1/2/3명, 학습 슬롯) × 보드 부하 (tools/review_recommend.py)
 references/
   oracle-manual/     → private 리포 dev4-oracle-manual 포인터(Oracle 문서는 재배포 제한). 읽는 규약 skills/oracle-reference
 
