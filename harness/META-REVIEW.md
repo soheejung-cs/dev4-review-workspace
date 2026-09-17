@@ -22,3 +22,13 @@
 
 ## 유지할 것
 규칙 ID 인용 · 세 원칙(재현/측정/승인 없이 ~하지 않는다) · 보드 공개 · "설계용/리뷰용 분리, 레퍼런스 공유, TC 별도" 구조.
+
+## 놓친 지적 사례 — PR#7937 (2026-09-17, 타 리뷰어 대조)
+같은 head(`02f49316d`) 에 shparkcubrid 가 4건을 올렸다. 하네스 2차(6 findings, 전부 non-blocking) 와 대조: **놓침 2, 동일 1, 범위 밖 1**. 상세 `claude-workspace/projects/CBRD-27186/리뷰대조-PR7937-shparkcubrid-20260917.md`.
+
+| 놓친 것 | 원인 | 하네스에 내릴 것 |
+|---|---|---|
+| 자식 2·부모 1 이 한 스텝에서 연결되면 FK 바닥이 1/N² (card 10000→1, 🔴) | 작성자 프레임(self-ref 두 제약) 만 감사, `else` 분기의 "eqclass 에 다른 누가 있나" 를 안 물음, `question` 으로 두고 재현 생략 | 카디널리티·선택도 모델 변경(`planner_visit_node`, `qo_*_selectivity*`) 이 diff 에 있으면 **조인 형상 체크리스트**(자식1·부모1 / 자식2·부모1 같은 스텝 / 자식1·부모2 / 체인 / self-ref / semi·anti / outer) 를 불변조건 절에 주입하고, "과소·과대 추정" finding 은 severity 가 question 이어도 **repro 의무** 대상으로 |
+| `er_set(ER_OUT_OF_VIRTUAL_MEMORY)` 뒤 `continue` (🟡) | 에러 경로를 콜드패스로 후순위 — 성능 규약을 정확성 축까지 확대 적용 | diff 한정 린트: `er_set(` 다음 문장이 `return`/`goto` 가 아니면 `error-path-continues` 리스크. `gate-imbalance` 와 나란히 |
+
+교훈 한 줄: **PG 규칙을 인용했으면 CUBRID 코드의 어느 줄에서 그 규칙이 깨지는지 대응시켜라** — N2 는 punt 규칙을 정확히 알고도 self-ref 에만 붙였다.
