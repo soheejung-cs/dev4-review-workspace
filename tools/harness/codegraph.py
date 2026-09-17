@@ -131,9 +131,16 @@ class CtagsProvider:
         out = subprocess.run(['ctags', '-x', '--c-kinds=f', '--c++-kinds=f', os.path.join(repo, rel)], stdout=subprocess.PIPE, universal_newlines=True).stdout
         funcs = []
         for ln in out.splitlines():
-            parts = ln.split(None, 3)
-            if len(parts) >= 3:
-                funcs.append(FunctionNode(f'{rel}:{parts[0]}', parts[0], rel, int(parts[2]), int(parts[2]), '', False))
+            # ctags -x: "<name> <kind> <line> <file> ..." -- but a C++ `operator ==` splits the name
+            # in two, so take the first purely numeric field after the kind as the line number
+            parts = ln.split()
+            try:
+                k = parts.index('function')
+                line_no = int(parts[k + 1])
+            except (ValueError, IndexError):
+                continue
+            name = ' '.join(parts[:k])
+            funcs.append(FunctionNode(f'{rel}:{name}', name, rel, line_no, line_no, '', False))
         return funcs, [], [], [], []
 
 class CodeGraph:
