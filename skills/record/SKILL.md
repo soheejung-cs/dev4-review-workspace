@@ -13,6 +13,7 @@ description: 세션에서 나온 것을 어디에 어떤 형식으로 남기는�
 | 리뷰 답글 원문, 설계 리뷰 덱, 재현 스크립트, 결정 상태 | `claude-workspace/projects/CBRD-XXXXX/` (**프로젝트 디렉터리는 옮기지 않는다**) | `세션기록-YYYYMMDD.md`, `repro/*.sh`, `설계리뷰-덱.html`, `prNNNN_*.md` |
 | **검증된 코드 사실**(함수 계약, 락 수준, 카탈로그 스키마, 함정) | `dev4-ai-source/staging/환류대기.md` → 모듈 `§2·§3` | 출처 컨테이너 + 기준 리비전, 미수정 상태 명시 |
 | **일하는 방식**(재현 순서, 문체, 사용자 지시) | 리뷰 방식이면 **이 리포 `skills/*/SKILL.md`**, 그 외는 `claude-workspace/memory/rules|howto` | 지시 날짜와 Why |
+| **리뷰가 잡아준 것**(지적 → 검증 → 고침 → 일반화) | **`references/리뷰에서-배운것.md`** — 답글 게시와 한 세트 (`review-response` §7) | 최신이 위로, 항목마다 ①지적 ②검증 ③고친 것 ④일반화 |
 | 재발 방지가 중요한 **환경 함정** | `claude-workspace/공통-CLAUDE.md` 함정 절(세 컨테이너 공통) 또는 `hosts/<ip>.md` | 실측 날짜·컨테이너 |
 | 진행 상태 | agent-todo 보드 카드 코멘트 + `worklog: YYYY-MM-DD` 1줄 | `- [영역] 한 일 (링크) — session_ID앞8자` |
 | 설계·분석 문서 | `projects/CBRD-XXXXX/설계문서.md` (+ `projects/현황.md` 행) | `projects/문서규약.md` |
