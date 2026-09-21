@@ -13,7 +13,7 @@
 추천만 한다 — reviewer 지정(gh pr edit --add-reviewer) 은 사람이 한다.
 python 3.6 호환(이 컨테이너 기본).
 """
-import argparse, datetime, json, os, subprocess, sys
+import argparse, datetime, json, os, re, subprocess, sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROSTER = os.path.join(HERE, 'roster.json')
@@ -27,7 +27,8 @@ DEFAULT_CFG = {
     'hard_dirs': ['src/storage', 'src/transaction', 'src/query', 'src/optimizer', 'src/thread', 'src/connection',
                   'src/communication', 'src/replication', 'src/parser'],
     'hard_files': ['btree', 'heap', 'log_', 'lock_', 'mvcc', 'page_buffer', 'pgbuf', 'xasl', 'scan', 'vacuum'],
-    'hard_title': ['refactor', 'parallel', 'lock', 'mvcc', 'deadlock', 'latch', 'crash', 'concurren', 'recovery', '동시', '교착'],
+    'hard_title': ['refactor', 'parallel', 'lock', 'mvcc', 'deadlock', 'latch', 'crash', 'concurren', 'recovery',
+                   'race', 'barrier', 'atomic', 'volatile', '동시', '교착', '경쟁'],
     'easy_title': ['typo', 'backport', 'doc', 'comment', 'message', 'rename', '오타', '주석', '메시지'],
     # 종합 점수 가중치와 부하 공평성
     'w_interest': 0.6, 'w_load': 0.4,
@@ -155,6 +156,31 @@ def dir_of(path, depth=2):
 
 
 # ---------------------------------------------------------------- 2. 난이도
+def _kw_hits(text, keys):
+    """제목 키워드 매칭. ASCII 키워드는 **단어 경계**로 본다 — 부분문자열로 보면
+    `lock` 이 `CLOCK_MONOTONIC`·`string block search` 에, `comment` 가 "post a PR comment" 에 걸린다.
+    실측(2026-09-21, 머지 PR 100건): 제목 키워드 ±1 하나가 tier 를 바꾼 PR 이 8건이었다.
+    한글 키워드는 단어 경계 개념이 없으므로 부분 일치를 유지한다."""
+    hits = []
+    for k in keys:
+        if all(ord(ch) < 128 for ch in k):   # 3.6 호환 (str.isascii 는 3.7+)
+            if re.search(r'(?<![a-z0-9])%s(?![a-z0-9])' % re.escape(k), text): hits.append(k)
+        elif k in text:
+            hits.append(k)
+    return hits
+
+def _hard_file_hits(path, keys):
+    """파일 키워드. `log_`·`lock_` 처럼 밑줄로 끝나는 키는 **basename 접두**로만 본다 —
+    부분문자열이면 `catalog_class.c` 가 `log_` 에 걸린다(실측). 나머지는 토큰 경계."""
+    b = os.path.basename(path).lower()
+    out = []
+    for k in keys:
+        if k.endswith('_'):
+            if b.startswith(k): out.append(k)
+        elif re.search(r'(?:^|[_.\-])%s(?:[_.\-]|$)' % re.escape(k), b):
+            out.append(k)
+    return out
+
 def difficulty(pr, cfg):
     size = pr['add'] + pr['del']
     dirs = set(dir_of(f) for f in pr['files'])
@@ -166,14 +192,16 @@ def difficulty(pr, cfg):
     d = 0 if len(dirs) <= 1 else 1 if len(dirs) == 2 else 2
     pts += d; why.append('디렉터리 %d개 → %d' % (len(dirs), d))
     hard_hit = sorted(set(dd for dd in dirs for h in cfg['hard_dirs'] if dd.startswith(h)))
-    hf = sorted(set(os.path.basename(fp) for fp in pr['files'] for k in cfg['hard_files'] if k in os.path.basename(fp).lower()))
+    hf = sorted(set(os.path.basename(fp) for fp in pr['files'] if _hard_file_hits(fp, cfg['hard_files'])))
     if hard_hit or hf:
         pts += 2; why.append('어려운 영역 %s → 2' % ', '.join((hard_hit + hf)[:4]))
     t = pr['title'].lower()
-    if any(k in t for k in cfg['hard_title']):
-        pts += 1; why.append('제목 키워드(+1): ' + ', '.join(k for k in cfg['hard_title'] if k in t))
-    if any(k in t for k in cfg['easy_title']):
-        pts -= 1; why.append('제목 키워드(−1): ' + ', '.join(k for k in cfg['easy_title'] if k in t))
+    hk = _kw_hits(t, cfg['hard_title'])
+    if hk:
+        pts += 1; why.append('제목 키워드(+1): ' + ', '.join(hk))
+    ek = _kw_hits(t, cfg['easy_title'])
+    if ek:
+        pts -= 1; why.append('제목 키워드(−1): ' + ', '.join(ek))
     pts = max(0, pts)
     for cap, name, n in cfg['tiers']:
         if pts <= cap:
