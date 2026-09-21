@@ -76,7 +76,10 @@ description: 리뷰 검증 규율 — 이 PR 에 무엇을 돌릴지(CTP sql/med
 ## 4. CTP 판정 규칙
 - 로컬 CTP 는 **코어 발생 여부만** 본다. NOK 는 CI(`tc/pr-<n>` 짝)의 몫 — 단 NOK 가 수백 건이면 원인 분류(`tc-analysis`)는 한다(예: 2026-09-16 `-494` 캐스케이드는 PL 연결 잔존).
 - fault-injection 코어(`fi_handler_random_exit`)는 결함이 아니다.
-- **CTP 가 `$CUBRID/conf` 를 `ha_mode=yes`·`port 1822` 로 바꿔 놓는다** — 뒤에 평범 서버를 쓰려면 되돌린다(`테스트TC-규칙 §6`).
+- **CTP 가 `$CUBRID/conf` 를 바꿔 놓는다** — `ha_mode=yes`·`port 1822`. 뒤에 평범 서버를 쓰려면 되돌린다.
+  `cubrid_locales.txt` 도 CTP 의 `make_locale` 이 채운다 — 그대로 두면 설치본 콜레이션 수가 DB 와 어긋나
+  `Number of collations do not match` 로 기동이 실패한다. 돌리기 전에 `conf/` 를 백업하고 끝나면 되돌린다
+  (2026-09-21 `.51` 실측: 로케일 11개가 채워져 있었다).
 - shell TC 단독 실행: `init_path`·`result_file`·`case_name` export, 로그는 작업 디렉터리 밖으로.
 
 ## 5. 리뷰 답글에 적는 형식
