@@ -59,8 +59,16 @@ def details(repo, num):
         r = n.get('requestedReviewer') or {}
         req.append(r.get('login') or r.get('name') or '?')
     latest = [(n['author']['login'], n['state'], n['submittedAt'][:10]) for n in d['latestReviews']['nodes'] if n.get('author')]
+    # GitHub 은 리뷰를 제출하는 순간 그 사람을 reviewRequests 에서 뺀다. 그래서 requested 만 보면
+    # 코멘트 한 번 남기고 승인하지 않은 리뷰어가 보드에서 사라진다. 두 상태를 갈라서 둘 다 남긴다:
+    #   requested        = 요청됐고 리뷰 이력 0 (미착수)
+    #   pending_approval = 리뷰는 했으나 APPROVED 아님 (승인 전)
+    # 재요청되면 requested 에 다시 들어오므로 그쪽을 우선한다.
+    approvers = [a for a, st, _ in latest if st == 'APPROVED' and a not in BOTS]
+    pending = [a for a, st, _ in latest if st != 'APPROVED' and a not in BOTS and a not in req]
     return {'threads_total': d['reviewThreads']['totalCount'], 'unresolved': len(unresolved),
             'unresolved_by': by_author, 'requested': req, 'latest_reviews': latest,
+            'approvers': approvers, 'pending_approval': pending,
             'decision': d.get('reviewDecision') or '-', 'mergeable': d.get('mergeable') or '-'}
 
 def agent_reviewed(repo, num):
@@ -165,6 +173,8 @@ def render(rows, now, orphans=()):
         by.setdefault(r['tracked'][0], []).append(r)
     tot_unres = sum(r['unresolved'] for r in rows)
     tot_wait = sum(1 for r in rows if r['requested'])
+    tot_noapr = sum(1 for r in rows if not r.get('approvers'))
+    tot_stuck = sum(1 for r in rows if not r.get('approvers') and not r['unresolved'])
     tot_agent = sum(1 for r in rows if r['agent_n'])
     css = """
     :root{--bg:#eef0f3;--surface:#fff;--ink:#161a20;--muted:#6b7684;--line:#d5dae1;--gate:#14706b;--warn:#a85b16;--bad:#a3262b;--soft:#f6f7f9}
@@ -178,12 +188,13 @@ def render(rows, now, orphans=()):
     th,td{padding:8px 10px;border-bottom:1px solid var(--line);vertical-align:top;text-align:left}th{background:var(--soft);font-family:"IBM Plex Mono",monospace;font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);white-space:nowrap}
     tr:last-child td{border-bottom:0} .n{font-family:"IBM Plex Mono",monospace;white-space:nowrap} .warn{color:var(--warn);font-weight:600}.bad{color:var(--bad);font-weight:600}.ok{color:var(--gate);font-weight:600}
     .pill{display:inline-block;font-family:"IBM Plex Mono",monospace;font-size:11px;padding:1px 7px;border-radius:999px;border:1px solid var(--line);margin:1px 2px 1px 0;white-space:nowrap}
-    .pill.APPROVED{color:var(--gate);border-color:var(--gate)}.pill.CHANGES_REQUESTED{color:var(--bad);border-color:var(--bad)}.pill.req{color:var(--warn);border-color:var(--warn)}
+    .pill.APPROVED{color:var(--gate);border-color:var(--gate)}.pill.CHANGES_REQUESTED{color:var(--bad);border-color:var(--bad)}.pill.req{color:var(--warn);border-color:var(--warn)}.pill.pend{color:var(--muted);border-color:var(--muted)}
     a{color:inherit} .docs a{display:block;font-size:12px;font-family:"IBM Plex Mono",monospace;color:var(--gate)} .muted{color:var(--muted)}
     """
     h = ['<!doctype html><html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>review-to-do</title><style>%s</style></head><body><div class="wrap">' % css]
     h.append('<h1>review-to-do</h1><div class="meta">스냅샷 %s · assignee ∈ {%s} · open · non-draft · 미해결 스레드는 리뷰 코멘트 기준 · CI 는 보지 않음(사용자 지시) · TC PR 은 JIRA 키/cubrid#n 으로 엔진 PR 하위에 연동</div>' % (now, ', '.join(TRACKED)))
-    h.append('<div class="facts"><div class="fact"><b>%d</b><span>추적 PR</span></div><div class="fact"><b class="%s">%d</b><span>미해결 스레드 합</span></div><div class="fact"><b>%d</b><span>리뷰어 응답 대기 PR</span></div><div class="fact"><b>%d / %d</b><span>에이전트가 리뷰한 PR (%s)</span></div></div>' % (len(rows), 'warn' if tot_unres else 'ok', tot_unres, tot_wait, tot_agent, len(rows), esc(','.join(sorted(AGENT)))))
+    h.append('<div class="facts"><div class="fact"><b>%d</b><span>추적 PR</span></div><div class="fact"><b class="%s">%d</b><span>미해결 스레드 합</span></div><div class="fact"><b>%d</b><span>리뷰 미착수 PR</span></div><div class="fact"><b class="%s">%d</b><span>승인 0 PR</span></div><div class="fact"><b class="%s">%d</b><span>승인만 남은 PR</span></div><div class="fact"><b>%d / %d</b><span>에이전트가 리뷰한 PR (%s)</span></div></div>' % (len(rows), 'warn' if tot_unres else 'ok', tot_unres, tot_wait, 'warn' if tot_noapr else 'ok', tot_noapr, 'bad' if tot_stuck else 'ok', tot_stuck, tot_agent, len(rows), esc(','.join(sorted(AGENT)))))
+    h.append('<div class="meta" style="margin:6px 0 2px">누구 차례인가 — <b>미해결 &gt; 0</b>: 작성자 · <b>미해결 0 + 승인자 0</b>: 리뷰어(승인 필요, "승인만 남은 PR") · <b>미해결 0 + 승인자 ≥ 1</b>: 머지 가능. 리뷰어 필 — <span class="pill req">미착수</span> 요청됐고 리뷰 이력 없음 · <span class="pill pend">승인 전</span> 리뷰했으나 승인 안 함(GitHub 은 리뷰 제출 시 요청 목록에서 빼므로 이 상태가 따로 필요하다)</div>')
     for who in TRACKED:
         rs = by.get(who, [])
         h.append('<h2>@%s <span class="meta">%d PR</span></h2>' % (esc(who), len(rs)))
@@ -195,10 +206,11 @@ def render(rows, now, orphans=()):
             if r['unresolved_by']:
                 unres += '<div class="muted" style="font-size:11px">' + ', '.join('%s %d' % (esc(a), n) for a, n in sorted(r['unresolved_by'].items(), key=lambda x: -x[1])) + '</div>'
             rev = ''.join('<span class="pill %s">%s %s</span>' % (esc(st), esc(a), {'APPROVED': '✓', 'CHANGES_REQUESTED': '✗', 'COMMENTED': '…', 'DISMISSED': '–'}.get(st, st)) for a, st, _ in r['latest_reviews'] if a not in BOTS)
-            rev += ''.join('<span class="pill req">%s 대기</span>' % esc(a) for a in r['requested'])
+            rev += ''.join('<span class="pill req">%s 미착수</span>' % esc(a) for a in r['requested'])
+            rev += ''.join('<span class="pill pend">%s 승인 전</span>' % esc(a) for a in r.get('pending_approval', []))
             rev += '<div class="muted" style="font-size:11px">decision: %s</div>' % esc(r['decision'])
             ag = ('<span class="ok">✓ %s</span><div class="muted" style="font-size:11px">%d건 · %s</div>' % (esc(r['agent_last']), r['agent_n'], esc('/'.join(r['agent_kinds'])))) if r['agent_n'] else '<span class="warn">아직</span>'
-            tcl = ''.join('<div><a href="%s">%s#%d</a> <span class="muted">미해결 %d/%d%s</span></div>' % (esc(t['url']), esc(t['repo'].split('/')[1].replace('cubrid-testcases','tc')), t['number'], t['unresolved'], t['threads_total'], (' · ' + ','.join(esc(a) + ' 대기' for a in t['requested'])) if t['requested'] else '') for t in r['linked_tc']) or '<span class="muted">없음</span>'
+            tcl = ''.join('<div><a href="%s">%s#%d</a> <span class="muted">미해결 %d/%d%s</span></div>' % (esc(t['url']), esc(t['repo'].split('/')[1].replace('cubrid-testcases','tc')), t['number'], t['unresolved'], t['threads_total'], (' · ' + ','.join(esc(a) + ' 미착수' for a in t['requested'])) if t['requested'] else '') for t in r['linked_tc']) or '<span class="muted">없음</span>'
             docs = ''.join('<a href="%s%s">%s</a>' % (DOCS_HTTP_BASE, quote(d), esc(d)) for d in r['docs']) or '<span class="muted">없음</span>'
             others = [a for a in r['assignees'] if a != r['tracked'][0]]
             h.append('<tr><td class="n"><a href="%s">%s#%d</a>%s</td><td>%s<div class="meta">%s · by %s%s</div></td><td class="n">%s</td><td>%s</td><td class="n">%s</td><td class="n">%s<div class="muted" style="font-size:11px">생성 %s</div></td><td class="docs" style="font-size:12px">%s</td><td class="docs">%s</td></tr>' % (
@@ -207,7 +219,7 @@ def render(rows, now, orphans=()):
                 unres, rev, ag, esc(r['updated']), esc(r['created']), tcl, docs))
         h.append('</table>')
     if orphans:
-        h.append('<h2>연동 대상 없는 TC PR <span class="meta">%d</span></h2><table><tr><th>PR</th><th>제목</th><th>미해결</th><th>리뷰어 대기</th></tr>' % len(orphans))
+        h.append('<h2>연동 대상 없는 TC PR <span class="meta">%d</span></h2><table><tr><th>PR</th><th>제목</th><th>미해결</th><th>리뷰 미착수</th></tr>' % len(orphans))
         for t in orphans:
             h.append('<tr><td class="n"><a href="%s">%s#%d</a></td><td>%s</td><td class="n">%d/%d</td><td>%s</td></tr>' % (esc(t['url']), esc(t['repo'].split('/')[1]), t['number'], esc(t['title']), t['unresolved'], t['threads_total'], esc(','.join(t['requested'])) or '-'))
         h.append('</table>')

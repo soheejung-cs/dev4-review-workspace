@@ -48,3 +48,37 @@
 교훈 한 줄: **"이 상태를 만드는 곳" 이 아니라 "이 상태를 놓는 곳" 을 전수로 세라.** 만드는 곳은 하나지만 놓는 곳은 여러 개다.
 
 측정 도구는 `harness/templates/leak/` 에 넣었다(RSS 배치 비교 · `cubrid memmon` · SA 모드 valgrind). 답안 비교가 못 잡는 종류는 이 셋 중 둘 이상으로 재고, **develop 대조군을 같은 방법으로 함께** 잰다.
+
+## 놓친 지적 사례 — PR#7899 (2026-09-21, xmilex-git 대조)
+
+`ALTER INDEX ... COMPACT` 의 새 서버 요청(CBRD-27401). 하네스 리뷰가 9건(코드 3·설계 6)을 냈는데 **전부 `btree.c`·`storage_common.h`·`csql_grammar.y`·`execute_schema.c`** 였다. xmilex-git 이 올린 지적은 **네트워크 응답 버퍼**였고 하네스는 0건이었다.
+
+### 무엇을 놓쳤나 (사실 확인 완료)
+
+`sbtree_compact_overflow ()` 는 응답 버퍼를 `OR_ALIGNED_BUF (OR_INT_SIZE + OR_INT64_SIZE * 3)` = **28B** 로 잡고 `or_pack_int` 하나 + `or_pack_int64` 셋을 쓴다. 그런데
+- `or_pack_int64 ()`·`or_pack_double ()` 는 쓰기 전에 `PTR_ALIGN (ptr, MAX_ALIGNMENT)` 를 한다(`object_representation.c`) — **정렬하는 패커는 이 둘뿐**이다.
+- 64비트에서 `OR_ALIGNED_BUF(size)` 는 `char buf[size]` 로 **여유 바이트가 없고**(32비트에서만 `+ MAX_ALIGNMENT`), `OR_ALIGNED_BUF_SIZE` 는 `sizeof (buf)` 그대로다.
+
+따라서 실제 배치는 `int`(0~3) → 패딩(4~7) → `int64`(8~15, 16~23, 24~31) = **32B 필요**. 28B 버퍼에 4바이트를 넘겨 쓰고(스택), 송신 길이는 28B 라 마지막 `pairs_skipped` 가 잘린다. 클라이언트 `btree_compact_overflow ()` 도 같은 28B 선언이고 `or_unpack_int64` 역시 정렬하므로 **양쪽 다** 범위를 넘는다.
+
+### 왜 못 봤나
+
+1. **컨텍스트 문제가 아니다.** 그 두 함수는 팩에 그대로 있었다 — `network_interface_sr.cpp:sbtree_compact_overflow [5123-5149]`, `network_interface_cl.c:btree_compact_overflow [7069-7111]`, `dropped 0`. 코드를 받고도 읽고 넘어갔다.
+2. **의무 항목에 직렬화 축이 없다.** 매 리뷰에 주입되는 것은 MEAS-01/04/05/06/07 + CHK-06(측정)과 INV-1~5(설계)뿐이다. 규칙 파일에 SER-01~04 가 있지만 **주입되지 않고**, 게다가 그 넷 중 어느 것도 "버퍼 크기 vs 패커 정렬 패딩"을 다루지 않는다(SER-03 은 *읽을 때* 캐스팅, SER-04 는 예약 필드).
+3. **[D] 통신 규칙이 존재만 본다.** 설계-리뷰-규칙의 [D] 행은 "새 요청 추가 시 3파일 동시 변경" — 세 파일이 **바뀌었는지**만 묻고 **크기가 맞는지**는 묻지 않는다. 이 PR 은 3파일을 모두 바꿨으므로 그 체크는 통과한다.
+4. **주의가 어려운 축으로 쏠렸다.** latch 커플링·MVCC·PG 대조에 9건을 쓰는 동안 요청/응답 배관은 "보일러플레이트"로 훑었다. 사람이 훑는 자리라는 것이 바로 도구가 봐야 할 이유다.
+
+### 하네스에 내릴 것
+
+| 내릴 것 | 어디에 | 근거 |
+|---|---|---|
+| **`or-buf-undersized` 결정론 검사기** — 함수 안에서 `OR_ALIGNED_BUF (EXPR) buf` 와 `OR_ALIGNED_BUF_START (buf)` 로 시작하는 `or_(un)pack_*` 체인을 모아 정렬을 시뮬레이션하고 선언값과 비교, 초과면 auto finding | `reachability.py` 의 `gate-imbalance` 옆, 산출은 `findings.auto.json` | 정렬 패커가 `or_pack_int64`·`or_pack_double`(+unpack 짝) **둘뿐**이라 규칙이 닫힌다. 이 결함은 LLM 판단이 아니라 산술이다 |
+| 같은 검사를 **서버·클라이언트 쌍**으로 — 같은 `NET_SERVER_*` 상수를 쓰는 sr/cl 두 함수의 응답 크기 식이 다르면 지적 | 위와 같은 자리 | 7899 는 양쪽이 같은 값으로 **같이 틀렸다**. 한쪽만 보면 "일치하니 맞다"로 읽힌다 |
+| **SER-05(신규)**: "고정 크기 요청/응답 버퍼는 패커의 정렬 규칙을 포함해 계산한다. `OR_INT_SIZE + OR_INT64_SIZE * n` 식 단순 합은 `or_pack_int64` 앞의 패딩을 빠뜨린다." | `rules/성능-리뷰-규칙.md` SER 절 | 인용할 ID 가 있어야 리뷰가 검증 가능해진다 |
+| **주입 조건 확대**: diff 가 `src/communication/` 를 건드리거나 `OR_ALIGNED_BUF`·`or_pack_` 가 나오면 SER 절을 불변조건처럼 **항상** 주입 | `context_pack._invariants()` | 지금은 성능 변경일 때만 의무 항목이 뜬다 |
+
+### 시제품에서 나온 부수 사실
+
+정규식으로 저장소 전수 스캔을 해 봤더니 5건이 걸렸는데 **전부 오탐**이었다 — `ptr` 체인이 함수 경계를 넘어 다음 함수의 패킹까지 이어 붙었다. 하네스 안에서 해야 하는 이유가 여기 있다: CodeGraph 는 이미 함수 범위를 알고 있다.
+
+교훈 한 줄: **배관처럼 보이는 코드가 가장 기계적으로 검증 가능한 자리다.** 사람이 "이건 그냥 요청/응답 boilerplate" 라며 훑고 지나가므로, 그 자리는 LLM 의 주의가 아니라 결정론적 검사로 덮어야 한다.

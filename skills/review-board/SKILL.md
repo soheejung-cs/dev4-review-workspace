@@ -9,7 +9,10 @@ description: 리뷰 보드 갱신 — review-to-do 웹 보드(http://192.168.6.5
 `tools/roster.json` 의 **`tracked_github`** 에 든 로그인이 **assignee** 인 PR 중 **open 이고 draft 가 아닌 것**만
 (사용자 지시 2026-09-16: 머지된 것·draft 는 추적 안 함, 기준은 JIRA 가 아니라 GitHub). PR 마다:
 - 미해결 리뷰 스레드 수 / 전체 스레드 수, 미해결 스레드를 남긴 사람별 개수
-- 리뷰어: 최신 리뷰 상태(✓ APPROVED · ✗ CHANGES_REQUESTED · … COMMENTED), **응답 대기(요청됐지만 아직 리뷰 안 함)**, reviewDecision
+- 리뷰어: 최신 리뷰 상태(✓ APPROVED · ✗ CHANGES_REQUESTED · … COMMENTED), reviewDecision, 그리고 **두 갈래의 남은 일**:
+  **미착수**(요청됐고 리뷰 이력 0) / **승인 전**(리뷰했으나 APPROVED 아님). GitHub 은 리뷰를 제출하는 순간 그 사람을
+  `reviewRequests` 에서 빼므로, 요청 목록만 보면 코멘트 한 번 남기고 승인하지 않은 리뷰어가 보드에서 사라진다
+  (2026-09-21 지적 반영). 재요청되면 다시 `미착수` 로 잡힌다.
 - CI 요약(`Check TC PRs` 는 규약상 무시), 갱신·생성일
 - **이 컨테이너에 있는 리뷰 문서**: `claude-workspace/projects/<JIRA키>/`, `dev4-review-workspace/examples|reviews` 에서 JIRA 키·PR 번호로 찾은 것(file:// 링크)
 - **에이전트 리뷰 여부**: `roster.json` 의 `agent_github` 로그인(또는 본문에 `agent_marker` 정규식)이 남긴 리뷰·인라인 코멘트·이슈 코멘트 건수와 마지막 날짜. **팀 공유 계정으로 돌리면 `agent_github` 만 그 계정으로** 바꾼다. 지금은 `soheejung-cs` 라 사용자 본인의 코멘트도 함께 세어진다(공유 계정 전환 전 한계).
@@ -29,8 +32,12 @@ python3 ~/dev/docs/dev4-review-workspace/tools/review_board_gen.py [out_dir]   #
 `tools/roster.json` → `tracked_github` 배열만 고친다(이름·JIRA 는 본인 등록 시). 커밋은 **본인 이름으로**. 다음 갱신에 반영.
 
 ## 판정 규칙 (보드를 읽는 법)
-- 미해결 > 0 이고 마지막 리뷰가 CHANGES_REQUESTED → **작성자가 움직일 차례**.
-- 미해결 = 0 이고 "대기" 필이 있으면 → **리뷰어가 움직일 차례**(응답 재촉 대상).
+- **미해결 > 0** → **작성자가 움직일 차례**(마지막 리뷰가 CHANGES_REQUESTED 면 더 분명).
+- **미해결 = 0 이고 승인자 0** → **리뷰어가 움직일 차례**. 요약의 **"승인만 남은 PR"** 이 이 칸이다 —
+  `미착수` 도 없고 미해결도 없어 조용해 보이지만 아무도 승인하지 않아 멈춘 PR 이다. 리뷰어 재요청 대상.
+- **미해결 = 0 이고 승인자 ≥ 1** → 머지 가능.
+- `미착수` 필이 있으면 그 리뷰어는 아직 보지도 않았다. `승인 전` 필은 봤지만 승인하지 않은 사람이다 —
+  미해결이 남아 있으면 그 사람이 아니라 **작성자**가 움직일 차례다.
 - CI FAIL 은 `build/test_*` 만 실제 문제, `Check TC PRs` 는 무시(PR브랜치-규칙 §5).
 - "에이전트 리뷰: 아직" 이면서 리뷰어 대기에 에이전트 계정이 있으면 → **이 세션이 움직일 차례**(`code-review` → `review-response`).
 - 리뷰 문서가 "없음"인 PR 을 리뷰하게 되면 먼저 `record` 스킬대로 `projects/<JIRA키>/` 를 만든다.
