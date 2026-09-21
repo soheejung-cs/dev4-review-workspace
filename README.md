@@ -54,6 +54,16 @@ examples/
 - 각 컨테이너: `git clone https://github.com/soheejung-cs/dev4-review-workspace ~/dev/docs/dev4-review-workspace`
   후 `ln -sfn ~/dev/docs/dev4-review-workspace/references/C-Cpp-성능규칙집.md ~/.claude/성능규칙집.md`.
 - Claude Code 스킬로 등록하려면 `~/.claude/skills/<name>` → `skills/<name>` 심링크(선택).
+- **`compile_commands.json` 을 만들어 둔다(권장).** 없으면 하네스의 `-fsyntax-only` 게이트가 **조용히 건너뛴다**
+  (`self_check: ran=False`, `implement_gate` 의 `syntax: skipped`). 즉 "게이트 OK" 가 컴파일을 확인했다는 뜻이 아니게 된다.
+  CMake 가 Ninja 제너레이터면 **재빌드 없이 0.1초**에 만들 수 있다(2026-09-21 실측: 1,233 엔트리 3.7MB, 0.066초):
+  ```bash
+  cd <빌드트리>   # 예: ~/dev/build/build_x86_64_release
+  RULES=$(grep '^rule ' CMakeFiles/rules.ninja | awk '{print $2}' | grep -E '^(C|CXX)_COMPILER__')
+  ninja -t compdb $RULES > compile_commands.json
+  ```
+  다른 경로에 두려면 `export HARNESS_COMPILE_COMMANDS=<경로>/compile_commands.json`.
+  (`CMAKE_EXPORT_COMPILE_COMMANDS=ON` 으로 다시 구성해도 되지만 그쪽은 재구성 비용이 든다.)
 - **산출물 디렉터리를 알려준다(권장).** 리뷰 산출물(`projects/<JIRA>/repro/` 등)은 사람마다 다른 리포에 둔다.
   `export DEV4_RECORDS_ROOT=<내 워크스페이스>` 또는 `tools/roster.json` 의 `records_root` 에 적는다.
   **설정하지 않으면** 하네스는 repro 의무를 *평가하지 않고* blocking 을 그대로 둔다(로그에 한 줄 남는다).
