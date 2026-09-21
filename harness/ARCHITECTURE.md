@@ -96,6 +96,9 @@ DB 서버·CTP 는 이 CLI 가 띄우지 않는다(`review-testing` 스킬의 �
 | 산출물 | 보고서 + 인라인 코멘트 | 대안표·결정 요청 Q + 덱 + 다이어그램 |
 | 공유 | Worktree · CodeGraph · ContextPack · Adjudicate · `references/` · `rules/` · `examples/` | |
 
+> 여러 에이전트로 쪼갤 때의 모델·추론 강도 등급은 [모델-선택.md](모델-선택.md) —
+> 수집은 낮추고 판정·종합·반증은 유지, 애매하면 올려보낸다(사용자 결정 2026-09-21).
+
 > **하네스는 `references/` 를 읽지 않는다.** `context_pack._rule_rows()` 와 `_invariants()` 가 긁는 것은 `rules/*.md` 의
 > `| PREFIX-nn` 행뿐이다(정규식 `[A-Z]{2,5}`, 6글자 접두사는 조용히 누락된다). 따라서 **인용 가능한 판정 행은 `rules/` 에 두고**
 > `references/` 에는 근거·해설만 둔다. 같은 표를 양쪽에 두면 갈라진다.

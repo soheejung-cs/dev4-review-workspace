@@ -44,6 +44,10 @@ python3 -m tools.harness.implement_gate --plan <out>/plan.json [--base HEAD|upst
 ## 산출물 (`~/dev/utils/harness-out/impl/CBRD-n/`)
 `implement_request*.md` · `codegraph.sqlite3`(plan 시점) · `arch.json` · `plan.json` · `gate.json` · `codegraph.after.sqlite3` · `manifest.json`
 
+## 여러 에이전트로 쪼갤 때
+**수집(팩 만들기·심볼 조회·로그 읽기)은 낮추고, plan 판정·자기 리뷰·게이트 해석은 유지**한다 —
+[`harness/모델-선택.md`](../../harness/모델-선택.md).
+
 ## 하지 않는 것
 - plan 승인 전 코드 수정. plan 밖 함수 수정(필요하면 plan 을 고쳐 다시 승인). 팩 밖 저장소 탐색으로 설계를 바꾸기(팩을 넓혀서 한다).
 - 요청 없는 빌드·CTP·벤치. 벤치 DB 에서 재현. `git stash -u`. 엔진 리포에 설계문서 커밋.

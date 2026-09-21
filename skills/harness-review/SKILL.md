@@ -19,5 +19,9 @@ description: 통합 리뷰 하네스 실행 — `/harness-review <PR번호>`. �
 6. `report.md` 를 사람 말투로 다듬어 `examples/리뷰보고서-예시-PR<PR>.md` 와 `claude-workspace/projects/<JIRA>/리뷰보고서-PR<PR>.md` 에 둔다. **게시는 하지 않는다** — 사용자에게 "N번 코멘트 — [층] 본문" 초안을 보이고 승인 후 `review-response` 규약(인라인)으로 게시.
 7. 기록: `record` 스킬(episodic 은 러너가 이미 적재).
 
+## 여러 에이전트로 쪼갤 때
+단계마다 추론 강도를 다르게 준다 — **수집은 낮추고 판정·종합·반증은 유지**, 애매하면 올려보낸다.
+등급표와 탈출구(escalate) 스키마는 [`harness/모델-선택.md`](../../harness/모델-선택.md).
+
 ## 하지 않는 것
 - 팩 밖 저장소 탐색, 줄 번호 추측, 판정 없이 게시, CTP/벤치 실행(`review-testing` 으로 제안만).
