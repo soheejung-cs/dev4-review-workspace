@@ -5,7 +5,7 @@
 """
 import hashlib, json, os, subprocess, sys, time
 import yaml
-from . import codegraph as CG, context_pack as CP, arch_infer as AI, adjudicate as AD, perf_claims as PC, episodic as EP
+from . import codegraph as CG, context_pack as CP, arch_infer as AI, adjudicate as AD, perf_claims as PC, episodic as EP, or_buf as OB
 from .run_support import Worktree, sh
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -52,6 +52,18 @@ def n_perf_claims(c, a):
     fn = c['g'].function(fids[0]) if fids else None
     auto = PC.analyze(body, fn.file if fn else (sorted(c['changed'])[0] if c['changed'] else 'PR'), fn.start_line if fn else 1)
     json.dump(auto, open(os.path.join(c['out'], 'findings.auto.json'), 'w'), ensure_ascii=False, indent=1); c['log'](f'perf claims: {len(auto)} auto findings'); return auto
+def n_or_buf(c, a):
+    """OR_ALIGNED_BUF 선언 크기 vs or_(un)pack_* 체인의 실제 배치. 산술이라 LLM 없이 결정론으로 돈다(PR#7899).
+    findings.auto.json 은 perf_claims 가 이미 썼으므로 **덮어쓰지 않고 append** 한다."""
+    auto, skipped = OB.analyze(c.need('wt'), c.need('g'), c.need('changed'), c.need('changed_fids'))
+    p = os.path.join(c['out'], 'findings.auto.json')
+    prev = json.load(open(p, encoding='utf-8')) if os.path.isfile(p) else []
+    json.dump(prev + auto, open(p, 'w'), ensure_ascii=False, indent=1)
+    # 건너뛴 체인을 반드시 보고한다 — 이 검사기는 모르면 조용히 넘어가므로, 침묵을 '깨끗함'으로
+    # 읽으면 안 된다(반증 2026-09-21: 같은 결함의 흔한 변형 12가지를 놓친다).
+    c['log'](f'or-buf: {len(auto)} auto findings · 판정 불가로 건너뛴 체인 {skipped}개')
+    c['or_buf_skipped'] = skipped
+    return auto
 def n_validate(c, a):
     findings = json.load(open(c['findings_path'], encoding='utf-8'))
     if os.path.isfile(os.path.join(c['out'], 'findings.auto.json')) and a.get('merge_auto', True): findings += json.load(open(os.path.join(c['out'], 'findings.auto.json')))
@@ -154,7 +166,7 @@ def n_report(c, a):
     md += ['', '## 돌릴 것 (제안 — 요청자 확인 후)', '', f"- 변경 계층 {json.load(open(arch_p))['architecture']['touched_layers'] if os.path.isfile(arch_p) else '?'} → review-testing 매트릭스로 CTP/동시성/JOB/TPC-H 제안", '', f"_manifest: harness {sh('git','-C',ROOT,'rev-parse','--short','HEAD').stdout.strip()}, model {os.environ.get('HARNESS_MODEL','unset')}_"]
     open(os.path.join(c['out'], 'report.md'), 'w', encoding='utf-8').write('\n'.join(md)); c['log']('report: report.md'); return md
 
-REGISTRY = {'review_request': n_review_request, 'report': n_report, 'worktree': n_worktree, 'diff_map': n_diff_map, 'codegraph': n_codegraph, 'pack': n_pack, 'arch': n_arch, 'perf_claims': n_perf_claims,
+REGISTRY = {'review_request': n_review_request, 'report': n_report, 'worktree': n_worktree, 'diff_map': n_diff_map, 'codegraph': n_codegraph, 'pack': n_pack, 'arch': n_arch, 'perf_claims': n_perf_claims, 'or_buf': n_or_buf,
             'validate': n_validate, 'gate': n_gate, 'self_check': n_self_check, 'episodic': n_episodic}
 
 def load(path):

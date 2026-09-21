@@ -13,6 +13,7 @@ stages:
   context:
     pack:        { impl: pack, budget_tokens: 12000 }        # 변경 함수·그래프 증거·불변조건(설계)·규칙 행(성능)·episodic
     perf_claims: { impl: perf_claims }                       # PR 본문 → MEAS 자동 finding
+    or_buf:      { impl: or_buf }                           # OR_ALIGNED_BUF 크기 vs 패킹 체인 (결정론)
   infer:
     arch:        { impl: arch }                              # 계층 유추·리스크·다이어그램 (설계 층 입력)
   request:

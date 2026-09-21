@@ -9,5 +9,6 @@ stages:
   context:                          # 압축 구간 — 예산 안에서만, 초과 시 파일 단위 배치
     pack:       { impl: pack, budget_tokens: 12000 }
     perf_claims: { impl: perf_claims }                    # PR 본문 성능 주장 → MEAS 자동 finding
+    or_buf:      { impl: or_buf }                           # OR_ALIGNED_BUF 크기 vs 패킹 체인 (결정론)
   # review 단계 = LLM(skills/code-review + rules/성능-리뷰-규칙) : context_pack*.md → findings.json (harness/schemas/finding.json)
   #   러너 밖에서 돈다. 산출물이 오면 adjudicate.yaml 로 이어진다.

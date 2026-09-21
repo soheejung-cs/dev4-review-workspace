@@ -8,6 +8,7 @@ stages:
   context:
     pack:       { impl: pack, budget_tokens: 12000 }     # invariants(INV 표 + AGENTS.md latch/lock) 절이 항상 들어간다
     perf_claims: { impl: perf_claims }
+    or_buf:      { impl: or_buf }                           # OR_ALIGNED_BUF 크기 vs 패킹 체인 (결정론)
   infer:                            # Azure smart_parse/risk/diagram 을 CodeGraph 위에서
     arch:       { impl: arch }                           # arch.json / arch.mmd / arch.excalidraw
   # review 단계 = LLM(skills/design-review + rules/설계-리뷰-규칙) : context_pack*.md + arch.json → findings.json(layer=설계, arch_edge 인용)
