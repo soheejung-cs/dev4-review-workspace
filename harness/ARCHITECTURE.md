@@ -96,6 +96,12 @@ DB 서버·CTP 는 이 CLI 가 띄우지 않는다(`review-testing` 스킬의 �
 | 산출물 | 보고서 + 인라인 코멘트 | 대안표·결정 요청 Q + 덱 + 다이어그램 |
 | 공유 | Worktree · CodeGraph · ContextPack · Adjudicate · `references/` · `rules/` · `examples/` | |
 
+> **하네스는 `references/` 를 읽지 않는다.** `context_pack._rule_rows()` 와 `_invariants()` 가 긁는 것은 `rules/*.md` 의
+> `| PREFIX-nn` 행뿐이다(정규식 `[A-Z]{2,5}`, 6글자 접두사는 조용히 누락된다). 따라서 **인용 가능한 판정 행은 `rules/` 에 두고**
+> `references/` 에는 근거·해설만 둔다. 같은 표를 양쪽에 두면 갈라진다.
+> `_invariants()` 는 항상 주입(잘리지 않음), `_rule_rows()` 는 우선순위 5 라 예산이 모자라면 통째로 잘린다 —
+> 잘리면 안 되는 축은 `_invariants()` 로 승격한다(현재 INV-* 전부 + BTL-*는 `src/storage`·`src/transaction` 을 건드릴 때만).
+
 ## 6. v2 에서 추가된 모듈
 | 모듈 | 역할 |
 |---|---|

@@ -64,14 +64,20 @@ def _rule_rows(rules_dir: str, axes: Set[str]) -> str:
             if m and m.group(1) in axes: rows.append(l.rstrip())
     return '\n'.join(rows[:60])
 
-AXIS_BY_FACT = {'latch_fix': {'PAR', 'COH', 'MEM'}, 'lock_acquire': {'PAR', 'CC'}, 'log_append': {'SER', 'SYS'}, 'alloc': {'ALLOC', 'MEM'}, 'sysop_start': {'CC'}}
+AXIS_BY_FACT = {'latch_fix': {'PAR', 'COH', 'MEM', 'BTL'}, 'lock_acquire': {'PAR', 'CC', 'BTL'},
+                'log_append': {'SER', 'SYS'}, 'alloc': {'ALLOC', 'MEM'}, 'sysop_start': {'CC'}}
 
 def _invariants(rules_dir: str, repo: str, touched_dirs: Set[str]) -> str:
     """항상 들어가는 불변조건: 설계-리뷰-규칙 §2 INV 표 + 손대는 디렉터리 AGENTS.md 의 latch/lock 규칙 줄."""
     rows = []
     p = os.path.join(rules_dir, '설계-리뷰-규칙.md')
     if os.path.isfile(p):
-        rows += [l.rstrip() for l in open(p, encoding='utf-8') if re.match(r'\|\s*INV-\d', l)]
+        # BTL(B-tree 락킹)은 _rule_rows 가 아니라 여기로 승격한다 — 그쪽은 우선순위 5 라 예산이 모자라면
+        # 통째로 잘리는데, 래치 커플링 판정은 잘리면 안 되는 축이다. 대신 무관한 PR 에 7행을 매번 넣지
+        # 않도록 storage·transaction 을 건드릴 때만 넣는다.
+        want_btl = any(d.startswith('src/storage') or d.startswith('src/transaction') for d in touched_dirs)
+        pat = r'\|\s*(INV-\d|BTL-\d)' if want_btl else r'\|\s*INV-\d'
+        rows += [l.rstrip() for l in open(p, encoding='utf-8') if re.match(pat, l)]
     for d in sorted(touched_dirs):
         ag = os.path.join(repo, d, 'AGENTS.md')
         if os.path.isfile(ag):
