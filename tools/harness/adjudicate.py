@@ -108,14 +108,49 @@ def dedup(findings: List[Dict]) -> List[Dict]:
         seen[key] = True; out.append(f)
     return out
 
+DEFAULT_RECORDS_ROOT = '~/dev/docs/claude-workspace'
+
+def records_root(repo_root: str = '') -> str:
+    """리뷰 산출물(projects/<JIRA>/repro/ 등)을 두는 디렉터리. 이 리포는 팀이 공유하므로 개인 경로를
+    알면 안 된다 — 역할만 알고 값은 밖에서 받는다. 우선순위:
+      1) 환경변수 DEV4_RECORDS_ROOT
+      2) tools/roster.json 의 "records_root"
+      3) DEFAULT_RECORDS_ROOT (이 리포를 만든 사람의 배치, 하위호환)
+    반환값은 expanduser 만 하고 존재 여부는 보지 않는다 — 판정은 호출자가 한다."""
+    v = os.environ.get('DEV4_RECORDS_ROOT')
+    if not v and repo_root:
+        try:
+            with open(os.path.join(repo_root, 'tools', 'roster.json'), encoding='utf-8') as fp:
+                v = json.load(fp).get('records_root')
+        except Exception:
+            v = None
+    return os.path.expanduser(v or DEFAULT_RECORDS_ROOT)
+
 def repro_obligation(repo_docs: str, findings: List[Dict], jira: str = '') -> List[Dict]:
-    """valid + blocking 인 코드 finding 은 재현 스크립트(projects/<JIRA>/repro/*) 또는 graph_supports=True 가 있어야 blocking 을 유지한다.
-    없으면 non-blocking 으로 강등하고 이유를 남긴다 — '재현 없이 결함이라 하지 않는다'."""
-    repros = glob.glob(os.path.join(repo_docs, 'projects', jira or '*', 'repro', '*')) if repo_docs else []
+    """valid + blocking 인 코드 finding 은 재현 스크립트(projects/<JIRA>/repro/*) 또는 graph_supports=True 가
+    있어야 blocking 을 유지한다 — '재현 없이 결함이라 하지 않는다'.
+
+    단 **'재현이 없다' 와 '재현을 둘 곳을 모른다' 는 다른 상태다.** repo_docs 가 비었거나 그 경로가 없으면
+    의무를 평가할 수 없으므로 강등하지 않는다. 예전에는 둘을 같게 취급해, 이 리포만 clone 한 팀원 환경에서
+    모든 blocking 이 아무 신호 없이 non-blocking 으로 떨어졌다(2026-09-21). 평가 불가일 때는 severity 를
+    그대로 두고 obligations.repro_checked=False 와 이유를 남긴다."""
+    checked = bool(repo_docs) and os.path.isdir(repo_docs)
+    repros = glob.glob(os.path.join(repo_docs, 'projects', jira or '*', 'repro', '*')) if checked else []
     for f in findings:
         if f.get('status') == 'valid' and f.get('severity') == 'blocking' and f.get('layer') == '코드':
-            if not repros and not f.get('obligations', {}).get('graph_supports'):
-                f['severity'] = 'non-blocking'; f.setdefault('reasons', []).append('재현 스크립트도 그래프 증거도 없어 blocking 을 유지할 수 없음 → non-blocking 강등')
+            if f.get('obligations', {}).get('graph_supports'):
+                continue
+            if not checked:
+                f.setdefault('obligations', {})['repro_checked'] = False
+                f.setdefault('reasons', []).append(
+                    'repro 의무 평가 불가(산출물 디렉터리 %s) → blocking 유지. '
+                    'DEV4_RECORDS_ROOT 또는 roster.json 의 records_root 를 설정하라'
+                    % (repo_docs or '미설정'))
+                continue
+            f.setdefault('obligations', {})['repro_checked'] = True
+            if not repros:
+                f['severity'] = 'non-blocking'
+                f.setdefault('reasons', []).append('재현 스크립트도 그래프 증거도 없어 blocking 을 유지할 수 없음 → non-blocking 강등')
     return findings
 
 def requery(bad: List[Dict], adjudicated: List[Dict], out_path: str) -> int:

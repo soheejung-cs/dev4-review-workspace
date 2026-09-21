@@ -4,6 +4,9 @@
    `이름(.컨테이너) 날짜` 서명. Claude 세션은 `Co-Authored-By:` 트레일러로만. 설정 절차: `members/_설정-템플릿.md`.
 2. **한 발견은 한 곳에.** 어디에 둘지는 `skills/record/SKILL.md` 판단표. 소스 사실은 `dev4-ai-source/staging/<이름>-<이슈명>.md` 로.
 3. **컨테이너·머신 고유 사실은 `members/<이름>/`** 에만. 공용 스킬·참고 문서에는 넣지 않는다.
+   **코드도 마찬가지다** — `tools/` 의 스크립트에 개인 경로를 하드코딩하지 않는다. 밖에서 받아라
+   (환경변수 또는 `tools/roster.json`). 2026-09-21 에 `pipeline.py` 가 `~/dev/docs/claude-workspace` 를
+   박아 두고 있었고, 그 경로가 없는 환경에서는 **모든 blocking finding 이 아무 신호 없이 강등**됐다.
 4. **규약을 바꾸면 그 줄에 이름과 지시 날짜.** 스킬(`skills/*/SKILL.md`)이 곧 규약이다 — 채팅에만 남긴 지시는 없는 것과 같다.
 5. push 전에 `git pull --rebase`. 세 컨테이너·여러 사람이 같은 리포에 push 한다.
 6. 프라이빗 리포다 — 초대는 `members/README.md` 명단 기준으로 owner(정소희)가 한다.

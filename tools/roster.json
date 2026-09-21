@@ -21,6 +21,7 @@
       ]
     }
   ],
+  "_comment_records_root": "리뷰 산출물(projects/<JIRA>/repro 등)을 두는 개인 디렉터리. 비워 두면 DEV4_RECORDS_ROOT 환경변수 → 기본값(~/dev/docs/claude-workspace) 순. 팀원은 여기에 자기 경로를 넣거나 환경변수를 쓴다 — 없으면 repro 의무는 평가하지 않고 blocking 을 유지한다(2026-09-21).",
   "repos": [
     "CUBRID/cubrid",
     "CUBRID/cubrid-testcases",

@@ -54,6 +54,10 @@ examples/
 - 각 컨테이너: `git clone https://github.com/soheejung-cs/dev4-review-workspace ~/dev/docs/dev4-review-workspace`
   후 `ln -sfn ~/dev/docs/dev4-review-workspace/references/C-Cpp-성능규칙집.md ~/.claude/성능규칙집.md`.
 - Claude Code 스킬로 등록하려면 `~/.claude/skills/<name>` → `skills/<name>` 심링크(선택).
+- **산출물 디렉터리를 알려준다(권장).** 리뷰 산출물(`projects/<JIRA>/repro/` 등)은 사람마다 다른 리포에 둔다.
+  `export DEV4_RECORDS_ROOT=<내 워크스페이스>` 또는 `tools/roster.json` 의 `records_root` 에 적는다.
+  **설정하지 않으면** 하네스는 repro 의무를 *평가하지 않고* blocking 을 그대로 둔다(로그에 한 줄 남는다).
+  예전에는 이 경로가 없으면 모든 blocking 이 조용히 non-blocking 으로 강등됐다 — 그래서 고쳤다(2026-09-21).
 
 ## 규칙 변경
 이 리포에 커밋 → 다른 컨테이너 pull. 리뷰 방식에 대한 사용자 지시는 해당 SKILL.md 에 **날짜와 함께** 적는다.

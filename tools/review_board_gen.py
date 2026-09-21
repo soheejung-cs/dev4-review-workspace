@@ -14,9 +14,14 @@ AGENT = set(ROSTER.get('agent_github', []))
 AGENT_MARK = re.compile(ROSTER.get('agent_marker') or r'Claude-Session:')
 REPOS = ROSTER.get('repos', ['CUBRID/cubrid'])
 OUT = sys.argv[1] if len(sys.argv) > 1 else os.path.expanduser('~/dev/utils/review-board/site')
-DOCS = [os.path.expanduser('~/dev/docs/claude-workspace/projects'),
-        os.path.expanduser('~/dev/docs/dev4-review-workspace/examples'),
-        os.path.expanduser('~/dev/docs/dev4-review-workspace/reviews')]
+# 산출물 디렉터리는 사람마다 다르다 — 이 리포는 팀이 공유하므로 개인 경로를 하드코딩하지 않는다.
+# DEV4_RECORDS_ROOT > roster.json 의 records_root > 기본값(이 리포를 만든 사람의 배치) 순.
+RECORDS_ROOT = os.path.expanduser(
+    os.environ.get('DEV4_RECORDS_ROOT') or ROSTER.get('records_root') or '~/dev/docs/claude-workspace')
+HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+DOCS = [os.path.join(RECORDS_ROOT, 'projects'),
+        os.path.join(HERE, 'examples'),
+        os.path.join(HERE, 'reviews')]
 DOCS_HTTP_BASE = 'http://192.168.6.51:8827/docs/'   # site/docs -> ~/dev/docs 심링크; 컨테이너 주소로 접근 (사용자 요청 2026-09-16)
 BOTS = {'greptile-apps', 'chatgpt-codex-connector', 'github-actions', 'cubrid-submodule-bot'}
 

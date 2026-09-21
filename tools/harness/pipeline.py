@@ -60,7 +60,10 @@ def n_validate(c, a):
 def n_gate(c, a):
     rules_dir = os.path.join(ROOT, 'rules'); rules_text = ''.join(open(os.path.join(rules_dir, f), encoding='utf-8').read() for f in os.listdir(rules_dir) if f.endswith('.md'))
     res = AD.adjudicate(c.need('wt'), c.need('g'), c.need('changed'), c.need('findings_ok'), rules_text)
-    res = AD.repro_obligation(os.path.expanduser('~/dev/docs/claude-workspace'), res, c['meta'].get('jira', ''))
+    docs = AD.records_root(ROOT)   # 팀 리포가 개인 경로를 알지 않도록 env/roster 에서 해석한다
+    if not os.path.isdir(docs):
+        c['log'](f'repro 의무: 산출물 디렉터리 없음({docs}) — 평가 건너뜀(blocking 유지). DEV4_RECORDS_ROOT 또는 roster.json records_root 설정')
+    res = AD.repro_obligation(docs, res, c['meta'].get('jira', ''))
     json.dump(res, open(os.path.join(c['out'], 'findings.adjudicated.json'), 'w'), ensure_ascii=False, indent=1)
     n = AD.requery(c.get('findings_bad', []), res, os.path.join(c['out'], 'requery.json'))
     for r in res: c['log'](f'{r["status"]:12s} {r.get("severity","")[:12]:12s} {r.get("id")} {r.get("file")}:{r.get("line")} {"; ".join(r.get("reasons", []))}')

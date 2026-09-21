@@ -103,7 +103,7 @@ DB 서버·CTP 는 이 CLI 가 띄우지 않는다(`review-testing` 스킬의 �
 | `harness/templates/repro.sh` | trap 정리·격리 포트·산출물 판정 템플릿 |
 | `context_pack.batches()` / `_invariants()` / `_episodic()` | 배치 분할 · 불변조건 상시 주입 · 과거 지적 주입 |
 | `reachability.latch_pairing_by_var()` | 변수 단위 관문 짝 |
-| `adjudicate.validate_findings/dedup/repro_obligation/requery` | 스키마 검증 → 재질의 파일, 중복 제거, repro 의무 |
+| `adjudicate.validate_findings/dedup/repro_obligation/requery` | 스키마 검증 → 재질의 파일, 중복 제거, repro 의무. repro 의무의 산출물 경로는 `adjudicate.records_root()` 가 `DEV4_RECORDS_ROOT` → `roster.json:records_root` → 기본값 순으로 해석하고, **그 경로가 없으면 강등하지 않고 blocking 을 유지**한다(평가 불가 ≠ 재현 없음) |
 
 ## 7. 알려진 한계 (META-REVIEW v2 참조)
 - 매크로(`NET_SERVER_REQUEST_ITEM`)가 함수로 잡힌다; 함수 포인터·가상 호출 미해석; `changed+1` 범위 밖 호출은 `root(no caller resolved)`.
