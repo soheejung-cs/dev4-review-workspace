@@ -3,6 +3,7 @@
 Metis 의 CodeGraph 계약을 따른다 — 심볼, 호출, 소스 위치, 언어 파생 사실(락/latch 호출)만 담고
 LLM 추론은 담지 않는다. 같은 입력(repo fingerprint + 파일 목록)이면 같은 그래프(행 순서까지)가 나온다.
 """
+import re
 import hashlib, json, os, sqlite3, subprocess, sys
 from dataclasses import dataclass, asdict, field
 from typing import Dict, Iterable, List, Optional, Tuple
@@ -66,6 +67,14 @@ class TreeSitterProvider:
     def parse_file(self, repo: str, rel: str) -> Tuple[List[FunctionNode], List[CallSite], List[DomainFact], List[dict]]:
         lang = 'cpp' if rel.endswith(('.cpp', '.hpp', '.cc', '.cxx')) else 'c'
         src = open(os.path.join(repo, rel), 'rb').read()
+        # A top-level function-like macro invocation without a trailing ';' (a kernel or leaf
+        # generator such as `EXPR_PRED_CMP_LEAF (name, db_get_int, ==)`) is not a C statement, and
+        # tree-sitter's recovery swallows everything up to the next parsable definition into one
+        # ERROR node -- 1,700 lines of expr_compile.c vanished from the graph (2026-09-30).  Blank
+        # such a line before parsing (same length, so line numbers and byte offsets are unchanged);
+        # an operator argument such as `<=` makes even a ';'-terminated form unparsable.  Generated
+        # functions themselves do not appear as definitions; look them up by --grep.
+        src = re.sub(rb'(?m)^[A-Z_][A-Z0-9_]*\s*\(.*\)\s*$', lambda m: b' ' * len(m.group(0)), src)
         tree = self._parsers[lang].parse(src)
         funcs, calls, facts, structs, types = [], [], [], [], []
 

@@ -39,44 +39,59 @@ def main():
     greps = [s.strip() for s in a.grep.split(',') if s.strip()]
     files = {f.strip() for f in a.files.split(',') if f.strip()}
 
-    # 1) 후보 줄 수집: 심볼 정의( 'name (' 로 시작하는 줄 ) + 키워드 줄
-    hits = {}
+    # 1) 후보 줄 수집 — 심볼 줄(정의+호출)과 키워드 줄을 따로 둔다: 심볼의 호출 줄이 키워드 후보로
+    #    둔갑하지 않게(2026-09-30 실측: 심볼 20개 + 키워드 7개에 후보 129개, 정의는 잘려 나감)
+    sym_hits = {}; kw_hits = {}
     for sym in symbols:
         for f, lns in git_grep(repo, sym).items():
-            for ln in lns: hits.setdefault(f, set()).add(ln)
+            for ln in lns: sym_hits.setdefault(f, set()).add(ln)
     for kw in greps:
         for f, lns in git_grep(repo, kw, word=False).items():
-            for ln in lns: hits.setdefault(f, set()).add(ln)
+            for ln in lns: kw_hits.setdefault(f, set()).add(ln)
+    hits = {}
+    for d in (sym_hits, kw_hits):
+        for f, lns in d.items(): hits.setdefault(f, set()).update(lns)
     for f in files: hits.setdefault(f, set())
     if not hits: log('후보 없음 — --symbols/--grep/--files 중 하나는 실제로 소스에 있어야 한다'); sys.exit(2)
+    # --files 가 있으면 후보는 그 파일들로 제한한다(그래프 범위는 그대로 같은 디렉터리까지)
+    if files:
+        dropped = {f for f in hits if f not in files}
+        if dropped: log(f'--files 밖 히트 {len(dropped)}개 파일은 후보에서 제외 (그래프 범위에만): {sorted(dropped)[:8]}{" …" if len(dropped) > 8 else ""}')
+        hits = {f: lns for f, lns in hits.items() if f in files}
+        kw_hits = {f: lns for f, lns in kw_hits.items() if f in files}
 
     # 2) 그래프 범위 = 후보 파일 + 같은 디렉터리 (리뷰 하네스의 changed+1 과 같은 규칙)
-    scope = set(hits)
-    for f in list(hits):
+    scope = set(hits) | set(files)
+    for f in list(scope):
         d = os.path.dirname(f); dd = os.path.join(repo, d)
         if os.path.isdir(dd): scope |= {os.path.join(d, fn) for fn in os.listdir(dd) if fn.endswith(SRC_EXT)}
     g = CG.CodeGraph.build(repo, sorted(scope), os.path.join(out, 'codegraph.sqlite3'), log=log)
 
-    # 3) 후보 함수: 심볼은 '정의' 만(호출 줄 제외), 키워드는 그 줄을 포함하는 함수
-    changed = {}; fids = []
-    for f, lns in sorted(hits.items()):
-        for fn in g.functions_in(f, sorted(lns)):
-            is_sym_def = fn.name in symbols
-            is_kw = any(ln in lns for ln in range(fn.start_line, fn.end_line + 1)) and (greps or not symbols)
-            if is_sym_def or is_kw or (fn.name in symbols):
-                if fn.fid in fids: continue
-                fids.append(fn.fid); changed.setdefault(fn.file, []).extend(range(fn.start_line, fn.end_line + 1))
-    # 심볼 정의가 hits 파일에 없을 수도(함수 정의 줄 패턴): functions 테이블에서 이름으로 보강
+    # 3) 후보 함수 — 우선순위: ① 요청한 심볼의 정의 ② 키워드 줄을 포함하는 함수. 상한을 넘으면 ②만 잘린다
+    fids = []; changed = {}
+    def take(fid):
+        if fid in fids: return
+        fn = g.function(fid); fids.append(fid); changed.setdefault(fn.file, []).extend(range(fn.start_line, fn.end_line + 1))
+    found = set()
     for sym in symbols:
         for (fid, file, s, e) in g.db.execute('SELECT fid,file,start_line,end_line FROM functions WHERE name=?', (sym,)):
-            if fid not in fids: fids.append(fid); changed.setdefault(file, []).extend(range(s, e + 1))
+            if files and file not in files: continue
+            take(fid); found.add(sym)
+    missing = [s for s in symbols if s not in found]
+    if missing: log(f'정의를 못 찾은 심볼 {len(missing)}개 (이름 오타·다른 디렉터리·매크로 생성 함수?): {missing}')
+    n_sym = len(fids)
+    for f, lns in sorted(kw_hits.items()):
+        for fn in g.functions_in(f, sorted(lns)):
+            take(fn.fid)
     if len(fids) > a.max_fns:
-        log(f'후보 {len(fids)}개 > {a.max_fns} — 키워드가 넓다. 앞 {a.max_fns}개만 넣고 나머지는 목록으로'); extra = fids[a.max_fns:]; fids = fids[:a.max_fns]
+        keep = max(a.max_fns, n_sym)
+        log(f'후보 {len(fids)}개 > {a.max_fns} — 키워드가 넓다. 심볼 정의 {n_sym}개는 전부, 키워드 후보는 앞 {keep - n_sym}개만 넣고 나머지는 목록으로')
+        extra = [g.function(fid).name for fid in fids[keep:]]; fids = fids[:keep]
         changed = {}
         for fid in fids:
             fn = g.function(fid); changed.setdefault(fn.file, []).extend(range(fn.start_line, fn.end_line + 1))
     else: extra = []
-    log(f'candidates: {len(fids)} functions in {len(changed)} files (graph {len(scope)} files, complete={g.complete()})')
+    log(f'candidates: {len(fids)} functions ({n_sym} symbol definitions) in {len(changed)} files (graph {len(scope)} files, complete={g.complete()})')
 
     # 4) 팩 + arch
     pack = CP.build(repo, g, '', os.path.join(ROOT, 'rules'), a.budget, os.path.join(ROOT, 'examples'), changed=changed, label='candidate function')
@@ -99,6 +114,7 @@ def main():
 - candidate layers: {arch.get('touched_layers')}
 - risks: {json.dumps(risks, ensure_ascii=False)[:1500]}
 {('- 후보 초과로 팩에 못 넣은 함수: ' + ', '.join(extra)) if extra else ''}
+{('- 정의를 못 찾은 심볼: ' + ', '.join(missing)) if missing else ''}
 
 ## plan 스키마 (harness/schemas/plan.json)
 ```json
@@ -109,7 +125,7 @@ def main():
     for i, b in enumerate(bs):
         name = 'implement_request.md' if len(bs) == 1 else f'implement_request.batch{i+1}.md'
         open(os.path.join(out, name), 'w', encoding='utf-8').write(head + f"\n## 컨텍스트 팩 ({i+1}/{len(bs)})\n" + b.render()); written.append(name)
-    json.dump({'key': a.key, 'repo_head': sh('git','-C',repo,'rev-parse','HEAD').strip(), 'symbols': symbols, 'grep': greps, 'files': sorted(files),
+    json.dump({'key': a.key, 'repo_head': sh('git','-C',repo,'rev-parse','HEAD').strip(), 'symbols': symbols, 'symbols_missing': missing, 'grep': greps, 'files': sorted(files),
                'candidate_fids': fids, 'n_files_parsed': len(scope), 'codegraph_complete': g.complete(), 'n_batches': len(bs),
                'harness_git': sh('git','-C',ROOT,'rev-parse','--short','HEAD').strip(), 'created': time.strftime('%Y-%m-%dT%H:%M:%S')},
               open(os.path.join(out, 'manifest.json'), 'w'), ensure_ascii=False, indent=1)
