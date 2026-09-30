@@ -56,6 +56,50 @@ def repo_fingerprint(repo: str) -> str:
     dirty = subprocess.run(['git', '-C', repo, 'status', '--porcelain', '--untracked-files=no'], stdout=subprocess.PIPE, universal_newlines=True).stdout
     return hashlib.sha1((head + dirty).encode()).hexdigest()
 
+_FN_START = re.compile(rb'(?m)^[a-z_][a-zA-Z0-9_:]*\s*\(')
+_NOT_A_DEFINITION = re.compile(rb'^(static_assert|__attribute__|sizeof|return|if|while|for|switch|do|else|case|goto|typedef)\b')
+
+def _definition_starts(src: bytes):
+    """Heuristic function-definition starts (house style: name at column 0, type on the line before).
+    Filters what merely looks like one: static_assert/__attribute__ lines, a line ending in ';' (a
+    prototype or a statement), a continuation of the previous line (ending in ',', '(' or '\\')."""
+    lines = src.split(b'\n'); out = set()
+    for m in _FN_START.finditer(src):
+        ln = src.count(b'\n', 0, m.start()); line = lines[ln].rstrip()
+        if _NOT_A_DEFINITION.match(line) or line.endswith(b';'): continue
+        prev = lines[ln - 1].rstrip() if ln > 0 else b''
+        if prev.endswith((b',', b'(', b'\\', b'&&', b'||')) or prev.startswith(b'#define'): continue
+        out.add(ln)
+    return out
+
+def _normalize_split_headers(src: bytes) -> bytes:
+    """CUBRID's debug/release twin definitions split the header with the preprocessor:
+         #if !defined(NDEBUG)
+         int fn_debug (..., const char *caller_file, int caller_line)
+         #else
+         int fn (...)
+         #endif
+         { body }
+       No C grammar parses a declarator that ends at #else, so the whole function (and often the
+       next ones) is lost.  Keep the first header and blank the #if/#else-branch/#endif lines (same
+       lengths, so line numbers hold): the debug-named function owns the body in the graph."""
+    lines = src.split(b'\n'); n = len(lines); i = 0
+    while i < n:
+        if re.match(rb'\s*#\s*if', lines[i]):
+            j = i + 1
+            while j < n and not re.match(rb'\s*#\s*(else|elif|endif)', lines[j]): j += 1
+            if j < n and re.match(rb'\s*#\s*else', lines[j]):
+                k = j + 1
+                while k < n and not re.match(rb'\s*#\s*(endif|if|else|elif)', lines[k]): k += 1
+                if k < n and re.match(rb'\s*#\s*endif', lines[k]):
+                    m = k + 1
+                    while m < n and lines[m].strip() == b'': m += 1
+                    if m < n and lines[m].lstrip().startswith(b'{') and 0 < j - i <= 6 and 0 < k - j <= 6:
+                        for x in (i, k, *range(j, k)): lines[x] = b' ' * len(lines[x])
+                        i = m; continue
+        i += 1
+    return b'\n'.join(lines)
+
 class TreeSitterProvider:
     """언어 소유 제공자. 실패(문법 라이브러리 없음)면 CtagsProvider 로 폴백한다."""
     def __init__(self):
@@ -75,27 +119,27 @@ class TreeSitterProvider:
         # an operator argument such as `<=` makes even a ';'-terminated form unparsable.  Generated
         # functions themselves do not appear as definitions; look them up by --grep.
         src = re.sub(rb'(?m)^[A-Z_][A-Z0-9_]*\s*\(.*\)\s*$', lambda m: b' ' * len(m.group(0)), src)
-        # Parse quality = lines inside ERROR nodes that no function_definition covers, over total
-        # lines: the lines whose functions the parser LOST (a function extracted inside a
-        # recovering ERROR node still counts as parsed).  A file over PARSE_ERROR_LIMIT must not be
-        # reported as "complete" (2026-09-30: 60% of expr_compile.c was inside one ERROR node while
+        src = _normalize_split_headers(src)
+        # Parse quality = function definitions the parser LOST: heuristic definition starts (an
+        # identifier followed by '(' at column 0, the house style) that no function_definition node
+        # covers, over all such starts.  A file over PARSE_ERROR_LIMIT must not be reported as
+        # "complete" (2026-09-30: 60% of expr_compile.c sat inside one ERROR node while
         # codegraph_complete said true).  The .c files are compiled as C++ here, so when the C
-        # grammar loses too much the C++ grammar is tried and the better parse kept.
+        # grammar loses functions the C++ grammar is tried and the better parse kept.
+        starts = _definition_starts(src)
         def _parse(l):
             t = self._parsers[l].parse(src)
-            err = set(); fn = set(); stack = [t.root_node]
+            fn = set(); stack = [t.root_node]
             while stack:
                 n = stack.pop()
                 if n.type == 'function_definition': fn.update(range(n.start_point[0], n.end_point[0] + 1))
-                elif n.type == 'ERROR': err.update(range(n.start_point[0], n.end_point[0] + 1))
                 stack.extend(n.children)
-            return t, len(err - fn)
-        total = src.count(b'\n') + 1
+            return t, len([x for x in starts if x not in fn])
         tree, lost = _parse(lang)
-        if lang == 'c' and lost / total > CodeGraph.PARSE_ERROR_LIMIT:
+        if lang == 'c' and lost > 0:
             tree2, lost2 = _parse('cpp')
             if lost2 < lost: tree, lost, lang = tree2, lost2, 'cpp'
-        self.last_quality = (lost, total)
+        self.last_quality = (lost, len(starts))
         funcs, calls, facts, structs, types = [], [], [], [], []
 
         def text(n): return src[n.start_byte:n.end_byte].decode('utf-8', 'replace')
@@ -197,7 +241,7 @@ class CodeGraph:
     def build(cls, repo: str, files: Iterable[str], db_path: str, provider=None, log=print) -> 'CodeGraph':
         files = sorted(set(files))  # 결정론: 입력 순서 무관
         fp = repo_fingerprint(repo)
-        key = hashlib.sha1(('v3|' + fp + '\n'.join(files)).encode()).hexdigest()
+        key = hashlib.sha1(('v5|' + fp + '\n'.join(files)).encode()).hexdigest()
         g = cls(db_path, repo)
         cur = g.db.execute("SELECT v FROM meta WHERE k='input_fingerprint'").fetchone()
         if cur and cur[0] == key:
@@ -212,10 +256,10 @@ class CodeGraph:
             for rel in files:
                 if not os.path.isfile(os.path.join(repo, rel)): continue
                 fs, cs, fa, st, ty = provider.parse_file(repo, rel)
-                q = getattr(provider, 'last_quality', None)
-                if q and q[1] > 0 and q[0] / q[1] > 0.02:
-                    quality[rel] = round(q[0] / q[1], 3)
-                    if q[0] / q[1] > cls.PARSE_ERROR_LIMIT: complete = False
+                q = getattr(provider, 'last_quality', None)   # (lost function starts, all starts)
+                if q and q[0] > 0:
+                    quality[rel] = {'lost': q[0], 'starts': q[1]}
+                    if q[1] > 0 and q[0] / q[1] > cls.PARSE_ERROR_LIMIT and q[0] >= cls.PARSE_LOST_MIN: complete = False
                 g.db.executemany('INSERT OR REPLACE INTO functions VALUES(?,?,?,?,?,?,?)', [(f.fid, f.name, f.file, f.start_line, f.end_line, f.params, int(f.is_static)) for f in fs])
                 g.db.executemany('INSERT INTO calls VALUES(?,?,?,?,NULL)', [(c.caller, c.callee, c.line, c.args) for c in cs])
                 g.db.executemany('INSERT INTO facts VALUES(?,?,?,?,?)', [(x.fid, x.kind, x.callee, x.line, x.var) for x in fa])
@@ -224,8 +268,9 @@ class CodeGraph:
             g._resolve()
             g.db.executemany('INSERT OR REPLACE INTO meta VALUES(?,?)', [('input_fingerprint', key), ('repo_fingerprint', fp), ('complete', '1' if complete else '0'), ('n_files', str(len(files))), ('schema_version', cls.SCHEMA_VERSION), ('parse_quality', json.dumps(quality, sort_keys=True))])
         log(f'codegraph: built {g.count("functions")} functions, {g.count("calls")} calls, {g.count("facts")} domain facts from {len(files)} files')
-        bad = {k: v for k, v in quality.items() if v > cls.PARSE_ERROR_LIMIT}
-        if bad: log(f'codegraph: parse ERROR ratio over {cls.PARSE_ERROR_LIMIT:.0%} in {len(bad)} file(s) -> complete=False: {bad}')
+        bad = {k: v for k, v in quality.items() if v['starts'] and v['lost'] / v['starts'] > cls.PARSE_ERROR_LIMIT and v['lost'] >= cls.PARSE_LOST_MIN}
+        if bad: log(f'codegraph: lost over {cls.PARSE_ERROR_LIMIT:.0%} of the functions in {len(bad)} file(s) -> complete=False: {bad}')
+        elif quality: log(f'codegraph: functions the parser lost (under the limit): ' + ', '.join(f"{k} {v['lost']}/{v['starts']}" for k, v in quality.items()))
         return g
 
     def _resolve(self):
@@ -245,11 +290,12 @@ class CodeGraph:
         self.db.executemany('UPDATE calls SET resolved=? WHERE rowid=?', upd)
 
     def count(self, table): return self.db.execute(f'SELECT COUNT(*) FROM {table}').fetchone()[0]
-    PARSE_ERROR_LIMIT = 0.10   # a file with more ERROR lines than this has lost functions: the graph is not complete
+    PARSE_ERROR_LIMIT = 0.10   # a file that lost more than this share of its functions makes the graph incomplete ...
+    PARSE_LOST_MIN = 3         # ... provided it lost at least this many (a 4-function file losing one is noise, not blindness)
 
     def complete(self): r = self.db.execute("SELECT v FROM meta WHERE k='complete'").fetchone(); return bool(r and r[0] == '1')
     def parse_quality(self) -> Dict[str, float]:
-        """rel file -> ERROR-line ratio for files above the 2% noise floor (empty = every file parsed cleanly)"""
+        """rel file -> {'lost': functions the parser lost, 'starts': heuristic definition count}; empty = nothing lost"""
         r = self.db.execute("SELECT v FROM meta WHERE k='parse_quality'").fetchone()
         return json.loads(r[0]) if r and r[0] else {}
     def functions_in(self, file: str, lines: Iterable[int]) -> List[FunctionNode]:

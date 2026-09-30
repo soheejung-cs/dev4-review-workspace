@@ -5,7 +5,7 @@
 """
 import hashlib, json, os, subprocess, sys, time
 import yaml
-from . import codegraph as CG, context_pack as CP, arch_infer as AI, adjudicate as AD, perf_claims as PC, episodic as EP, or_buf as OB
+from . import codegraph as CG, context_pack as CP, arch_infer as AI, adjudicate as AD, perf_claims as PC, episodic as EP, or_buf as OB, pr_refs as PR
 from .run_support import Worktree, sh
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -85,7 +85,13 @@ def n_self_check(c, a):
     if not any(r['status'] == 'valid' for r in c.get('adjudicated', [])): c['log']('self_check: skipped (no valid finding)'); return None
     r = AD.self_check_build(c.need('wt'), files); c['log'](f'self_check: {r}'); json.dump(r, open(os.path.join(c['out'], 'self_check.json'), 'w')); return r
 def n_episodic(c, a):
-    p = EP.collect(c['pr'], a.get('reviewer', 'soheejung-cs'), os.path.join(ROOT, 'examples', 'episodic')); c['log'](f'episodic: {p}'); return p
+    p = EP.collect(c['pr'], a.get('reviewer', 'soheejung-cs'), os.path.join(ROOT, 'examples', 'episodic'), local=c.get('adjudicated'))
+    n = len(json.load(open(p, encoding='utf-8'))); c['log'](f'episodic: {n} items -> {p}'); return p
+def n_pr_refs(c, a):
+    """본문이 기대는 외부 사실 — 참조 PR 상태(미머지로 닫힌 것을 "포트했다" 고 적었나), 언급한 커밋 해시가 head 에 있나."""
+    r = PR.check(c['pr'], c['meta'].get('body') or '', c['meta']['headRefOid'], 'CUBRID/cubrid', c.get('wt') or os.path.expanduser('~/dev/sources/cubrid'))
+    open(os.path.join(c['out'], 'pr_refs.md'), 'w', encoding='utf-8').write(PR.to_md(r)); json.dump(r, open(os.path.join(c['out'], 'pr_refs.json'), 'w'), ensure_ascii=False, indent=1)
+    c['pr_refs'] = r; c['log'](f"pr_refs: {len(r['prs'])} PR refs, {len(r['hashes'])} hashes, warnings {len(r['warnings'])}" + (' — ' + ' | '.join(r['warnings']) if r['warnings'] else '')); return r
 
 
 def _mandatory(rules_dir):
@@ -125,6 +131,9 @@ def n_review_request(c, a):
 {json.dumps(auto, ensure_ascii=False, indent=1)}
 ```
 
+## 본문 참조 확인 (pr_refs)
+{chr(10).join('- ⚠ ' + w for w in (c.get('pr_refs') or {}).get('warnings', [])) or '- 참조 PR·커밋 해시 모두 정상 (또는 미실행)'}
+
 ## 아키텍처 유추 (arch.json 요약)
 """ + (('- touched layers: ' + ', '.join(arch['architecture']['touched_layers']) + '\n- edges: ' + '; '.join(f"{e['source']}->{e['target']}({e['calls']})" for e in arch['architecture']['connections'][:30]) + '\n- risks: ' + ('\n  - '.join(f"[{r['severity']}] {r['kind']} {r['component']}: {r['issue']}" for r in arch['risks']) or 'none')) if arch else '- (design infer 미실행)') + f"""
 
@@ -149,7 +158,8 @@ def n_report(c, a):
         v = r.get('verification') or {}
         return (f"- {AD.comment_header(r)} `{r.get('file')}:{r.get('line')}` — {r.get('claim')}\n  - 왜 문제인가: {r.get('why', '(없음)')}\n  - 제안: {r.get('proposal', '(없음)')}"
                 + (f"\n  - 검증: [{v.get('method')}] {v.get('result')}" + (f" ({v.get('artifact')})" if v.get('artifact') else '') if v else '')
-                + f"\n  - status **{r.get('status')}**, {r.get('severity')}, rules {r.get('rule_ids') or '-'}" + (f"; {'; '.join(r.get('reasons'))}" if r.get('reasons') else ''))
+                + f"\n  - status **{r.get('status')}**, {r.get('severity')}, rules {r.get('rule_ids') or '-'}" + (f"; {'; '.join(r.get('reasons'))}" if r.get('reasons') else '')
+                + (f"\n  - 통과: {', '.join(r.get('passed'))}" if r.get('passed') else ''))
     ORDER = {'높음': 0, '중간': 1, '낮음': 2}
     res = sorted(res, key=lambda r: ORDER.get(r.get('importance', '중간'), 1))
     valid = [r for r in res if r['status'] == 'valid']; inc = [r for r in res if r['status'] != 'valid']
@@ -163,11 +173,15 @@ def n_report(c, a):
     arch_p = os.path.join(c['out'], 'arch.json')
     if os.path.isfile(arch_p):
         arch = json.load(open(arch_p, encoding='utf-8')); md += ['', '## 아키텍처 리스크 (결정론 탐지)', ''] + [f"- [{r['severity']}] {r['kind']} `{r['component']}` — {r['issue']}" for r in arch['risks']] or ['없음']
+    pr_p = os.path.join(c['out'], 'pr_refs.json')
+    if os.path.isfile(pr_p):
+        rr = json.load(open(pr_p, encoding='utf-8'))
+        md += ['', '## 본문 참조 확인 (pr_refs)', ''] + ([f'- ⚠ {w}' for w in rr['warnings']] or ['- 참조 PR·커밋 해시 모두 정상']) + [f"- 참조 PR: " + ', '.join(f'{a} {b}' for a, b, _ in rr['prs'])] if rr['prs'] else []
     md += ['', '## 돌릴 것 (제안 — 요청자 확인 후)', '', f"- 변경 계층 {json.load(open(arch_p))['architecture']['touched_layers'] if os.path.isfile(arch_p) else '?'} → review-testing 매트릭스로 CTP/동시성/JOB/TPC-H 제안", '', f"_manifest: harness {sh('git','-C',ROOT,'rev-parse','--short','HEAD').stdout.strip()}, model {os.environ.get('HARNESS_MODEL','unset')}_"]
     open(os.path.join(c['out'], 'report.md'), 'w', encoding='utf-8').write('\n'.join(md)); c['log']('report: report.md'); return md
 
 REGISTRY = {'review_request': n_review_request, 'report': n_report, 'worktree': n_worktree, 'diff_map': n_diff_map, 'codegraph': n_codegraph, 'pack': n_pack, 'arch': n_arch, 'perf_claims': n_perf_claims, 'or_buf': n_or_buf,
-            'validate': n_validate, 'gate': n_gate, 'self_check': n_self_check, 'episodic': n_episodic}
+            'validate': n_validate, 'gate': n_gate, 'self_check': n_self_check, 'episodic': n_episodic, 'pr_refs': n_pr_refs}
 
 def load(path):
     y = yaml.safe_load(open(path, encoding='utf-8'))

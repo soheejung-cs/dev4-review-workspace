@@ -65,7 +65,17 @@ def adjudicate(repo: str, g: CodeGraph, changed: Dict[str, List[int]], findings:
             status = 'valid'
         elif obligations['graph_supports'] is False or not obligations['anchor_exists']:
             status = 'invalid' if not obligations['anchor_exists'] else 'inconclusive'
-        out.append(fill_importance(dict(f, status=status, obligations=obligations, reasons=reasons)))
+        # 통과한 의무도 적는다 — valid 판정에 이유가 비면 "왜 valid 인지" 를 나중에 되짚을 수 없다 (2026-09-30)
+        passed = []
+        if obligations['anchor_exists']: passed.append(f"anchor {file}:{line} 존재" + (" · diff 안" if obligations['anchor_in_diff'] else " · diff 밖(설계 층)" if f.get('layer') != '코드' else ''))
+        if obligations['evidence_resolves']: passed.append(f'evidence {len(ev)}/{len(ev)} 해석')
+        if obligations['why_present']: passed.append('why 있음')
+        if obligations['proposal_present']: passed.append('proposal 있음')
+        if rids and obligations['rule_known']: passed.append(f'rule {sorted(rids)} 규칙집에 있음')
+        if obligations['graph_supports'] is True: passed.append('그래프가 관문 짝 불균형을 뒷받침')
+        v = f.get('verification') or {}
+        if v.get('method') in ('static', 'dynamic') and (v.get('result') or '').strip(): passed.append(f"verification [{v['method']}] 있음")
+        out.append(fill_importance(dict(f, status=status, obligations=obligations, reasons=reasons, passed=passed)))
     return out
 
 def self_check_build(repo: str, files: List[str], timeout: int = 900) -> Dict:
@@ -103,11 +113,26 @@ def self_check_ninja(repo: str, files: List[str], timeout: int = 1800) -> Dict:
     repo 가 빌드 디렉터리의 소스(메인 체크아웃)가 아니면 컴파일할 수 없어 ran=False."""
     build_dir = os.environ.get('HARNESS_BUILD_DIR', os.path.expanduser('~/dev/build/build_x86_64_release'))
     main_src = os.path.realpath(os.path.expanduser('~/dev/sources/cubrid'))
-    if os.path.realpath(repo) != main_src: return {'ran': False, 'reason': f'ninja 폴백은 메인 체크아웃({main_src})만 컴파일한다; repo={repo}'}
     if not os.path.isfile(os.path.join(build_dir, 'build.ninja')): return {'ran': False, 'reason': f'build.ninja 없음 ({build_dir})'}
     files = [f for f in files if f.endswith(('.c', '.cpp', '.cc'))]
     if not files: return {'ran': True, 'method': 'ninja', 'results': {}}
     tmap = ninja_targets_for(build_dir, files)
+    if os.path.realpath(repo) != main_src:
+        # 워크트리(PR head 스냅샷)의 파일: 오브젝트를 굽는 대신 ninja 가 쓰는 컴파일 명령을 그대로 가져와
+        # 소스 경로만 워크트리로 바꿔 -fsyntax-only 로 돈다 (include 경로·정의는 빌드 디렉터리 것 그대로).
+        res = {}
+        for f, ts in tmap.items():
+            if not ts: res[f] = 'no-ninja-target'; continue
+            outs = []
+            for t in ts:
+                cmd = subprocess.run(['ninja', '-C', build_dir, '-t', 'commands', t], stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True).stdout.strip().splitlines()
+                cmd = cmd[-1] if cmd else ''
+                if not cmd or ' -c ' not in cmd: outs.append(f'{t}: 명령 없음'); continue
+                cmd = re.sub(r'\s-o\s+\S+', ' -o /dev/null', cmd).replace(os.path.join(main_src, f), os.path.join(repo, f)) + ' -fsyntax-only'
+                r = subprocess.run(cmd, shell=True, cwd=build_dir, stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True, timeout=timeout)
+                if r.returncode: outs.append(f'{t}: ' + r.stderr[-600:])
+            res[f] = 'ok' if not outs else 'FAILED ' + ' | '.join(outs)
+        return {'ran': True, 'method': 'ninja-commands (worktree, -fsyntax-only)', 'results': res}
     res = {}; all_targets = []
     for f, ts in tmap.items():
         if not ts: res[f] = 'no-ninja-target'; continue
