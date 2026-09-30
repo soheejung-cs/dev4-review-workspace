@@ -262,6 +262,31 @@ def render(rows, now, orphans=()):
     h.append('<h1>review-to-do</h1><div class="meta">스냅샷 %s · assignee ∈ {%s} · open · non-draft · 미해결 스레드는 리뷰 코멘트 기준 · CI 는 보지 않음(사용자 지시) · TC PR 은 JIRA 키/cubrid#n 으로 엔진 PR 하위에 연동</div>' % (now, ', '.join(TRACKED)))
     h.append('<div class="facts"><div class="fact"><b>%d</b><span>추적 PR</span></div><div class="fact"><b class="%s">%d</b><span>미해결 스레드 합</span></div><div class="fact"><b>%d</b><span>리뷰 미착수 PR</span></div><div class="fact"><b class="%s">%d</b><span>승인 0 PR</span></div><div class="fact"><b class="%s">%d</b><span>승인만 남은 PR</span></div><div class="fact"><b>%d / %d</b><span>에이전트가 리뷰한 PR (%s)</span></div></div>' % (len(rows), 'warn' if tot_unres else 'ok', tot_unres, tot_wait, 'warn' if tot_noapr else 'ok', tot_noapr, 'bad' if tot_stuck else 'ok', tot_stuck, tot_agent, len(rows), esc(','.join(sorted(AGENT)))))
     h.append('<div class="meta" style="margin:6px 0 2px">누구 차례인가 — <b>미해결 &gt; 0</b>: 작성자 · <b>미해결 0 + 승인자 0</b>: 리뷰어(승인 필요, "승인만 남은 PR") · <b>미해결 0 + 승인자 ≥ 1</b>: 머지 가능. 리뷰어 필 — <span class="pill req">미착수</span> 요청됐고 리뷰 이력 없음 · <span class="pill pend">승인 전</span> 리뷰했으나 승인 안 함(GitHub 은 리뷰 제출 시 요청 목록에서 빼므로 이 상태가 따로 필요하다)</div>')
+    # 업무 부하표 (사용자 지시 2026-09-30): 본인 PR / 리뷰 중(미착수 + 승인 전) / 추천받은 PR / 합계 — 추적 ID 전원
+    def walk_tc(r):
+        for t in r.get('linked_tc', []):
+            yield t
+    people = list(TRACKED)
+    load = {c: {'own': [], 'reviewing': [], 'recommended': []} for c in people}
+    for r in rows:
+        if r['author'] in load: load[r['author']]['own'].append(r['number'])
+        for c in r.get('requested', []) + r.get('pending_approval', []):
+            if c in load and r['number'] not in load[c]['reviewing']: load[c]['reviewing'].append(r['number'])
+        for t in walk_tc(r):
+            for c in t.get('requested', []) + t.get('pending_approval', []):
+                if c in load and ('tc#%d' % t['number']) not in load[c]['reviewing']: load[c]['reviewing'].append('tc#%d' % t['number'])
+        for x in (r.get('rec') or {}).get('picks', []):
+            if x['login'] in load and not x['already']: load[x['login']]['recommended'].append(r['number'])
+    tot = {c: len(v['own']) + len(v['reviewing']) + len(v['recommended']) for c, v in load.items()}
+    mx = max(tot.values() or [1])
+    h.append('<h2>업무 부하 <span class="meta">본인 PR + 리뷰 중(미착수·승인 전, TC PR 포함) + 추천받은 PR</span></h2>')
+    h.append('<table><tr><th>사람</th><th>본인 PR</th><th>리뷰 중</th><th>추천받음</th><th>합계</th><th></th></tr>')
+    for c in sorted(people, key=lambda c: -tot[c]):
+        v = load[c]; bar = '<div style="height:8px;border-radius:4px;background:var(--gate);width:%d%%;opacity:.7"></div>' % (100 * tot[c] // mx if mx else 0)
+        fmt = lambda xs: '<span class="muted" style="font-size:11px">%s</span>' % esc(' '.join('#%s' % x if isinstance(x, int) else x for x in xs)) if xs else ''
+        h.append('<tr><td class="n">%s</td><td class="n">%d %s</td><td class="n">%d %s</td><td class="n">%d %s</td><td class="n"><b class="%s">%d</b></td><td style="width:180px">%s</td></tr>' % (
+            esc(c), len(v['own']), fmt(v['own']), len(v['reviewing']), fmt(v['reviewing']), len(v['recommended']), fmt(v['recommended']), 'bad' if tot[c] >= mx and mx >= 6 else '', tot[c], bar))
+    h.append('</table>')
     for who in TRACKED:
         rs = by.get(who, [])
         h.append('<h2>@%s <span class="meta">%d PR</span></h2>' % (esc(who), len(rs)))
