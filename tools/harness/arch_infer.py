@@ -27,6 +27,22 @@ def layer_of(path: str) -> Tuple[str, str]:
         if path.startswith(pfx): return lid, name
     return ('?', path.split('/')[1] if path.count('/') >= 1 else path)
 
+def include_edges(repo: str, diff: str) -> List[Dict]:
+    """diff 가 새로 넣은 `#include "x.h"` 줄 → (포함하는 파일의 계층 → 헤더의 계층) 간선.  호출 그래프는 헤더 의존을
+    보지 못하므로(매크로·인라인·타입만 쓰는 의존) 이 간선이 계층 경계를 넘는 새 의존의 첫 신호다 (2026-09-30)."""
+    import os, re, glob
+    edges = []; cur = None
+    for line in diff.splitlines():
+        if line.startswith('+++ b/'): cur = line[6:]; continue
+        if cur is None or not line.startswith('+') or line.startswith('+++'): continue
+        m = re.match(r'\+\s*#\s*include\s+"([^"]+)"', line)
+        if not m: continue
+        hdr = m.group(1); hits = glob.glob(os.path.join(repo, 'src', '**', os.path.basename(hdr)), recursive=True)
+        target = os.path.relpath(hits[0], repo) if hits else None
+        a = layer_of(cur)[1]; b = layer_of(target)[1] if target else '?'
+        edges.append({'source': a, 'target': b, 'kind': 'include', 'file': cur, 'header': hdr, 'header_path': target, 'cross_layer': a != b})
+    return edges
+
 def infer(g: CodeGraph, changed_fids: List[str]) -> Dict:
     comps: Dict[str, Dict] = {}
     conns: Counter = Counter()
@@ -43,6 +59,18 @@ def infer(g: CodeGraph, changed_fids: List[str]) -> Dict:
     # 변경이 닿은 계층
     touched = sorted({layer_of(f.split(':', 1)[0])[1] for f in changed_fids})
     return {'components': sorted(comps.values(), key=lambda c: c['id']), 'connections': connections, 'touched_layers': touched}
+
+def include_risks(edges: List[Dict]) -> List[Dict]:
+    """계층을 넘는 새 include: 바닥(base/compat)으로 내려가는 건 허용, 허브(object)·공식 사이클 안은 낮음, 그 밖은 중간 — 설계 리뷰가 '왜 이 의존이 여기 생겼나' 를 묻는 자리."""
+    risks = []
+    for e in edges:
+        if not e['cross_layer'] or e['target'] == '?': continue
+        a, b = e['source'], e['target']
+        if b in DOWNWARD_OK: continue
+        sev = 'low' if (b == HUB or frozenset({a, b}) in ALLOWED_CYCLES or (a, b) in DISPATCH_OK) else 'medium'
+        if a in DOWNWARD_OK: sev = 'high'   # 바닥 계층이 위를 include — 방향 역전
+        risks.append({'kind': 'new-include', 'severity': sev, 'component': f'{a} -> {b}', 'issue': f"{e['file']} 가 {e['header']} 를 새로 include (호출 그래프에 안 보이는 계층 간 의존: 타입·매크로·인라인)", 'evidence': [f"{e['file']}: #include \"{e['header']}\""], 'rule': '설계-리뷰-규칙 §3 (의존 방향·새 사이클)'})
+    return risks
 
 def detect_risks(arch: Dict, g: CodeGraph, changed_fids: List[str]) -> List[Dict]:
     risks = []
@@ -69,7 +97,7 @@ def detect_risks(arch: Dict, g: CodeGraph, changed_fids: List[str]) -> List[Dict
         pair = R.latch_pairing(g, fid)
         for k, v in pair.items():
             if v > 0:
-                risks.append({'kind': 'gate-imbalance', 'severity': 'medium', 'component': fid, 'issue': f'{k} = {v:+d} (이 함수 안의 호출 수 차; 에러 경로 unfix/unlock 누락 후보 — 조건 분기·호출자 위임이면 오탐)', 'evidence': [f'{fid}:{l} {c}' for kd, c, l in g.facts(fid) if kd.split("_")[0] == k.split("_")[0]][:6], 'rule': 'src-storage §2 pgbuf 짝 규약 / 설계-리뷰-규칙 §4 P3'})
+                risks.append({'kind': 'gate-imbalance', 'severity': 'medium', 'component': fid, 'issue': f'{k} = {v:+d} (이 함수 안의 호출 수 차; 에러 경로 unfix/unlock 누락 후보 — 조건 분기·호출자 위임·반환값으로 소유권 이전(빌더 함수)이면 오탐)', 'evidence': [f'{fid}:{l} {c}' for kd, c, l in g.facts(fid) if kd.split('_')[0] in k.replace('-', '_').split('_')][:6], 'rule': 'src-storage §2 pgbuf 짝 규약 / 설계-리뷰-규칙 §4 P3'})
         # 3) 락 획득 순서: 한 함수 안에서 latch 를 잡은 채 lock_object 를 부르면(래치 → 락) 데드락 등급 A 자원 순서 위반 후보
         kinds = [(l, k) for k, _, l in g.facts(fid)]
         held = 0

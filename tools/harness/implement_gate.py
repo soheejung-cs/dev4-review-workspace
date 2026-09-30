@@ -4,14 +4,16 @@
 검사: (1) 범위 — 바뀐 파일·함수가 plan.changes 안인가  (2) codestyle.sh  (3) -fsyntax-only (compile_commands 있으면)
       (4) 관문 짝 — 바뀐 함수의 latch/lock/alloc 카운트가 계획 없이 달라졌나 (before 그래프와 비교)
 결과: <out>/gate.json + 표준출력 요약. 실패 = 코드를 고쳐 다시(재질의 1회 규칙은 스킬이 관리)."""
-import argparse, json, os, subprocess, sys, tempfile, shutil
+import argparse, sys, json, os, subprocess, sys, tempfile, shutil
 from . import codegraph as CG, reachability as R, adjudicate as AD, context_pack as CP
+ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 def sh(*a, cwd=None): return subprocess.run(list(a), stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True, cwd=cwd)
 
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('--plan', required=True); ap.add_argument('--repo', default=os.path.expanduser('~/dev/sources/cubrid'))
+    ap.add_argument('--commits', default='', help='<base>..<head>: 커밋마다 홀로 컴파일되는지도 본다(compile_check) — 나눈 커밋 필수')
     ap.add_argument('--base', default='HEAD', help='비교 기준 rev (기본 HEAD: 미커밋 변경을 본다; 커밋했으면 upstream/develop 등)')
     ap.add_argument('--before', default='', help='plan 시점 codegraph.sqlite3 (기본: plan 과 같은 디렉터리)')
     a = ap.parse_args()
@@ -22,7 +24,11 @@ def main():
     # (1) 범위
     diff = sh('git', '-C', repo, 'diff', '--name-only', a.base).stdout.split() + sh('git', '-C', repo, 'ls-files', '--others', '--exclude-standard', 'src').stdout.split()
     changed_files = sorted({f for f in diff if f.endswith(('.c', '.cpp', '.h', '.hpp', '.cc'))})
-    plan_files = {c['file'] for c in plan.get('changes', [])}; plan_fns = {(c['file'], c['function']) for c in plan.get('changes', [])}
+    plan_files = {c['file'] for c in plan.get('changes', [])}
+    # plan 의 function 칸은 사람이 "a / b / c" 나 "(선언 3곳: a, b)" 처럼 여러 이름을 적기도 한다 — 식별자 토큰 전부를 인정한다 (2026-09-30)
+    import re as _re
+    plan_fns = {(c['file'], tok) for c in plan.get('changes', []) for tok in _re.findall(r'[A-Za-z_][A-Za-z0-9_]*', c['function']) if len(tok) > 2}
+    plan_wild = {c['file'] for c in plan.get('changes', []) if '*' in c['function']}   # "file: *" 는 그 파일 전체 허용
     for f in changed_files:
         if f not in plan_files: fail('scope', f'plan 밖 파일 변경: {f}')
     for f in plan_files:
@@ -42,6 +48,11 @@ def main():
     res['checks']['syntax'] = sc
     if sc.get('ran') and any(v not in ('ok', 'no-compile-command', 'no-ninja-target') for v in sc['results'].values()): fail('syntax', '컴파일 실패 — checks.syntax.results 참조')
     res['skipped'] = [] if sc.get('ran') else ['syntax: ' + sc.get('reason', '')]
+    if a.commits:
+        # 커밋 단위 컴파일: 헝크로 나눈 커밋이 홀로 컴파일되지 않던 사고(2026-09-30) — 게이트가 직접 돈다
+        cc = subprocess.run([sys.executable, '-m', 'tools.harness.compile_check', '--repo', repo, '--commits', a.commits], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, universal_newlines=True, cwd=ROOT)
+        res['checks']['commits'] = [l for l in cc.stdout.splitlines() if l.strip()]
+        if cc.returncode: fail('commits', f'커밋 단위 컴파일 실패 ({a.commits}) — checks.commits 참조')
     if sc.get('ran'): res['skipped'] += [f'syntax({f}): {v}' for f, v in sc['results'].items() if v in ('no-compile-command', 'no-ninja-target')]
     # (4) 관문 짝 전후 비교
     before_db = a.before or os.path.join(out, 'codegraph.sqlite3')
@@ -56,14 +67,15 @@ def main():
         for f, lns in changed_lines.items():
             for fn in g_after.functions_in(f, lns):
                 touched.append(fn.fid)
-                if (fn.file, fn.name) not in plan_fns: fail('scope', f'plan 밖 함수 변경: {fn.fid}')
+                if (fn.file, fn.name) not in plan_fns and fn.file not in plan_wild: fail('scope', f'plan 밖 함수 변경: {fn.fid}')
                 pa = R.latch_pairing(g_after, fn.fid); pb = R.latch_pairing(g_before, fn.fid) if g_before and g_before.function(fn.fid) else {}
                 delta = {k: pa.get(k, 0) - pb.get(k, 0) for k in set(pa) | set(pb) if pa.get(k, 0) != pb.get(k, 0)}
                 unbalanced = {k: v for k, v in pa.items() if v}
                 if unbalanced:
-                    declared = next((c.get('gate_contract', '') for c in plan.get('changes', []) if c['file'] == fn.file and c['function'] == fn.name), '')
-                    if not declared: fail('gates', f'{fn.fid}: 관문 카운트 불균형 {unbalanced} (변화 {delta}) 인데 plan.gate_contract 가 비어 있음')
-                    else: res['checks'].setdefault('gates-declared', []).append(f'{fn.fid}: {unbalanced} — 계약: {declared[:120]}')
+                    declared = next((c.get('gate_contract', '') for c in plan.get('changes', []) if c['file'] == fn.file and fn.name in c['function']), '')
+                    if declared: res['checks'].setdefault('gates-declared', []).append(f'{fn.fid}: {unbalanced} — 계약: {declared[:120]}')
+                    elif delta and g_before is not None and g_before.function(fn.fid): fail('gates', f'{fn.fid}: 이 변경이 관문 카운트를 바꿈 {delta} (현재 불균형 {unbalanced}) 인데 plan.gate_contract 가 비어 있음')
+                    else: res['checks'].setdefault('gates-note', []).append(f'{fn.fid}: 불균형 {unbalanced} 은 변경 전에도 같음(또는 before 그래프 없음) — 빌더의 소유권 이전이면 정상, 아니면 선재 결함 후보')
     res['changed_files'] = changed_files; res['touched_functions'] = touched
     json.dump(res, open(os.path.join(out, 'gate.json'), 'w'), ensure_ascii=False, indent=1)
     verdict = 'GATE FAIL' if not res['ok'] else ('GATE OK' if not res.get('skipped') else 'GATE OK* (건너뛴 검사 있음 — 컴파일을 확인한 것이 아니다)')

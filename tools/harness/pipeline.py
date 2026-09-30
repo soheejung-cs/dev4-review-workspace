@@ -23,7 +23,11 @@ class Ctx(dict):
 
 def n_worktree(c, a): c['wt'] = c['_wt_cm'].__enter__(); return c['wt']
 def n_diff_map(c, a):
-    c['diff'] = sh('gh', 'pr', 'diff', str(c['pr']), '-R', 'CUBRID/cubrid').stdout
+    if c.get('local_base'):
+        # 로컬 head(미push 커밋) 리뷰: PR 의 diff 대신 base...sha 의 git diff
+        c['diff'] = sh('git', '-C', c['repo'], 'diff', f"{c['local_base']}...{c['sha']}").stdout
+    else:
+        c['diff'] = sh('gh', 'pr', 'diff', str(c['pr']), '-R', 'CUBRID/cubrid').stdout
     open(os.path.join(c['out'], 'pr.diff'), 'w').write(c['diff']); c['changed'] = CP.parse_unified_diff(c['diff']); return c['changed']
 def n_codegraph(c, a):
     wt = c.need('wt'); changed = c.need('changed')
@@ -44,6 +48,8 @@ def n_pack(c, a):
     c['log'](f'context pack: {sum(s.tokens for s in pack.sections)} tokens → {len(bs)} batch(es), dropped {len(pack.dropped)}'); c['n_batches'] = len(bs); return bs
 def n_arch(c, a):
     arch = AI.infer(c.need('g'), c.need('changed_fids')); risks = AI.detect_risks(arch, c['g'], c['changed_fids'])
+    inc = AI.include_edges(c.need('wt'), c.need('diff')); arch['include_edges'] = inc; risks = sorted(risks + AI.include_risks(inc), key=lambda r: ({'critical': 0, 'high': 1, 'medium': 2, 'low': 3}[r['severity']], r['kind'], r['component']))
+    if inc: c['log'](f"arch: new includes {len(inc)} ({sum(1 for e in inc if e['cross_layer'])} cross-layer)")
     json.dump({'architecture': arch, 'risks': risks}, open(os.path.join(c['out'], 'arch.json'), 'w'), ensure_ascii=False, indent=1)
     open(os.path.join(c['out'], 'arch.mmd'), 'w').write(AI.to_mermaid(arch, risks)); json.dump(AI.to_excalidraw(arch), open(os.path.join(c['out'], 'arch.excalidraw'), 'w'))
     c['log'](f'arch: {len(arch["components"])} layers, {len(arch["connections"])} edges, touched {arch["touched_layers"]}, risks {len(risks)}'); c['risks'] = risks; return arch
@@ -193,14 +199,19 @@ def load(path):
             if impl not in REGISTRY: raise SystemExit(f'pipeline {os.path.basename(path)}: stage {st} node {name}: unknown impl {impl!r} (registry: {sorted(REGISTRY)})')
     return y
 
-def run(pipeline_path, pr, out_base, repo, findings_path=None, model=None):
+def run(pipeline_path, pr, out_base, repo, findings_path=None, model=None, local_sha=None, local_base=None):
+    """local_sha: PR head 대신 이 로컬 리비전을 리뷰한다(미push 자기 리뷰). local_base(기본 upstream/develop)...local_sha 의 diff."""
     t0 = time.time(); y = load(pipeline_path)
     log = lambda m: print(f'[{time.time()-t0:6.1f}s] {m}', file=sys.stderr)
     meta = json.loads(sh('gh', 'pr', 'view', str(pr), '-R', 'CUBRID/cubrid', '--json', 'headRefOid,title,files,author,body').stdout)
     import re; m = re.search(r'CBRD-\d+', meta['title'] + ' ' + (meta.get('body') or '')); meta['jira'] = m.group(0) if m else ''
-    sha = meta['headRefOid']; out = os.path.join(out_base, str(pr), sha[:9]); os.makedirs(out, exist_ok=True)
-    c = Ctx(pr=pr, out=out, log=log, meta=meta, findings_path=findings_path, _wt_cm=Worktree(repo, sha, out_base))
-    manifest = {'pipeline': y['harness'], 'pipeline_sha': _sha([pipeline_path]), 'pr': pr, 'head': sha, 'title': meta['title'], 'author': meta['author']['login'], 'jira': meta['jira'],
+    sha = meta['headRefOid']
+    if local_sha:
+        sha = sh('git', '-C', repo, 'rev-parse', local_sha).stdout.strip(); meta['headRefOid'] = sha
+        local_base = local_base or 'upstream/develop'; log(f'local head {sha[:9]} (diff vs {local_base}) — PR head 가 아닌 미push 리비전을 리뷰한다')
+    out = os.path.join(out_base, str(pr), sha[:9]); os.makedirs(out, exist_ok=True)
+    c = Ctx(pr=pr, out=out, log=log, meta=meta, findings_path=findings_path, repo=repo, sha=sha, local_base=local_base if local_sha else None, _wt_cm=Worktree(repo, sha, out_base))
+    manifest = {'pipeline': y['harness'], 'pipeline_sha': _sha([pipeline_path]), 'pr': pr, 'head': sha, 'local_head': bool(local_sha), 'diff_base': local_base if local_sha else 'pr', 'title': meta['title'], 'author': meta['author']['login'], 'jira': meta['jira'],
                 'harness_git': sh('git', '-C', ROOT, 'rev-parse', '--short', 'HEAD').stdout.strip(), 'rules_sha': _sha([os.path.join(ROOT, 'rules', f) for f in os.listdir(os.path.join(ROOT, 'rules'))]),
                 'skills_sha': _sha([os.path.join(dp, f) for dp, _, fs in os.walk(os.path.join(ROOT, 'skills')) for f in fs if f == 'SKILL.md']),
                 'model_id': model or os.environ.get('HARNESS_MODEL', 'unset'), 'started': time.strftime('%Y-%m-%dT%H:%M:%S'), 'stages': {}}

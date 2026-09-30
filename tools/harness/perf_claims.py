@@ -15,16 +15,19 @@ def analyze(body: str, anchor_file: str, anchor_line: int) -> List[Dict]:
     median = ln(r'median|중앙값')
     disp = ln(r'\bMAD\b|표준편차|stddev|σ|rep\s*별|편차')
     reps = ln(r'\d+\s*회|min-of-|median-of-|warm-?up|\d+\s*runs?|\d+\s*반복|반복\s*\d+')
+    rate_only = ln(r'\d+(\.\d+)?\s*(%|배|x\b|×)') and not ln(r'\d+(\.\d+)?\s*(초|ms|s\b|sec|분\b|시간|건/초|rows?/s|MB|GB|KB|바이트|bytes?|회|건|cycles?|misses?)')   # 율(%·배)만 있고 절대량이 없다 (MEAS-06)
     def ln_unless(pat, deferral):   # 같은 줄에 유보 표현("별도 실행합니다", "예정")이 있으면 근거로 치지 않는다 (.52 2026-09-17, PR#7900 본문)
         for i, l in enumerate(lines, 1):
             if re.search(pat, l, re.I) and not re.search(deferral, l): return i
         return 0
     ctp = ln_unless(r'\bCTP\b|/run all|test_sql|test_medium|test_shell|sql\s*/\s*medium|regression suite|회귀 테스트|회귀 검증', r'별도\s*실행|예정|아직|미실행|추후|나중에|돌릴')
-    WHY = {'MEAS-01': '측정 없는 성능 주장은 머지 뒤 회귀가 나도 기준선이 없어 원인을 되짚을 수 없고, 리뷰어가 코드만 읽고 "빨라 보인다"에 동의하는 것은 근거가 아니다.',
+    WHY = {'MEAS-06': '율(%·배)만으로는 분모가 바뀐 것과 개선을 구분할 수 없고, 작은 항목의 큰 비율이 과대평가된다 — 절대량(초·행·바이트·미스 횟수)이 있어야 크기를 판단할 수 있다.',
+           'MEAS-01': '측정 없는 성능 주장은 머지 뒤 회귀가 나도 기준선이 없어 원인을 되짚을 수 없고, 리뷰어가 코드만 읽고 "빨라 보인다"에 동의하는 것은 근거가 아니다.',
            'MEAS-04': '1회 실행값은 캐시·호스트 부하 같은 기준선 오염과 개선을 구분할 수 없어, 개선이 잡음일 가능성을 배제하지 못한다.',
            'MEAS-05': '정확성이 성능보다 먼저다 — 회귀 테스트 근거가 없으면 빨라진 코드가 틀린 답을 내는지 아무도 확인하지 않은 상태로 머지된다.',
            'MEAS-07': '산포 없이는 0.9 배 개선과 1.1 배 회귀가 같은 잡음 폭 안일 수 있어, 표의 방향 자체를 믿을 수 없다.'}
-    PROP = {'MEAS-01': '본문에 측정 표를 추가: 워크로드·계약(버퍼/병렬도/핀)·warmup·반복 수·median·MAD. 예: `| q1 | before 32.2s (MAD 0.3) | after 15.3s (MAD 0.2) | 0.47 |`',
+    PROP = {'MEAS-06': '표에 절대량 열을 추가한다. 예: `| q1 | 32.2s → 15.3s (0.47) |` 처럼 배율 옆에 초·행수·바이트를 같이.',
+            'MEAS-01': '본문에 측정 표를 추가: 워크로드·계약(버퍼/병렬도/핀)·warmup·반복 수·median·MAD. 예: `| q1 | before 32.2s (MAD 0.3) | after 15.3s (MAD 0.2) | 0.47 |`',
             'MEAS-04': '반복 실행(최소 3회, median-of-N)으로 다시 재고 표에 N 을 적는다. 예: "warmup 1 + 5회 중앙값".',
             'MEAS-05': '`/run all` 결과 또는 CTP sql/medium 실행 결과(코어 0, NOK 분류)를 본문 Verification 에 한 줄로. 예: "CTP sql 통과, medium NOK 2건은 기존 답안 차이".',
             'MEAS-07': '표에 MAD(또는 표준편차/rep 별 값) 열을 추가한다. 예: `| q7 | 7.04 (MAD 0.05) | 7.75 (MAD 0.07) | 1.10 |` — 산포가 있어야 1.10 이 잡음 밖임이 보인다.'}
@@ -34,4 +37,5 @@ def analyze(body: str, anchor_file: str, anchor_line: int) -> List[Dict]:
     if median and not disp: out.append(F('MEAS-07-auto', 'MEAS-07', '중앙값만 있고 산포(MAD/표준편차/rep 별 값)가 없다 — 개선폭이 잡음 범위 안인지 판정 불가', median))
     if table and not reps: out.append(F('MEAS-04-auto', 'MEAS-04', '측정 표에 반복 횟수(min-of-N/median-of-N/warmup) 언급이 없다 — 1회 실행값이면 기준선 오염을 구분 못 한다', table))
     if perf_claim and not ctp: out.append(F('MEAS-05-auto', 'MEAS-05', '성능 변경인데 기능 회귀 테스트(CTP) 통과 근거가 본문에 없다', perf_claim))
+    if perf_claim and rate_only: out.append(F('MEAS-06-auto', 'MEAS-06', '개선 근거가 율(%·배)만이고 절대량(초·행·바이트·횟수)이 없다', rate_only))
     return out

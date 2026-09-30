@@ -125,3 +125,10 @@ DB 서버·CTP 는 이 CLI 가 띄우지 않는다(`review-testing` 스킬의 �
 - codegraph 는 파일별 **파서가 잃은 줄 비율**(`parse_quality`, ERROR 노드 안이면서 어떤 function_definition 도 덮지 않는 줄)을 manifest 에 적고, 한 파일이라도 10% 를 넘으면 `codegraph_complete=false`. C 문법이 잃으면 C++ 문법으로 재시도(.c 도 C++ 로 컴파일되는 저장소). 세미콜론 없는 최상위 매크로 호출 줄은 파싱 전에 지운다. 남은 한계: list_file.c·page_buffer.c·file_io.c 는 15~21% 를 잃는다(C++ 구문 혼재) — 그 파일의 팩·관문 판정은 불완전할 수 있다.
 - implement_gate 는 건너뛴 검사가 있으면 `GATE OK*`. compile_commands 가 없으면 ninja 오브젝트 타깃으로 컴파일한다(`adjudicate.self_check_ninja`).
 - 새 도구: `review_threads`(스레드 분류) · `pr_refs`(본문 참조 확인) · `compile_check`(커밋 단위 컴파일) · `tools/ab/`(A/B 표준).
+
+## 2026-09-30 라운드 3
+- 파서 품질 지표 = 잃은 함수 정의 수(휴리스틱 정의 시작, static_assert·attribute·프로토타입·연속줄 제외). `#if/#else/#endif` 로 헤더가 갈린 debug/release 쌍은 첫 헤더만 남겨 파싱. 10% 초과 **그리고** 3개 이상 잃을 때만 incomplete. 핫 파일은 0 lost(expr_compile·page_buffer·btree·heap_file·system_parameter).
+- adjudicate: `passed`(통과 의무) 기록, `mentions_resolve`(지적이 `name ()` 로 부르는 함수가 그래프에 있나).
+- pipeline: `pr_refs` 노드(context 단계), `--sha/--base` 로컬 head 리뷰, arch 의 `include_edges`(diff 의 새 `#include` → 계층 간선) + `new-include` 리스크(바닥으로 내려가면 무해, 바닥이 위를 include 하면 high).
+- self_check: 워크트리는 `ninja -t commands` 의 컴파일 명령을 빌려 `-fsyntax-only`. implement_gate `--commits` 로 커밋 단위 컴파일.
+- episodic: 로컬 판정도 적재(`source=local`), 팩의 episodic 절이 `[local valid/non-blocking]` 로 표시.

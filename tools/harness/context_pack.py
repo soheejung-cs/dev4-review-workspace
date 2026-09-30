@@ -94,7 +94,8 @@ def _episodic(examples_dir: str, files: Set[str]) -> str:
         if not fn.endswith('.json'): continue
         for e in json.load(open(os.path.join(d, fn), encoding='utf-8')):
             if e.get('file') in files:
-                rows.append(f"- [{e.get('outcome','open')}] PR#{e.get('pr')} {e['file']}:{e.get('line')} — {e.get('claim','')[:160]}")
+                tag = e.get('outcome', 'open') if e.get('source') != 'local' else f"local {e.get('status')}/{e.get('severity')}"
+                rows.append(f"- [{tag}] PR#{e.get('pr')} {e['file']}:{e.get('line')} — {e.get('claim','')[:160]}")
     return '\n'.join(rows[:20])
 
 def build(repo: str, g: CodeGraph, diff_text: str, rules_dir: str, budget: int = 12000, examples_dir: str = '',
