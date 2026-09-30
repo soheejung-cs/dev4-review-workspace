@@ -48,6 +48,12 @@ def adjudicate(repo: str, g: CodeGraph, changed: Dict[str, List[int]], findings:
             if m and (m.group(1) == 'pr-body' or _line_exists(repo, m.group(1), int(m.group(2)))): ok += 1
         obligations['evidence_resolves'] = bool(ev) and ok == len(ev)
         if not obligations['evidence_resolves']: reasons.append(f'evidence {ok}/{len(ev)} 해석됨')
+        # 지적이 이름 붙여 부르는 함수들이 그래프에 실제로 있나 — 팩 밖 이름을 지어낸 finding 을 잡는다 (2026-09-30)
+        names = {n for n in re.findall(r'`?\b([a-z_][a-z0-9_]{3,}) ?\(\)', claim + ' ' + why + ' ' + prop)}
+        if names:
+            known = {n for n in names if g.db.execute('SELECT 1 FROM functions WHERE name=? LIMIT 1', (n,)).fetchone()}
+            obligations['mentions_resolve'] = (len(known), len(names))
+            if len(known) < len(names): reasons.append(f'언급한 함수 중 그래프에 없는 것: {sorted(names - known)[:6]} (팩 밖·오타·매크로 생성?)')
         rids = set(f.get('rule_ids') or [])
         obligations['rule_known'] = bool(rids) and rids <= rule_ids
         if rids and not obligations['rule_known']: reasons.append(f'모르는 규칙 ID {sorted(rids - rule_ids)}')
@@ -73,6 +79,8 @@ def adjudicate(repo: str, g: CodeGraph, changed: Dict[str, List[int]], findings:
         if obligations['proposal_present']: passed.append('proposal 있음')
         if rids and obligations['rule_known']: passed.append(f'rule {sorted(rids)} 규칙집에 있음')
         if obligations['graph_supports'] is True: passed.append('그래프가 관문 짝 불균형을 뒷받침')
+        mr = obligations.get('mentions_resolve')
+        if mr and mr[0] == mr[1]: passed.append(f'언급 함수 {mr[1]}개 모두 그래프에 있음')
         v = f.get('verification') or {}
         if v.get('method') in ('static', 'dynamic') and (v.get('result') or '').strip(): passed.append(f"verification [{v['method']}] 있음")
         out.append(fill_importance(dict(f, status=status, obligations=obligations, reasons=reasons, passed=passed)))
