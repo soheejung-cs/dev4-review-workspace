@@ -141,7 +141,12 @@ def build(repo: str, g: CodeGraph, diff_text: str, rules_dir: str, budget: int =
     rows = _rule_rows(rules_dir, axes or {'MEAS'})
     if rows: pack.sections.append(Section(f'rules for touched axes {sorted(axes)}', rows, 5))
     epi = _episodic(examples_dir, set(changed)) if examples_dir else ''
-    if epi: pack.sections.append(Section('episodic memory (past findings on these files)', epi, 6))
+    if epi:
+        # 메모리는 작다(대개 수백 토큰). 예산 컷에서 맨 먼저 잘리던 것을(우선순위 6) 작을 때는 잘리지 않는 급(2)으로 —
+        # 2026-09-30: 8029 팩에서 2줄짜리 절이 매번 dropped 로 갔다
+        sec = Section('episodic memory (past findings on these files)', epi, 6)
+        if sec.tokens <= 600: sec.priority = 2
+        pack.sections.append(sec)
     # 예산 적용: 우선순위 낮은 것부터 잘라낸다
     total = sum(s.tokens for s in pack.sections)
     for s in sorted([s for s in pack.sections], key=lambda s: (-s.priority, -s.tokens)):
