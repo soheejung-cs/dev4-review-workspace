@@ -203,6 +203,10 @@ def difficulty(pr, cfg):
     if ek:
         pts -= 1; why.append('제목 키워드(−1): ' + ', '.join(ek))
     pts = max(0, pts)
+    # 대규모: 점수와 무관하게 2,000줄 이상 또는 20파일 이상 — 리뷰어 3명 + 나눠 보기 권고 (사용자 지시 2026-09-30)
+    if size >= cfg.get('large_lines', 2000) or pr['nfiles'] >= cfg.get('large_files', 20):
+        why.append('대규모: %d줄 / %d파일 → 나눠 보기' % (size, pr['nfiles']))
+        return {'points': pts, 'tier': '어려움 (대규모)', 'n_reviewers': 3, 'why': why, 'dirs': sorted(dirs)}
     for cap, name, n in cfg['tiers']:
         if pts <= cap:
             return {'points': pts, 'tier': name, 'n_reviewers': n, 'why': why, 'dirs': sorted(dirs)}
