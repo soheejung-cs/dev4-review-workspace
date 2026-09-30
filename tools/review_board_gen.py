@@ -4,7 +4,7 @@
    사용: review_board_gen.py [out_dir]   (기본 ~/dev/utils/review-board/site)
    의존: gh CLI(인증됨). 이 컨테이너의 리뷰 문서(claude-workspace/projects/CBRD-*, dev4-review-workspace/examples|reviews)를 링크한다.
 """
-import json, os, re, subprocess, sys, datetime, html
+import sys, json, os, re, subprocess, datetime, html
 from urllib.parse import quote
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -165,9 +165,45 @@ def main():
     rows.sort(key=lambda r: (r['tracked'][0], -r['unresolved'], r['updated']))
     now = datetime.datetime.now().strftime('%Y-%m-%d %H:%M KST')
     os.makedirs(OUT, exist_ok=True)
-    json.dump({'generated': now, 'tracked': TRACKED, 'prs': rows, 'unlinked_tc_prs': orphans}, open(os.path.join(OUT, 'board.json'), 'w', encoding='utf-8'), ensure_ascii=False, indent=1)
+    dump = lambda: json.dump({'generated': now, 'tracked': TRACKED, 'prs': rows, 'unlinked_tc_prs': orphans}, open(os.path.join(OUT, 'board.json'), 'w', encoding='utf-8'), ensure_ascii=False, indent=1)
+    dump()                       # 1차: 부하 계산(load_from_board)이 이 스냅샷을 읽는다
+    attach_recommendations(rows)  # 리뷰어 추천 (사용자 지시 2026-09-30)
+    dump()
     open(os.path.join(OUT, 'index.html'), 'w', encoding='utf-8').write(render(rows, now, orphans))
     print('%s review board: %d PRs (tracked %d ids) -> %s/index.html' % (now, len(rows), len(TRACKED), OUT))
+
+def attach_recommendations(rows):
+    """review_recommend.py 로 PR 마다 난이도·추천 리뷰어를 붙인다. 머지 인덱스가 없으면(한 번만 수집 규약) 건너뛴다."""
+    try:
+        sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+        import review_recommend as rr
+    except Exception as e:
+        print('recommend: import 실패 %s' % e, file=sys.stderr); return
+    if not os.path.exists(rr.INDEX):
+        print('recommend: 인덱스 없음 (%s) — tools/review_recommend.py <PR> 을 한 번 돌려 만든다' % rr.INDEX, file=sys.stderr); return
+    try:
+        roster, cfg = rr.load_roster()
+        pool = list(roster.get('reviewer_pool') or roster['tracked_github'])
+        idx = rr.load_index('CUBRID/cubrid', 18, False)
+        load, load_src = rr.load_from_board(pool, cfg)
+        if load is None:
+            load, load_src = rr.load_from_github(pool, roster.get('repos', ['CUBRID/cubrid']), cfg)
+    except Exception as e:
+        print('recommend: 준비 실패 %s' % e, file=sys.stderr); return
+    for r in rows:
+        if r['repo'] != 'CUBRID/cubrid':
+            continue
+        try:
+            pr = rr.fetch_pr(r['repo'], r['number'])
+            diff = rr.difficulty(pr, cfg)
+            inter = rr.interest(pr, idx, pool, cfg)
+            _rows, picks, deferred, _m = rr.recommend(pr, diff, inter, load, pool, cfg)
+            r['rec'] = {'tier': diff['tier'], 'points': diff['points'], 'n': diff['n_reviewers'],
+                        'picks': [{'login': x['login'], 'learner': bool(x.get('learner')), 'already': x.get('already', '')} for x in picks],
+                        'deferred': [x['login'] for x in deferred], 'why': diff['why'], 'load_src': load_src}
+        except Exception as e:
+            r['rec'] = {'error': str(e)[:120]}
+
 
 def esc(s):
     return html.escape(str(s))
@@ -205,7 +241,7 @@ def render(rows, now, orphans=()):
         h.append('<h2>@%s <span class="meta">%d PR</span></h2>' % (esc(who), len(rs)))
         if not rs:
             h.append('<div class="muted">추적 대상 없음 (open·non-draft·assignee 기준)</div>'); continue
-        h.append('<table><tr><th>PR</th><th>제목 / JIRA</th><th>미해결</th><th>리뷰어</th><th>에이전트 리뷰</th><th>갱신</th><th>연동된 테스트케이스</th><th>리뷰 문서(내부망)</th></tr>')
+        h.append('<table><tr><th>PR</th><th>제목 / JIRA</th><th>미해결</th><th>리뷰어</th><th>추천 리뷰어</th><th>에이전트 리뷰</th><th>갱신</th><th>연동된 테스트케이스</th><th>리뷰 문서(내부망)</th></tr>')
         for r in rs:
             unres = ('<span class="%s">%d</span> / %d' % ('bad' if r['unresolved'] else 'ok', r['unresolved'], r['threads_total']))
             if r['unresolved_by']:
@@ -214,14 +250,24 @@ def render(rows, now, orphans=()):
             rev += ''.join('<span class="pill req">%s 미착수</span>' % esc(a) for a in r['requested'])
             rev += ''.join('<span class="pill pend">%s 승인 전</span>' % esc(a) for a in r.get('pending_approval', []))
             rev += '<div class="muted" style="font-size:11px">decision: %s</div>' % esc(r['decision'])
+            rc = r.get('rec') or {}
+            if rc.get('picks') is not None:
+                pills = ''.join('<span class="pill %s" title="%s">%s%s</span>' % ('ok' if not x['already'] else 'pend', esc(x['already'] or '새 추천'), esc(x['login']), ' (학습)' if x['learner'] else '') for x in rc['picks'])
+                rec = '<div><span class="pill %s" title="%s">%s · %d명</span></div>%s' % ({'간단': 'ok', '보통': 'pend', '어려움': 'bad'}.get(rc['tier'], ''), esc(' / '.join(rc.get('why', []))), esc(rc['tier']), rc['n'], pills)
+                if rc.get('deferred'):
+                    rec += '<div class="muted" style="font-size:11px">과부하로 뒤로: %s</div>' % esc(','.join(rc['deferred']))
+            elif rc.get('error'):
+                rec = '<span class="warn" title="%s">실패</span>' % esc(rc['error'])
+            else:
+                rec = '<span class="muted">-</span>'
             ag = ('<span class="ok">✓ %s</span><div class="muted" style="font-size:11px">%d건 · %s</div>' % (esc(r['agent_last']), r['agent_n'], esc('/'.join(r['agent_kinds'])))) if r['agent_n'] else '<span class="warn">아직</span>'
             tcl = ''.join('<div><a href="%s">%s#%d</a> <span class="muted">미해결 %d/%d%s</span></div>' % (esc(t['url']), esc(t['repo'].split('/')[1].replace('cubrid-testcases','tc')), t['number'], t['unresolved'], t['threads_total'], (' · ' + ','.join(esc(a) + ' 미착수' for a in t['requested'])) if t['requested'] else '') for t in r['linked_tc']) or '<span class="muted">없음</span>'
             docs = ''.join('<a href="%s%s">%s</a>' % (DOCS_HTTP_BASE, quote(d), esc(d)) for d in r['docs']) or '<span class="muted">없음</span>'
             others = [a for a in r['assignees'] if a != r['tracked'][0]]
-            h.append('<tr><td class="n"><a href="%s">%s#%d</a>%s</td><td>%s<div class="meta">%s · by %s%s</div></td><td class="n">%s</td><td>%s</td><td class="n">%s</td><td class="n">%s<div class="muted" style="font-size:11px">생성 %s</div></td><td class="docs" style="font-size:12px">%s</td><td class="docs">%s</td></tr>' % (
+            h.append('<tr><td class="n"><a href="%s">%s#%d</a>%s</td><td>%s<div class="meta">%s · by %s%s</div></td><td class="n">%s</td><td>%s</td><td style="font-size:12px">%s</td><td class="n">%s</td><td class="n">%s<div class="muted" style="font-size:11px">생성 %s</div></td><td class="docs" style="font-size:12px">%s</td><td class="docs">%s</td></tr>' % (
                 esc(r['url']), esc(r['repo'].split('/')[1]), r['number'], '<div class="muted" style="font-size:11px">%s</div>' % esc(r['tracked'][0]) if len(rs) and who != r['tracked'][0] else '',
                 esc(r['title']), esc(r['jira'] or '-'), esc(r['author']), (' · assignees +' + ','.join(others)) if others else '',
-                unres, rev, ag, esc(r['updated']), esc(r['created']), tcl, docs))
+                unres, rev, rec, ag, esc(r['updated']), esc(r['created']), tcl, docs))
         h.append('</table>')
     if orphans:
         h.append('<h2>연동 대상 없는 TC PR <span class="meta">%d</span></h2><table><tr><th>PR</th><th>제목</th><th>미해결</th><th>리뷰 미착수</th></tr>' % len(orphans))

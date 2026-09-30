@@ -37,7 +37,7 @@ DEFAULT_CFG = {
     'recency_half_life_months': 12.0,
     'w_author': 1.0, 'w_reviewer': 0.6,
     'learner_prob': 0.5,        # 리뷰어 2명 이상일 때 마지막 자리를 학습 슬롯으로 돌릴 확률(PR 번호 시드 → 재실행 동일)
-    'tiers': [(2, '간단', 1), (5, '보통', 2), (999, '어려움', 3)],   # 난이도 점수 상한, 이름, 리뷰어 수
+    'tiers': [(2, '간단', 1), (4, '보통', 2), (999, '어려움', 3)],   # 난이도 점수 상한, 이름, 리뷰어 수 (2026-09-30 척도 낮춤)
 }
 
 
@@ -185,16 +185,16 @@ def difficulty(pr, cfg):
     size = pr['add'] + pr['del']
     dirs = set(dir_of(f) for f in pr['files'])
     pts, why = 0, []
-    s = 0 if size < 50 else 1 if size < 200 else 2 if size < 600 else 3
+    s = 0 if size < 100 else 1 if size < 300 else 2 if size < 800 else 3   # 2026-09-30 척도 낮춤(사용자 지시)
     pts += s; why.append('변경 %d줄(+%d/−%d) → %d' % (size, pr['add'], pr['del'], s))
-    f = 0 if pr['nfiles'] < 3 else 1 if pr['nfiles'] < 8 else 2
+    f = 0 if pr['nfiles'] < 4 else 1 if pr['nfiles'] < 10 else 2
     pts += f; why.append('파일 %d개 → %d' % (pr['nfiles'], f))
-    d = 0 if len(dirs) <= 1 else 1 if len(dirs) == 2 else 2
+    d = 0 if len(dirs) <= 2 else 1
     pts += d; why.append('디렉터리 %d개 → %d' % (len(dirs), d))
     hard_hit = sorted(set(dd for dd in dirs for h in cfg['hard_dirs'] if dd.startswith(h)))
     hf = sorted(set(os.path.basename(fp) for fp in pr['files'] if _hard_file_hits(fp, cfg['hard_files'])))
     if hard_hit or hf:
-        pts += 2; why.append('어려운 영역 %s → 2' % ', '.join((hard_hit + hf)[:4]))
+        pts += 1; why.append('어려운 영역 %s → 1' % ', '.join((hard_hit + hf)[:4]))
     t = pr['title'].lower()
     hk = _kw_hits(t, cfg['hard_title'])
     if hk:
