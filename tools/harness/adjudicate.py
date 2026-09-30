@@ -82,7 +82,11 @@ def adjudicate(repo: str, g: CodeGraph, changed: Dict[str, List[int]], findings:
         mr = obligations.get('mentions_resolve')
         if mr and mr[0] == mr[1]: passed.append(f'언급 함수 {mr[1]}개 모두 그래프에 있음')
         v = f.get('verification') or {}
-        if v.get('method') in ('static', 'dynamic') and (v.get('result') or '').strip(): passed.append(f"verification [{v['method']}] 있음")
+        if v.get('method') in ('static', 'dynamic') and (v.get('result') or '').strip():
+            art = v.get('artifact')
+            if art and not os.path.exists(os.path.expanduser(str(art))): reasons.append(f'verification.artifact 경로가 없다: {art}')
+            elif art: passed.append(f"verification [{v['method']}] + artifact 존재")
+            else: passed.append(f"verification [{v['method']}] 있음" + (' (static 인데 file:line 인용 없음)' if v['method'] == 'static' and not re.search(r'\w+\.(c|cpp|h|hpp):\d+', v.get('result', '')) else ''))
         out.append(fill_importance(dict(f, status=status, obligations=obligations, reasons=reasons, passed=passed)))
     return out
 

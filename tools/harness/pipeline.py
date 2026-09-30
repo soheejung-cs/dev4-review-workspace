@@ -48,7 +48,8 @@ def n_pack(c, a):
     c['log'](f'context pack: {sum(s.tokens for s in pack.sections)} tokens → {len(bs)} batch(es), dropped {len(pack.dropped)}'); c['n_batches'] = len(bs); return bs
 def n_arch(c, a):
     arch = AI.infer(c.need('g'), c.need('changed_fids')); risks = AI.detect_risks(arch, c['g'], c['changed_fids'])
-    inc = AI.include_edges(c.need('wt'), c.need('diff')); arch['include_edges'] = inc; risks = sorted(risks + AI.include_risks(inc), key=lambda r: ({'critical': 0, 'high': 1, 'medium': 2, 'low': 3}[r['severity']], r['kind'], r['component']))
+    inc = AI.include_edges(c.need('wt'), c.need('diff')); arch['include_edges'] = inc
+    risks = sorted(risks + AI.include_risks(inc) + AI.mode_guard_changes(c['diff']), key=lambda r: ({'critical': 0, 'high': 1, 'medium': 2, 'low': 3}[r['severity']], r['kind'], r['component']))
     if inc: c['log'](f"arch: new includes {len(inc)} ({sum(1 for e in inc if e['cross_layer'])} cross-layer)")
     json.dump({'architecture': arch, 'risks': risks}, open(os.path.join(c['out'], 'arch.json'), 'w'), ensure_ascii=False, indent=1)
     open(os.path.join(c['out'], 'arch.mmd'), 'w').write(AI.to_mermaid(arch, risks)); json.dump(AI.to_excalidraw(arch), open(os.path.join(c['out'], 'arch.excalidraw'), 'w'))

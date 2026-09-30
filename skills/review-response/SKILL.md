@@ -6,6 +6,7 @@ description: 내 PR 에 달린 리뷰 코멘트(봇·사람)에 대응하는 규
 # 리뷰 대응 (review-response)
 
 
+> 게시는 `python3 -m tools.harness.review_reply --pr <PR> --draft <replies.md>`(기본 dry-run: 초안 `## T<idx>` 절 ↔ 스레드 매핑표) → 사용자 승인 뒤 `--post`. 사람이 연 스레드는 resolve 하지 않는다.
 > 스레드 수집은 `python3 -m tools.harness.review_threads --pr <PR>` — 미해결 스레드를 **대응 필요**(리뷰어가 마지막)와 **resolve 대기**(작성자가 마지막)로 갈라 `threads.md/json` 으로 준다(2026-09-30). 답글 초안은 그 T번호·URL 기준으로 쓴다.
 
 ## 0. 누구 PR 인가

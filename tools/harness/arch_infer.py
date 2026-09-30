@@ -60,6 +60,17 @@ def infer(g: CodeGraph, changed_fids: List[str]) -> Dict:
     touched = sorted({layer_of(f.split(':', 1)[0])[1] for f in changed_fids})
     return {'components': sorted(comps.values(), key=lambda c: c['id']), 'connections': connections, 'touched_layers': touched}
 
+def mode_guard_changes(diff: str) -> List[Dict]:
+    """diff 가 더하거나 지운 `#if defined (SERVER_MODE|CS_MODE|SA_MODE)` 줄 — INV-3(One Source, Three Binaries) 의 경계를 건드린 자리.
+    리스크 자체가 아니라 '가드 누락은 어떻게 되나' 를 리뷰가 묻게 하는 신호(설계-리뷰-규칙 §2 INV-3)."""
+    import re
+    out = []; cur = None
+    for line in diff.splitlines():
+        if line.startswith('+++ b/'): cur = line[6:]; continue
+        if cur and line[:1] in '+-' and not line.startswith(('+++', '---')) and re.search(r'#\s*(if|elif|ifdef|ifndef)\b.*\b(SERVER_MODE|CS_MODE|SA_MODE)\b', line):
+            out.append({'kind': 'mode-guard-change', 'severity': 'low', 'component': cur, 'issue': f"모드 가드 줄 {'추가' if line[0] == '+' else '삭제'}: {line[1:].strip()[:80]} — SA/CS/SERVER 세 빌드에서 각각 어떻게 되나(INV-3)", 'evidence': [f'{cur}: {line.strip()[:100]}'], 'rule': '설계-리뷰-규칙 §2 INV-3'})
+    return out
+
 def include_risks(edges: List[Dict]) -> List[Dict]:
     """계층을 넘는 새 include: 바닥(base/compat)으로 내려가는 건 허용, 허브(object)·공식 사이클 안은 낮음, 그 밖은 중간 — 설계 리뷰가 '왜 이 의존이 여기 생겼나' 를 묻는 자리."""
     risks = []

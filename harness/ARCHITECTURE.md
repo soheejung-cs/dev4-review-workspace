@@ -132,3 +132,4 @@ DB 서버·CTP 는 이 CLI 가 띄우지 않는다(`review-testing` 스킬의 �
 - pipeline: `pr_refs` 노드(context 단계), `--sha/--base` 로컬 head 리뷰, arch 의 `include_edges`(diff 의 새 `#include` → 계층 간선) + `new-include` 리스크(바닥으로 내려가면 무해, 바닥이 위를 include 하면 high).
 - self_check: 워크트리는 `ninja -t commands` 의 컴파일 명령을 빌려 `-fsyntax-only`. implement_gate `--commits` 로 커밋 단위 컴파일.
 - episodic: 로컬 판정도 적재(`source=local`), 팩의 episodic 절이 `[local valid/non-blocking]` 로 표시.
+- 라운드 3 후속: adjudicate 가 `verification.artifact` 경로 존재를 확인(static 인데 file:line 인용이 없으면 표시), arch 가 diff 의 모드 가드(`#if … SERVER_MODE|CS_MODE|SA_MODE`) 추가·삭제를 INV-3 신호로 낸다, `review_reply.py`(답글 초안 ↔ 스레드 dry-run/게시), `tools/ab/ab_pair.sh`, 작은 episodic 절은 팩 예산에서 잘리지 않음. 구조도: `harness/구조도.html`.
