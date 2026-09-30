@@ -41,6 +41,7 @@ python3 -m tools.harness.implement_gate --plan <out>/plan.json [--base HEAD|upst
 - 빌드는 `nohup bash ~/bin/goto.sh <br> release > log 2>&1 &`(`goto` 는 셸 함수라 nohup 에 없다). 실패하면 심링크가 `cub_server` 없는 설치본으로 넘어가 `cubrid` 가 사라진다 — 고친 rev 로 다시 goto 하면 복구. 빌드 중엔 엔진 소스를 고치지 않는다(ninja 가 반쯤 고친 파일을 집는다).
 - `cubrid server start` 를 **파이프로 받지 않는다**(데몬이 stdout 을 물어 영원히 안 끝난다, `goto setup` 과 같은 함정) — `> file` 로.
 - A/B 는 `tools/ab/`(README 참조): `pick_ref.sh` 로 REF 후보(develop 조상인지, 머지베이스 이후 바뀐 디렉터리)를 고르고, 정합은 `ab_sa.sh`, 시간은 `ab_time.sh` + `ab_summarize.py`(교대·median·MAD). 대조 설치본은 **실행 의미가 develop 과 같은 것**(옵티마이저만 바뀐 것은 가능)으로. 벤치 볼륨이 이 develop 세대에서 열리지 않으면(upgradedb 메타데이터 버저닝, `System metadata is incompatible`) 재적재 대신 **결정적 합성 테이블**(INSERT…SELECT 배증, 두 설치본에 같은 스크립트)로 리뷰어 측정 형상을 재현한다. 시간은 csql 의 `selected. (N sec)` 줄에서 **첫 괄호**를 읽는다(마지막 괄호는 commit 시간).
+- **CI 판독에서 `Check TC PRs` 잡은 항상 제외한다**(PR브랜치-규칙 §5) — 사용자가 직접 다루는 영역이라 원인을 조사하지도, 보고에 올리지도 않는다(2026-09-30 사용자 지시). 실제 문제는 `build/test_*`·`gha-ci`·`code-style`·`cppcheck` 만.
 - 성능 대안이 둘이면 **둘 다 빌드해 같은 계약으로 재고 나서 고른다** — "C ≈ B" 같은 추정으로 고르면 뒤집힌다(2026-09-30: 워드 루트 1.04 vs 프로그램 제외 0.92).
 
 ## S5. 자기 리뷰 → PR
