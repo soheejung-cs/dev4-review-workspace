@@ -13,7 +13,7 @@ description: 리뷰 보드 갱신 — review-to-do 웹 보드(http://192.168.6.5
   **미착수**(요청됐고 리뷰 이력 0) / **승인 전**(리뷰했으나 APPROVED 아님). GitHub 은 리뷰를 제출하는 순간 그 사람을
   `reviewRequests` 에서 빼므로, 요청 목록만 보면 코멘트 한 번 남기고 승인하지 않은 리뷰어가 보드에서 사라진다
   (2026-09-21 지적 반영). 재요청되면 다시 `미착수` 로 잡힌다.
-- **추천 리뷰어**(2026-09-30): `review-recommend` 와 같은 계산 — 난이도(간단/보통/어려움 · 필요 인원)와 추천 로그인 필. `(학습)` 은 학습 슬롯, 회색 필은 이미 요청·리뷰한 사람, "과부하로 뒤로" 는 공평성으로 미룬 후보. 머지 인덱스(`~/dev/utils/review-recommend/merged_index.json`)가 없으면 열이 `-` — `tools/review_recommend.py <PR>` 을 한 번 돌려 만든다. 생성 시간 +1.5분.
+- **추천 리뷰어**(2026-09-30): `review-recommend` 와 같은 계산 — 난이도(쉬움/간단/보통/어려움 · 필요 인원)와 추천 로그인 필 — **쉬움은 "팀장 리뷰만 받고 진행", 추천 없음**(사용자 지시 2026-09-30). 난이도는 제목 줄 메타에도 적힌다. `(학습)` 은 학습 슬롯, 회색 필은 이미 요청·리뷰한 사람, "과부하로 뒤로" 는 공평성으로 미룬 후보. 머지 인덱스(`~/dev/utils/review-recommend/merged_index.json`)가 없으면 열이 `-` — `tools/review_recommend.py <PR>` 을 한 번 돌려 만든다. 생성 시간 +1.5분.
 - CI 요약(`Check TC PRs` 는 규약상 무시), 갱신·생성일
 - **이 컨테이너에 있는 리뷰 문서**: `claude-workspace/projects/<JIRA키>/`, `dev4-review-workspace/examples|reviews` 에서 JIRA 키·PR 번호로 찾은 것(file:// 링크)
 - **에이전트 리뷰 여부**: `roster.json` 의 `agent_github` 로그인(또는 본문에 `agent_marker` 정규식)이 남긴 리뷰·인라인 코멘트·이슈 코멘트 건수와 마지막 날짜. **팀 공유 계정으로 돌리면 `agent_github` 만 그 계정으로** 바꾼다. 지금은 `soheejung-cs` 라 사용자 본인의 코멘트도 함께 세어진다(공유 계정 전환 전 한계).

@@ -253,7 +253,8 @@ def render(rows, now, orphans=()):
             rc = r.get('rec') or {}
             if rc.get('picks') is not None:
                 pills = ''.join('<span class="pill %s" title="%s">%s%s</span>' % ('ok' if not x['already'] else 'pend', esc(x['already'] or '새 추천'), esc(x['login']), ' (학습)' if x['learner'] else '') for x in rc['picks'])
-                rec = '<div><span class="pill %s" title="%s">%s · %d명</span></div>%s' % ({'간단': 'ok', '보통': 'pend', '어려움': 'bad'}.get(rc['tier'], ''), esc(' / '.join(rc.get('why', []))), esc(rc['tier']), rc['n'], pills)
+                lvl = '<span class="pill %s" title="%s">%s</span>' % ({'쉬움': 'ok', '간단': 'ok', '보통': 'pend', '어려움': 'bad'}.get(rc['tier'], ''), esc(' / '.join(rc.get('why', []))), esc(rc['tier']))
+                rec = ('%s <span class="muted">팀장 리뷰만 받고 진행</span>' % lvl) if rc['n'] == 0 else ('<div>%s <span class="muted">%d명</span></div>%s' % (lvl, rc['n'], pills))
                 if rc.get('deferred'):
                     rec += '<div class="muted" style="font-size:11px">과부하로 뒤로: %s</div>' % esc(','.join(rc['deferred']))
             elif rc.get('error'):
@@ -266,7 +267,7 @@ def render(rows, now, orphans=()):
             others = [a for a in r['assignees'] if a != r['tracked'][0]]
             h.append('<tr><td class="n"><a href="%s">%s#%d</a>%s</td><td>%s<div class="meta">%s · by %s%s</div></td><td class="n">%s</td><td>%s</td><td style="font-size:12px">%s</td><td class="n">%s</td><td class="n">%s<div class="muted" style="font-size:11px">생성 %s</div></td><td class="docs" style="font-size:12px">%s</td><td class="docs">%s</td></tr>' % (
                 esc(r['url']), esc(r['repo'].split('/')[1]), r['number'], '<div class="muted" style="font-size:11px">%s</div>' % esc(r['tracked'][0]) if len(rs) and who != r['tracked'][0] else '',
-                esc(r['title']), esc(r['jira'] or '-'), esc(r['author']), (' · assignees +' + ','.join(others)) if others else '',
+                esc(r['title']), esc(r['jira'] or '-'), esc(r['author']), ((' · assignees +' + ','.join(others)) if others else '') + ((' · 난이도 <b>%s</b>' % esc(rc['tier'])) if rc.get('tier') else ''),
                 unres, rev, rec, ag, esc(r['updated']), esc(r['created']), tcl, docs))
         h.append('</table>')
     if orphans:

@@ -18,7 +18,7 @@ cd ~/dev/docs/dev4-review-workspace && python3 tools/review_recommend.py <PR> [-
 | 축 | 어디서 | 계산 |
 |---|---|---|
 | **관심도** | 머지 PR 인덱스(작성자·리뷰어·모듈) | 머지 PR 마다 `sim = (겹친 모듈 수) / (대상 PR 모듈 수)`, 역할 가중(작성 1.0 / 리뷰 0.6), 최근성 `0.5^(개월/12)`. 후보별 합. 모듈 = `src/optimizer` 같은 2단계 디렉터리 |
-| **난이도** | 대상 PR | 점수 = 변경 줄(<100:0, <300:1, <800:2, ≥800:3) + 파일 수(<4:0, <10:1, ≥10:2) + 디렉터리 수(≤2:0, ≥3:1) + 어려운 영역(storage·transaction·query·optimizer·thread·connection·communication·replication·parser, 또는 btree·heap·log_·lock_·mvcc·pgbuf·xasl·scan·vacuum 파일) 1 + 제목 키워드(refactor·parallel·lock·mvcc·deadlock·crash… +1, typo·backport·doc·comment·message… −1). **≤2 간단→1명, ≤4 보통→2명, 그 위 어려움→3명** (2026-09-30 척도 한 단계 낮춤 — 사용자 지시 "전체적으로 수준을 낮게"; 기준 예 91줄 3파일 storage 정리 = 간단, 266줄 6파일 optimizer = 보통) |
+| **난이도** | 대상 PR | 점수 = 변경 줄(<100:0, <300:1, <800:2, ≥800:3) + 파일 수(<4:0, <10:1, ≥10:2) + 디렉터리 수(≤2:0, ≥3:1) + 어려운 영역(storage·transaction·query·optimizer·thread·connection·communication·replication·parser, 또는 btree·heap·log_·lock_·mvcc·pgbuf·xasl·scan·vacuum 파일) 1 + 제목 키워드(refactor·parallel·lock·mvcc·deadlock·crash… +1, typo·backport·doc·comment·message… −1). **≤1 쉬움→팀장 리뷰만(추천 없음), 2 간단→1명, ≤4 보통→2명, 그 위 어려움→3명** (2026-09-30 척도 한 단계 낮춤 — 사용자 지시 "전체적으로 수준을 낮게"; 기준 예 91줄 3파일 storage 정리 = 간단, 266줄 6파일 optimizer = 보통) |
 | **부하** | review-to-do 보드 `board.json`(10분 주기, 90분 넘게 낡았으면 GitHub 직접) | 후보가 **요청됐지만 아직 리뷰 안 한** PR 1.0 + **리뷰했지만 승인 전이고 PR 이 열린** 것 0.5. 자기 PR 은 제외(따로 표시) |
 
 **종합** = 0.6·관심도(최대값으로 정규화) + 0.4·(1 − 부하 정규화). 부하가 **평균 + 2 이상**인 후보는 다른 후보로 인원을 채울 수 있으면 뒤로 뺀다(공평성). 작성자는 후보에서 제외, 이미 요청·리뷰한 사람은 "현재" 열에 표시.

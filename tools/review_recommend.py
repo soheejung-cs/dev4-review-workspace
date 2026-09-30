@@ -37,7 +37,7 @@ DEFAULT_CFG = {
     'recency_half_life_months': 12.0,
     'w_author': 1.0, 'w_reviewer': 0.6,
     'learner_prob': 0.5,        # 리뷰어 2명 이상일 때 마지막 자리를 학습 슬롯으로 돌릴 확률(PR 번호 시드 → 재실행 동일)
-    'tiers': [(2, '간단', 1), (4, '보통', 2), (999, '어려움', 3)],   # 난이도 점수 상한, 이름, 리뷰어 수 (2026-09-30 척도 낮춤)
+    'tiers': [(1, '쉬움', 0), (2, '간단', 1), (4, '보통', 2), (999, '어려움', 3)],   # 난이도 점수 상한, 이름, 리뷰어 수. 쉬움 = 팀장 리뷰만, 추천 없음 (사용자 지시 2026-09-30)
 }
 
 
@@ -318,6 +318,8 @@ def recommend(pr, diff, inter, load, pool, cfg):
                      'already': 'requested' if c in pr['requested'] else ('reviewed:' + pr['reviewed'][c] if c in pr['reviewed'] else '')})
     rows.sort(key=lambda r: (-r['total'], r['load'], r['login']))
     picks, deferred = [], []
+    if diff['n_reviewers'] == 0:          # 쉬움: 팀장 리뷰만 받고 진행 — 추천하지 않는다
+        return rows, picks, deferred, mean_l
     n_expert = diff['n_reviewers']
     learner = None
     if diff['n_reviewers'] >= 2 and len(cands) >= 3:
