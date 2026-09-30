@@ -190,19 +190,45 @@ def attach_recommendations(rows):
             load, load_src = rr.load_from_github(pool, roster.get('repos', ['CUBRID/cubrid']), cfg)
     except Exception as e:
         print('recommend: 준비 실패 %s' % e, file=sys.stderr); return
-    for r in rows:
-        if r['repo'] != 'CUBRID/cubrid':
-            continue
+    # 보드 전체를 한 번에 배정한다 (사용자 지시 2026-09-30 "한 사람에게 로드가 쏠림"):
+    #  · 오래된 PR 부터 차례로 추천하고, 이번 패스에서 추천한 자리를 가상 부하(virtual, 대기 1건과 같은 무게)로 누적해
+    #    다음 PR 계산에 넣는다 → 같은 사람이 연달아 뽑히지 않는다. 이미 요청·리뷰한 사람의 자리는 새 부하로 세지 않는다.
+    #  · 실제 부하(pending·in_progress)는 그대로 밑에 깔린다.
+    import copy
+    w_virtual = cfg.get('load_virtual', cfg.get('load_pending', 1.0))
+    virtual = {c: 0 for c in pool}
+    order = sorted([r for r in rows if r['repo'] == 'CUBRID/cubrid'], key=lambda r: (r['created'], r['number']))
+    # 1패스: PR 메타·난이도만 먼저 받아 전체 자리 수를 알고 1인 상한을 정한다 (자리 수 / (후보 − 1), 최소 2)
+    import math
+    meta = {}
+    for r in order:
         try:
-            pr = rr.fetch_pr(r['repo'], r['number'])
-            diff = rr.difficulty(pr, cfg)
-            inter = rr.interest(pr, idx, pool, cfg)
-            _rows, picks, deferred, _m = rr.recommend(pr, diff, inter, load, pool, cfg)
-            r['rec'] = {'tier': diff['tier'], 'points': diff['points'], 'n': diff['n_reviewers'],
-                        'picks': [{'login': x['login'], 'learner': bool(x.get('learner')), 'already': x.get('already', '')} for x in picks],
-                        'deferred': [x['login'] for x in deferred], 'why': diff['why'], 'load_src': load_src}
+            pr = rr.fetch_pr(r['repo'], r['number']); meta[r['number']] = (pr, rr.difficulty(pr, cfg))
         except Exception as e:
             r['rec'] = {'error': str(e)[:120]}
+    total_slots = sum(d['n_reviewers'] for _, d in meta.values())
+    cap = max(2, math.ceil(total_slots / max(1, len(pool) - 1)))
+    for r in order:
+        if r['number'] not in meta:
+            continue
+        try:
+            pr, diff = meta[r['number']]
+            inter = rr.interest(pr, idx, pool, cfg)
+            load2 = copy.deepcopy(load)
+            for c in pool:
+                load2[c]['virtual'] = virtual[c]
+                load2[c]['score'] = load2[c].get('score', 0.0) + w_virtual * virtual[c] + (100.0 if virtual[c] >= cap else 0.0)  # 상한 넘으면 뒤로
+            _rows, picks, deferred, _m = rr.recommend(pr, diff, inter, load2, pool, cfg)
+            for x in picks:
+                if not x.get('already'):
+                    virtual[x['login']] += 1
+            r['rec'] = {'tier': diff['tier'], 'points': diff['points'], 'n': diff['n_reviewers'],
+                        'picks': [{'login': x['login'], 'learner': bool(x.get('learner')), 'already': x.get('already', '')} for x in picks],
+                        'deferred': [x['login'] for x in deferred], 'why': diff['why'], 'load_src': load_src,
+                        'load_at_pick': {c: round(load2[c]['score'], 1) for c in pool}}
+        except Exception as e:
+            r['rec'] = {'error': str(e)[:120]}
+    print('recommend: 자리 %d, 1인 상한 %d, 배정 분포 ' % (total_slots, cap) + ', '.join('%s %d' % kv for kv in sorted(virtual.items(), key=lambda kv: -kv[1])), file=sys.stderr)
 
 
 def esc(s):
