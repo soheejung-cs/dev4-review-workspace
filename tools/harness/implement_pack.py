@@ -28,6 +28,8 @@ def main():
     ap.add_argument('--symbols', default='', help='후보 함수 이름, 콤마 구분 (정의 위치를 찾아 그 함수 전체를 팩에)')
     ap.add_argument('--files', default='', help='후보 파일, 콤마 구분 (그 파일의 함수 중 --grep/--symbols 에 걸린 것; 없으면 파일 전체는 넣지 않고 그래프 범위로만)')
     ap.add_argument('--grep', default='', help='본문 키워드(에러 코드·메시지·필드명), 콤마 구분 — 그 줄을 포함하는 함수를 후보로')
+    ap.add_argument('--pr', type=int, default=0, help="리뷰 대응: 이 PR 의 '대응 필요' 스레드(리뷰어가 마지막)의 file:line 을 후보로 (review_threads.collect); --files 가 없으면 그 파일들로 제한")
+    ap.add_argument('--gh-repo', default='CUBRID/cubrid')
     ap.add_argument('--out', default='')
     ap.add_argument('--budget', type=int, default=12000)
     ap.add_argument('--max-fns', type=int, default=24)
@@ -48,8 +50,19 @@ def main():
     for kw in greps:
         for f, lns in git_grep(repo, kw, word=False).items():
             for ln in lns: kw_hits.setdefault(f, set()).add(ln)
+    thread_hits = {}
+    if a.pr:
+        from . import review_threads as RT
+        data = RT.collect(a.pr, a.gh_repo)
+        json.dump(data, open(os.path.join(out, 'threads.json'), 'w'), ensure_ascii=False, indent=1)
+        open(os.path.join(out, 'threads.md'), 'w', encoding='utf-8').write(RT.to_md(data))
+        for t in data['threads']:
+            if t['class'] == '대응 필요' and t['path'] and t['line'] and t['path'].endswith(SRC_EXT):
+                thread_hits.setdefault(t['path'], set()).add(int(t['line']))
+        log(f"threads: PR #{a.pr} 대응 필요 {sum(1 for t in data['threads'] if t['class']=='대응 필요')}건 -> {len(thread_hits)} files (threads.md 참조)")
+        if not files: files = set(thread_hits)
     hits = {}
-    for d in (sym_hits, kw_hits):
+    for d in (sym_hits, kw_hits, thread_hits):
         for f, lns in d.items(): hits.setdefault(f, set()).update(lns)
     for f in files: hits.setdefault(f, set())
     if not hits: log('후보 없음 — --symbols/--grep/--files 중 하나는 실제로 소스에 있어야 한다'); sys.exit(2)
@@ -80,6 +93,9 @@ def main():
     missing = [s for s in symbols if s not in found]
     if missing: log(f'정의를 못 찾은 심볼 {len(missing)}개 (이름 오타·다른 디렉터리·매크로 생성 함수?): {missing}')
     n_sym = len(fids)
+    for f, lns in sorted(thread_hits.items()):
+        for fn in g.functions_in(f, sorted(lns)):
+            take(fn.fid)
     for f, lns in sorted(kw_hits.items()):
         for fn in g.functions_in(f, sorted(lns)):
             take(fn.fid)
@@ -115,6 +131,7 @@ def main():
 - risks: {json.dumps(risks, ensure_ascii=False)[:1500]}
 {('- 후보 초과로 팩에 못 넣은 함수: ' + ', '.join(extra)) if extra else ''}
 {('- 정의를 못 찾은 심볼: ' + ', '.join(missing)) if missing else ''}
+{('- ⚠ 파서가 일부를 잃은 파일(ERROR 줄 비율): ' + json.dumps(g.parse_quality(), ensure_ascii=False)) if g.parse_quality() else ''}
 
 ## plan 스키마 (harness/schemas/plan.json)
 ```json
@@ -126,7 +143,7 @@ def main():
         name = 'implement_request.md' if len(bs) == 1 else f'implement_request.batch{i+1}.md'
         open(os.path.join(out, name), 'w', encoding='utf-8').write(head + f"\n## 컨텍스트 팩 ({i+1}/{len(bs)})\n" + b.render()); written.append(name)
     json.dump({'key': a.key, 'repo_head': sh('git','-C',repo,'rev-parse','HEAD').strip(), 'symbols': symbols, 'symbols_missing': missing, 'grep': greps, 'files': sorted(files),
-               'candidate_fids': fids, 'n_files_parsed': len(scope), 'codegraph_complete': g.complete(), 'n_batches': len(bs),
+               'candidate_fids': fids, 'n_files_parsed': len(scope), 'codegraph_complete': g.complete(), 'codegraph_parse_quality': g.parse_quality(), 'n_batches': len(bs), 'pr': a.pr or None,
                'harness_git': sh('git','-C',ROOT,'rev-parse','--short','HEAD').strip(), 'created': time.strftime('%Y-%m-%dT%H:%M:%S')},
               open(os.path.join(out, 'manifest.json'), 'w'), ensure_ascii=False, indent=1)
     log(f'written: {written}'); print(out)

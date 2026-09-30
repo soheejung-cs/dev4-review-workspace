@@ -71,8 +71,11 @@ def adjudicate(repo: str, g: CodeGraph, changed: Dict[str, List[int]], findings:
 def self_check_build(repo: str, files: List[str], timeout: int = 900) -> Dict:
     """자기 보정 루프의 정적 단계: 변경 파일만 컴파일(빌드 디렉터리의 compile_commands.json 사용). 실패 = finding 이 아니라 하네스가 멈춘다."""
     cc = os.environ.get('HARNESS_COMPILE_COMMANDS', os.path.expanduser('~/dev/build/build_x86_64_release/compile_commands.json'))
-    if not os.path.isfile(cc): return {'ran': False, 'reason': f'compile_commands.json 없음 ({cc})'}
     import json
+    if not os.path.isfile(cc) or os.path.getsize(cc) < 100:
+        # goto 빌드 디렉터리는 compile_commands.json 이 비어 있다(2026-09-17~30 실측) → ninja 오브젝트 타깃으로 대신 컴파일한다.
+        # 이 폴백은 빌드 디렉터리가 가리키는 소스(메인 체크아웃)만 컴파일할 수 있다.
+        return self_check_ninja(repo, files, timeout)
     src_root = os.path.expanduser('~/dev/sources/cubrid')   # compile_commands 는 원본 소스 경로 기준; 워크트리 파일로 치환해 컴파일한다
     cmds = {os.path.relpath(e['file'], src_root): e for e in json.load(open(cc)) if e['file'].startswith(src_root)}
     res = {}
@@ -84,6 +87,39 @@ def self_check_build(repo: str, files: List[str], timeout: int = 900) -> Dict:
         r = subprocess.run(cmd, shell=True, cwd=e['directory'], stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True, timeout=timeout)
         res[f] = 'ok' if r.returncode == 0 else r.stderr[-800:]
     return {'ran': True, 'results': res}
+
+def ninja_targets_for(build_dir: str, files: List[str]) -> Dict[str, List[str]]:
+    """변경 파일 -> 그 파일을 컴파일하는 ninja 오브젝트 타깃들(sa/cs/cubrid 라이브러리마다 하나씩)."""
+    r = subprocess.run(['ninja', '-C', build_dir, '-t', 'targets', 'all'], stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True)
+    targets = [l.split(':', 1)[0] for l in r.stdout.splitlines() if l.endswith('.o') or ': ' in l]
+    out = {}
+    for f in files:
+        suffix = '/' + f.replace('src/', '', 1) + '.o' if f.startswith('src/') else '/' + f + '.o'
+        out[f] = sorted(t for t in targets if t.endswith(suffix) or t.endswith('/' + os.path.basename(f) + '.o') and ('/' + os.path.dirname(f).split('/')[-1] + '/') in t)
+    return out
+
+def self_check_ninja(repo: str, files: List[str], timeout: int = 1800) -> Dict:
+    """compile_commands 가 없을 때의 컴파일 확인: 빌드 디렉터리의 ninja 로 변경 파일의 오브젝트만 굽는다.
+    repo 가 빌드 디렉터리의 소스(메인 체크아웃)가 아니면 컴파일할 수 없어 ran=False."""
+    build_dir = os.environ.get('HARNESS_BUILD_DIR', os.path.expanduser('~/dev/build/build_x86_64_release'))
+    main_src = os.path.realpath(os.path.expanduser('~/dev/sources/cubrid'))
+    if os.path.realpath(repo) != main_src: return {'ran': False, 'reason': f'ninja 폴백은 메인 체크아웃({main_src})만 컴파일한다; repo={repo}'}
+    if not os.path.isfile(os.path.join(build_dir, 'build.ninja')): return {'ran': False, 'reason': f'build.ninja 없음 ({build_dir})'}
+    files = [f for f in files if f.endswith(('.c', '.cpp', '.cc'))]
+    if not files: return {'ran': True, 'method': 'ninja', 'results': {}}
+    tmap = ninja_targets_for(build_dir, files)
+    res = {}; all_targets = []
+    for f, ts in tmap.items():
+        if not ts: res[f] = 'no-ninja-target'; continue
+        all_targets += ts
+    if all_targets:
+        r = subprocess.run(['ninja', '-C', build_dir, '-k', '0'] + all_targets, stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True, timeout=timeout)
+        log = r.stdout + r.stderr
+        for f, ts in tmap.items():
+            if not ts: continue
+            failed = [t for t in ts if f'FAILED: {t}' in log]
+            res[f] = 'ok' if not failed else 'FAILED ' + ', '.join(failed) + '\n' + '\n'.join(l for l in log.splitlines() if 'error' in l.lower() and f in l)[:800]
+    return {'ran': True, 'method': 'ninja', 'targets': all_targets, 'results': res}
 
 # ---- 자기 보정 루프 ----
 import json, hashlib, glob

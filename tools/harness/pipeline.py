@@ -196,7 +196,7 @@ def run(pipeline_path, pr, out_base, repo, findings_path=None, model=None):
                 node = node or {}; impl = node.get('impl', name)
                 if node.get('when') == 'findings' and not findings_path: log(f'{st}.{name}: skipped (no --findings)'); continue
                 REGISTRY[impl](c, node); manifest['stages'].setdefault(st, []).append(name)
-        if 'g' in c: manifest.update(codegraph_fingerprint=c['g'].db.execute("SELECT v FROM meta WHERE k='input_fingerprint'").fetchone()[0], codegraph_complete=c['g'].complete(), n_files_parsed=c.get('files_parsed'), changed_functions=c.get('changed_fids'), n_batches=c.get('n_batches'))
+        if 'g' in c: manifest.update(codegraph_fingerprint=c['g'].db.execute("SELECT v FROM meta WHERE k='input_fingerprint'").fetchone()[0], codegraph_complete=c['g'].complete(), codegraph_parse_quality=c['g'].parse_quality(), n_files_parsed=c.get('files_parsed'), changed_functions=c.get('changed_fids'), n_batches=c.get('n_batches'))
     finally:
         if 'wt' in c: c['_wt_cm'].__exit__(None, None, None)
         manifest['finished'] = time.strftime('%Y-%m-%dT%H:%M:%S'); json.dump(manifest, open(os.path.join(out, 'manifest.json'), 'w'), ensure_ascii=False, indent=1)

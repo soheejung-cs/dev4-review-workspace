@@ -98,6 +98,18 @@ skills/
   design-doc/        **/design-doc <CBRD-n|증상>** — 증상 인터뷰 5라운드로 설계문서를 함께 쓴다(영역 판정·대안표·결정 Q)
   review-board/      리뷰 보드 갱신 — review-to-do 웹 보드(8827) 생성·호스팅, 추적 ID 관리
   review-recommend/  리뷰어 추천 — 머지 PR 모듈 관심도 × 난이도(1/2/3명, 학습 슬롯) × 보드 부하 (tools/review_recommend.py)
+
+### 어느 스킬을 여나 (경계표, 2026-09-30)
+| 하려는 일 | 스킬 | 옆 스킬로 넘어가는 신호 |
+|---|---|---|
+| PR 의 코드가 맞나·핫패스 낭비인가 | code-review / **harness-review**(도구 포함) | "여기가 맞는 자리인가" 가 떠오르면 design-review |
+| 변경이 있어야 할 자리에 있나(불변조건·계층·공유) | design-review | 리뷰어에게 보일 자료가 필요하면 design-deck(퍼스널) |
+| 증상에서 설계문서까지 함께 쓰기 | design-doc | 문서가 있으면 harness-implement |
+| 코드를 고쳐 PR 까지(신규·리뷰 대응) | harness-implement | 리뷰 코멘트에 답하는 단계는 review-response |
+| 달린 리뷰에 답하기·resolve | review-response | 결함이 확인되면 harness-implement 로 고친 뒤 돌아온다 |
+| 무엇을 돌려 검증하나(CTP/JOB/TPC-H) | review-testing | 측정 자체는 tools/ab |
+| 끝났을 때 어디에 남기나 | record | 세션을 닫을 땐 pre-clear(퍼스널) |
+
 references/
   oracle-manual/     → private 리포 dev4-oracle-manual 포인터(Oracle 문서는 재배포 제한). 읽는 규약 skills/oracle-reference
 
@@ -107,6 +119,8 @@ references/
   저지연패턴-HFT논문.md / -서적.md, 서버사이드-성능검토.md
 members/             팀 명단(GitHub 기준)·가입 템플릿·사람별 공간(컨테이너 사실은 여기에만)
 tools/               roster.json(추적 GitHub ID) · review_board_gen.py(review-to-do 보드)
+  ab/                A/B 표준 스크립트 — pick_ref.sh(REF 후보) · ab_sa.sh(정합 byte) · ab_time.sh + ab_summarize.py(교대·median·MAD) · mkbench_numeric.sql(합성 벤치)
+  harness/           review_threads.py(미해결 스레드 분류) · pr_refs.py(본문 참조 PR 상태·커밋 존재) · compile_check.py(파일/커밋 단위 컴파일) — 나머지는 harness/ARCHITECTURE.md
 imports/xmilex-git/    송일한 워크스페이스에서 들여온 원문(PR 리뷰 스킬·영문 성능 규칙집·설계 어휘·ctp-run·PR 코퍼스) — README 에 대응표
 examples/
   설계리뷰-덱-CBRD-27369.html   13장 덱(비유·락 전후 표·라이브락 그림·결정 요청) — 다음 덱의 틀

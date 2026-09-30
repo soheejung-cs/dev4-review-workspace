@@ -75,7 +75,27 @@ class TreeSitterProvider:
         # an operator argument such as `<=` makes even a ';'-terminated form unparsable.  Generated
         # functions themselves do not appear as definitions; look them up by --grep.
         src = re.sub(rb'(?m)^[A-Z_][A-Z0-9_]*\s*\(.*\)\s*$', lambda m: b' ' * len(m.group(0)), src)
-        tree = self._parsers[lang].parse(src)
+        # Parse quality = lines inside ERROR nodes that no function_definition covers, over total
+        # lines: the lines whose functions the parser LOST (a function extracted inside a
+        # recovering ERROR node still counts as parsed).  A file over PARSE_ERROR_LIMIT must not be
+        # reported as "complete" (2026-09-30: 60% of expr_compile.c was inside one ERROR node while
+        # codegraph_complete said true).  The .c files are compiled as C++ here, so when the C
+        # grammar loses too much the C++ grammar is tried and the better parse kept.
+        def _parse(l):
+            t = self._parsers[l].parse(src)
+            err = set(); fn = set(); stack = [t.root_node]
+            while stack:
+                n = stack.pop()
+                if n.type == 'function_definition': fn.update(range(n.start_point[0], n.end_point[0] + 1))
+                elif n.type == 'ERROR': err.update(range(n.start_point[0], n.end_point[0] + 1))
+                stack.extend(n.children)
+            return t, len(err - fn)
+        total = src.count(b'\n') + 1
+        tree, lost = _parse(lang)
+        if lang == 'c' and lost / total > CodeGraph.PARSE_ERROR_LIMIT:
+            tree2, lost2 = _parse('cpp')
+            if lost2 < lost: tree, lost, lang = tree2, lost2, 'cpp'
+        self.last_quality = (lost, total)
         funcs, calls, facts, structs, types = [], [], [], [], []
 
         def text(n): return src[n.start_byte:n.end_byte].decode('utf-8', 'replace')
@@ -177,7 +197,7 @@ class CodeGraph:
     def build(cls, repo: str, files: Iterable[str], db_path: str, provider=None, log=print) -> 'CodeGraph':
         files = sorted(set(files))  # 결정론: 입력 순서 무관
         fp = repo_fingerprint(repo)
-        key = hashlib.sha1(('v2|' + fp + '\n'.join(files)).encode()).hexdigest()
+        key = hashlib.sha1(('v3|' + fp + '\n'.join(files)).encode()).hexdigest()
         g = cls(db_path, repo)
         cur = g.db.execute("SELECT v FROM meta WHERE k='input_fingerprint'").fetchone()
         if cur and cur[0] == key:
@@ -186,19 +206,26 @@ class CodeGraph:
             try: provider = TreeSitterProvider(); complete = True
             except Exception as e: log(f'codegraph: tree-sitter unavailable ({e}); ctags fallback'); provider = CtagsProvider(); complete = False
         else: complete = not isinstance(provider, CtagsProvider)
+        quality = {}   # rel -> ERROR-line ratio, only files above the noise floor
         with g.db:
             for t in ('functions', 'calls', 'facts', 'structs', 'fn_types', 'meta'): g.db.execute(f'DELETE FROM {t}')
             for rel in files:
                 if not os.path.isfile(os.path.join(repo, rel)): continue
                 fs, cs, fa, st, ty = provider.parse_file(repo, rel)
+                q = getattr(provider, 'last_quality', None)
+                if q and q[1] > 0 and q[0] / q[1] > 0.02:
+                    quality[rel] = round(q[0] / q[1], 3)
+                    if q[0] / q[1] > cls.PARSE_ERROR_LIMIT: complete = False
                 g.db.executemany('INSERT OR REPLACE INTO functions VALUES(?,?,?,?,?,?,?)', [(f.fid, f.name, f.file, f.start_line, f.end_line, f.params, int(f.is_static)) for f in fs])
                 g.db.executemany('INSERT INTO calls VALUES(?,?,?,?,NULL)', [(c.caller, c.callee, c.line, c.args) for c in cs])
                 g.db.executemany('INSERT INTO facts VALUES(?,?,?,?,?)', [(x.fid, x.kind, x.callee, x.line, x.var) for x in fa])
                 g.db.executemany('INSERT INTO fn_types VALUES(?,?)', ty)
                 g.db.executemany('INSERT INTO structs VALUES(?,?,?,?)', [(s['name'], s['file'], s['start_line'], s['end_line']) for s in st])
             g._resolve()
-            g.db.executemany('INSERT OR REPLACE INTO meta VALUES(?,?)', [('input_fingerprint', key), ('repo_fingerprint', fp), ('complete', '1' if complete else '0'), ('n_files', str(len(files))), ('schema_version', cls.SCHEMA_VERSION)])
+            g.db.executemany('INSERT OR REPLACE INTO meta VALUES(?,?)', [('input_fingerprint', key), ('repo_fingerprint', fp), ('complete', '1' if complete else '0'), ('n_files', str(len(files))), ('schema_version', cls.SCHEMA_VERSION), ('parse_quality', json.dumps(quality, sort_keys=True))])
         log(f'codegraph: built {g.count("functions")} functions, {g.count("calls")} calls, {g.count("facts")} domain facts from {len(files)} files')
+        bad = {k: v for k, v in quality.items() if v > cls.PARSE_ERROR_LIMIT}
+        if bad: log(f'codegraph: parse ERROR ratio over {cls.PARSE_ERROR_LIMIT:.0%} in {len(bad)} file(s) -> complete=False: {bad}')
         return g
 
     def _resolve(self):
@@ -218,7 +245,13 @@ class CodeGraph:
         self.db.executemany('UPDATE calls SET resolved=? WHERE rowid=?', upd)
 
     def count(self, table): return self.db.execute(f'SELECT COUNT(*) FROM {table}').fetchone()[0]
+    PARSE_ERROR_LIMIT = 0.10   # a file with more ERROR lines than this has lost functions: the graph is not complete
+
     def complete(self): r = self.db.execute("SELECT v FROM meta WHERE k='complete'").fetchone(); return bool(r and r[0] == '1')
+    def parse_quality(self) -> Dict[str, float]:
+        """rel file -> ERROR-line ratio for files above the 2% noise floor (empty = every file parsed cleanly)"""
+        r = self.db.execute("SELECT v FROM meta WHERE k='parse_quality'").fetchone()
+        return json.loads(r[0]) if r and r[0] else {}
     def functions_in(self, file: str, lines: Iterable[int]) -> List[FunctionNode]:
         out = []
         for ln in sorted(set(lines)):

@@ -40,7 +40,9 @@ def main():
     # (3) -fsyntax-only
     sc = AD.self_check_build(repo, [f for f in changed_files if f.endswith(('.c', '.cpp', '.cc'))])
     res['checks']['syntax'] = sc
-    if sc.get('ran') and any(v not in ('ok', 'no-compile-command') for v in sc['results'].values()): fail('syntax', '컴파일 실패 — checks.syntax.results 참조')
+    if sc.get('ran') and any(v not in ('ok', 'no-compile-command', 'no-ninja-target') for v in sc['results'].values()): fail('syntax', '컴파일 실패 — checks.syntax.results 참조')
+    res['skipped'] = [] if sc.get('ran') else ['syntax: ' + sc.get('reason', '')]
+    if sc.get('ran'): res['skipped'] += [f'syntax({f}): {v}' for f, v in sc['results'].items() if v in ('no-compile-command', 'no-ninja-target')]
     # (4) 관문 짝 전후 비교
     before_db = a.before or os.path.join(out, 'codegraph.sqlite3')
     scope = set(changed_files)
@@ -64,7 +66,9 @@ def main():
                     else: res['checks'].setdefault('gates-declared', []).append(f'{fn.fid}: {unbalanced} — 계약: {declared[:120]}')
     res['changed_files'] = changed_files; res['touched_functions'] = touched
     json.dump(res, open(os.path.join(out, 'gate.json'), 'w'), ensure_ascii=False, indent=1)
-    print(('GATE OK' if res['ok'] else 'GATE FAIL') + f' — files {len(changed_files)}, functions {len(touched)}')
+    verdict = 'GATE FAIL' if not res['ok'] else ('GATE OK' if not res.get('skipped') else 'GATE OK* (건너뛴 검사 있음 — 컴파일을 확인한 것이 아니다)')
+    print(verdict + f' — files {len(changed_files)}, functions {len(touched)}')
+    for m in res.get('skipped', []): print(f'  skipped: {m}')
     for k, v in res['checks'].items():
         if k == 'syntax': print(f'  syntax: {"ran" if v.get("ran") else "skipped: " + v.get("reason","")}' + (f' {v["results"]}' if v.get('ran') else '')); continue
         for m in v: print(f'  {k}: {m}')

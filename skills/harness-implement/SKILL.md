@@ -17,6 +17,7 @@ description: 구현 하네스 — `/harness-implement <CBRD-n>`. 심볼·키워�
 ```bash
 cd ~/dev/docs/dev4-review-workspace
 python3 -m tools.harness.implement_pack --key CBRD-n --symbols fn1,fn2 --grep "ER_XXX,메시지 조각" [--files src/a.c]
+python3 -m tools.harness.implement_pack --key CBRD-n --pr <PR>      # 리뷰 대응: '대응 필요' 스레드(리뷰어가 마지막)의 file:line 이 후보, 그 파일들로 제한. threads.md 도 산출
 # → ~/dev/utils/harness-out/impl/CBRD-n/{implement_request[.batchN].md, codegraph.sqlite3, arch.json, manifest.json}
 ```
 후보 함수 = ① 요청한 심볼의 **정의**(항상 전부) + ② 키워드 줄을 포함하는 함수(상한을 넘으면 ②만 잘림; 같은 디렉터리로 그래프 범위). `--files` 를 주면 후보는 그 파일들로 제한된다(2026-09-30 이전엔 무시됐고, 심볼 호출 줄이 키워드 후보로 둔갑해 무관한 함수 40개가 채워졐다). 로그의 `정의를 못 찾은 심볼` 은 이름 오타·매크로 생성 함수(`EXPR_NUMERIC_BINOP_KERNEL` 류)다 — 그런 함수는 `--grep` 으로 잡는다. 키워드는 필드명·에러코드처럼 좁은 것만; `shareable`·`collation_flag` 같은 일반어는 파서까지 끌어온다. `implement_request*.md` 를 배치 순서대로 **전부** 읽는다. 팩 밖 코드는 "없음". 팩이 그래도 안 맞으면(리뷰 스레드가 파일:줄을 이미 주는 경우) 그 함수들을 소스에서 직접 읽되 **plan.changes 에 함수명을 전부 적는다** — 게이트의 범위 검사는 plan 기준이다.
@@ -35,10 +36,11 @@ python3 -m tools.harness.implement_pack --key CBRD-n --symbols fn1,fn2 --grep "E
 ```bash
 python3 -m tools.harness.implement_gate --plan <out>/plan.json [--base HEAD|upstream/develop]
 ```
-① 범위 — 바뀐 파일·함수 ⊆ plan.changes ② `codestyle.sh` 로 포맷 차이 0 ③ `-fsyntax-only`(compile_commands 있을 때) ④ 바뀐 함수의 **관문 카운트 불균형**이 있는데 `gate_contract` 가 없으면 실패. 실패 → 고치고 재실행(**재질의 상한 1회**; 두 번째도 실패면 사용자에게 상태 보고). 그다음 사용자 허락 하에 `goto CBRD-n` 빌드 → 재현 스크립트(`harness/templates/repro.sh`, `ServerSession`) → TC. **CTP 는 요청자 확인 후**(`review-testing`).
+① 범위 — 바뀐 파일·함수 ⊆ plan.changes ② `codestyle.sh` 로 포맷 차이 0 ③ 컴파일 — `compile_commands.json` 이 있으면 `-fsyntax-only`, 없으면(goto 빌드 디렉터리는 비어 있다) **ninja 오브젝트 타깃으로 실제 컴파일** ④ 바뀐 함수의 **관문 카운트 불균형**이 있는데 `gate_contract` 가 없으면 실패. 건너뛴 검사가 있으면 `GATE OK*` 로 찍힌다 — `*` 가 있으면 컴파일을 확인한 것이 아니다.
+커밋을 나눴으면 **커밋마다** 컴파일: `python3 -m tools.harness.compile_check --commits <base>..<head>`(깨끗한 트리에서 커밋을 차례로 체크아웃해 그 커밋이 바꾼 파일만 굽고 원래 ref 로 돌아온다). 파일만 보려면 `--files a.c,b.cpp`. 실패 → 고치고 재실행(**재질의 상한 1회**; 두 번째도 실패면 사용자에게 상태 보고). 그다음 사용자 허락 하에 `goto CBRD-n` 빌드 → 재현 스크립트(`harness/templates/repro.sh`, `ServerSession`) → TC. **CTP 는 요청자 확인 후**(`review-testing`).
 - 빌드는 `nohup bash ~/bin/goto.sh <br> release > log 2>&1 &`(`goto` 는 셸 함수라 nohup 에 없다). 실패하면 심링크가 `cub_server` 없는 설치본으로 넘어가 `cubrid` 가 사라진다 — 고친 rev 로 다시 goto 하면 복구. 빌드 중엔 엔진 소스를 고치지 않는다(ninja 가 반쯤 고친 파일을 집는다).
 - `cubrid server start` 를 **파이프로 받지 않는다**(데몬이 stdout 을 물어 영원히 안 끝난다, `goto setup` 과 같은 함정) — `> file` 로.
-- A/B 대조 설치본은 develop 기반 goto 캐시 중 **실행 의미가 develop 과 같은 것**(옵티마이저만 바뀐 것은 가능)으로. 벤치 볼륨이 이 develop 세대에서 열리지 않으면(upgradedb 메타데이터 버저닝, `System metadata is incompatible`) 재적재 대신 **결정적 합성 테이블**(INSERT…SELECT 배증, 두 설치본에 같은 스크립트)로 리뷰어 측정 형상을 재현한다. 시간은 csql 의 `selected. (N sec)` 줄에서 **첫 괄호**를 읽는다(마지막 괄호는 commit 시간).
+- A/B 는 `tools/ab/`(README 참조): `pick_ref.sh` 로 REF 후보(develop 조상인지, 머지베이스 이후 바뀐 디렉터리)를 고르고, 정합은 `ab_sa.sh`, 시간은 `ab_time.sh` + `ab_summarize.py`(교대·median·MAD). 대조 설치본은 **실행 의미가 develop 과 같은 것**(옵티마이저만 바뀐 것은 가능)으로. 벤치 볼륨이 이 develop 세대에서 열리지 않으면(upgradedb 메타데이터 버저닝, `System metadata is incompatible`) 재적재 대신 **결정적 합성 테이블**(INSERT…SELECT 배증, 두 설치본에 같은 스크립트)로 리뷰어 측정 형상을 재현한다. 시간은 csql 의 `selected. (N sec)` 줄에서 **첫 괄호**를 읽는다(마지막 괄호는 commit 시간).
 - 성능 대안이 둘이면 **둘 다 빌드해 같은 계약으로 재고 나서 고른다** — "C ≈ B" 같은 추정으로 고르면 뒤집힌다(2026-09-30: 워드 루트 1.04 vs 프로그램 제외 0.92).
 
 ## S5. 자기 리뷰 → PR
