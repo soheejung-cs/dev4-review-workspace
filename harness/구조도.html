@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>리뷰 하네스 구조도</title>
+<meta name="description" content="dev4 리뷰·구현 하네스의 파이프라인, 도구, 스킬, 산출물 위치 한 장 (2026-09-30)">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans+KR:wght@400;600;700&display=swap">
+<style>
+:root{--bg:#eef0f3;--surface:#fff;--ink:#161a20;--ink2:#39414c;--muted:#6b7684;--line:#d5dae1;--gate:#14706b;--gate-soft:#d9ebe9;--contend:#a85b16;--contend-soft:#f6e6d6;--proof:#5b4b8a;--proof-soft:#e7e3f2;--mono:"IBM Plex Mono",monospace;--body:"IBM Plex Sans KR",sans-serif}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){--bg:#0e1218;--surface:#161b23;--ink:#e7ebf0;--ink2:#bcc5d1;--muted:#8a95a3;--line:#2a323c;--gate:#46b3a8;--gate-soft:#14312f;--contend:#d98b45;--contend-soft:#33220f;--proof:#a08fdc;--proof-soft:#241e39}}
+:root[data-theme="dark"]{--bg:#0e1218;--surface:#161b23;--ink:#e7ebf0;--ink2:#bcc5d1;--muted:#8a95a3;--line:#2a323c;--gate:#46b3a8;--gate-soft:#14312f;--contend:#d98b45;--contend-soft:#33220f;--proof:#a08fdc;--proof-soft:#241e39}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--body);line-height:1.55}
+main{max-width:1100px;margin:0 auto;padding:32px 16px 64px}
+h1{font-size:clamp(24px,4vw,36px);margin:0 0 6px}h2{font-size:20px;margin:36px 0 10px}p{color:var(--ink2);max-width:75ch;margin:0 0 10px}
+.fig{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:14px;overflow-x:auto}svg{display:block;max-width:100%;height:auto}
+table{border-collapse:collapse;width:100%;font-size:14px;background:var(--surface);border:1px solid var(--line);border-radius:10px;overflow:hidden}
+th,td{text-align:left;padding:8px 12px;border-bottom:1px solid var(--line);vertical-align:top}th{font-family:var(--mono);font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:var(--muted)}
+code{font-family:var(--mono);font-size:.92em;background:var(--bg);border:1px solid var(--line);border-radius:4px;padding:.05em .3em}
+.tag{font-family:var(--mono);font-size:11px;padding:2px 7px;border-radius:999px;white-space:nowrap}.g{background:var(--gate-soft);color:var(--gate)}.c{background:var(--contend-soft);color:var(--contend)}.p{background:var(--proof-soft);color:var(--proof)}
+small{color:var(--muted)}
+</style></head><body><main>
+<h1>리뷰·구현 하네스 — 구조와 위치</h1>
+<p>세 리포에 나뉘어 있습니다. <b>규약과 도구</b>는 팀 리포 <code>dev4-review-workspace</code>, <b>일하는 방식·프로젝트 기록</b>은 개인 리포 <code>claude-workspace</code>, <b>소스 지식</b>은 <code>dev4-ai-source</code>. 산출물은 리포 밖 <code>~/dev/utils/harness-out</code> 에 쌓입니다. <small>2026-09-30 기준</small></p>
+
+<h2>1. 리뷰 파이프라인 (<code>run full --pr N</code>) — 결정론 구간과 LLM 구간</h2>
+<div class="fig"><svg viewBox="0 0 1060 300" role="img" aria-label="리뷰 파이프라인: 초기화, 컨텍스트, 유추, 요청, LLM 판단, 검증, 메모리 단계와 각 산출물">
+<defs><marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0L10 5L0 10z" fill="currentColor"/></marker></defs>
+<g font-family="IBM Plex Mono, monospace" font-size="11.5" fill="currentColor">
+<text x="14" y="18" font-size="11" opacity=".6">결정론 (python, gh, tree-sitter) — LLM 없음</text>
+<rect x="14" y="30" width="150" height="66" rx="6" fill="none" stroke="currentColor"/><text x="24" y="50" font-weight="600">initialize</text><text x="24" y="66" opacity=".75">worktree · diff_map</text><text x="24" y="82" opacity=".75">codegraph (품질 지표)</text>
+<rect x="190" y="30" width="170" height="66" rx="6" fill="none" stroke="currentColor"/><text x="200" y="50" font-weight="600">context</text><text x="200" y="66" opacity=".75">pack · perf_claims(MEAS)</text><text x="200" y="82" opacity=".75">pr_refs · or_buf</text>
+<rect x="386" y="30" width="120" height="66" rx="6" fill="none" stroke="currentColor"/><text x="396" y="50" font-weight="600">infer</text><text x="396" y="66" opacity=".75">arch: 계층·간선</text><text x="396" y="82" opacity=".75">include 간선·리스크</text>
+<rect x="532" y="30" width="140" height="66" rx="6" fill="#d9ebe9" stroke="#14706b" stroke-width="1.5"/><text x="542" y="50" font-weight="600" fill="#14706b">request</text><text x="542" y="66" fill="#14706b">review_request</text><text x="542" y="82" fill="#14706b">.batchN.md</text>
+<rect x="700" y="30" width="150" height="66" rx="6" fill="#e7e3f2" stroke="#5b4b8a" stroke-width="1.5"/><text x="710" y="50" font-weight="600" fill="#5b4b8a">LLM = 이 세션</text><text x="710" y="66" fill="#5b4b8a">팩만 읽고</text><text x="710" y="82" fill="#5b4b8a">findings.json</text>
+<rect x="876" y="30" width="170" height="66" rx="6" fill="none" stroke="currentColor"/><text x="886" y="50" font-weight="600">verify (--findings)</text><text x="886" y="66" opacity=".75">validate · gate(판정)</text><text x="886" y="82" opacity=".75">self_check · report</text>
+<rect x="876" y="120" width="170" height="44" rx="6" fill="none" stroke="currentColor" stroke-dasharray="4 3"/><text x="886" y="140" font-weight="600">memory</text><text x="886" y="156" opacity=".75">episodic (게시+로컬)</text>
+<text x="14" y="200" font-size="11" opacity=".6">산출물 ~/dev/utils/harness-out/&lt;pr&gt;/&lt;sha9&gt;/</text>
+<text x="14" y="220" opacity=".8">pr.diff · codegraph.sqlite3 · context_pack*.md · findings.auto.json · pr_refs.md · arch.{json,mmd} · review_request*.md</text>
+<text x="14" y="240" opacity=".8">findings.json(LLM) → findings.adjudicated.json · requery.json · self_check.json · report.md · manifest.json(complete·parse_quality·stages)</text>
+<text x="14" y="276" fill="#a85b16">게시는 report 를 사람 말투로 다듬어 사용자 승인 뒤 — 하네스는 GitHub 에 쓰지 않는다 (gh 는 읽기만)</text>
+</g>
+<g stroke="currentColor" fill="none" opacity=".55" marker-end="url(#a)"><line x1="166" y1="63" x2="186" y2="63"/><line x1="362" y1="63" x2="382" y2="63"/><line x1="508" y1="63" x2="528" y2="63"/><line x1="674" y1="63" x2="696" y2="63"/><line x1="852" y1="63" x2="872" y2="63"/><line x1="961" y1="98" x2="961" y2="116"/></g>
+</svg></div>
+
+<h2>2. 구현 하네스 (<code>/harness-implement</code>) — 승인 지점 둘</h2>
+<div class="fig"><svg viewBox="0 0 1060 150" role="img" aria-label="구현 하네스: 팩, plan 승인, 구현, 게이트, 검증, 자기 리뷰, PR">
+<g font-family="IBM Plex Mono, monospace" font-size="11.5" fill="currentColor">
+<rect x="14" y="30" width="170" height="60" rx="6" fill="none" stroke="currentColor"/><text x="24" y="50" font-weight="600">implement_pack</text><text x="24" y="66" opacity=".75">--symbols/--grep/--files</text><text x="24" y="82" opacity=".75">--pr N (대응 필요 스레드)</text>
+<rect x="208" y="30" width="130" height="60" rx="6" fill="#e7e3f2" stroke="#5b4b8a" stroke-width="1.5"/><text x="218" y="50" font-weight="600" fill="#5b4b8a">plan.json</text><text x="218" y="66" fill="#5b4b8a">영역·대안·changes</text><text x="218" y="82" fill="#a85b16">★ 사용자 승인</text>
+<rect x="362" y="30" width="110" height="60" rx="6" fill="none" stroke="currentColor"/><text x="372" y="50" font-weight="600">구현</text><text x="372" y="66" opacity=".75">plan.changes 만</text><text x="372" y="82" opacity=".75">커밋 나누기</text>
+<rect x="496" y="30" width="190" height="60" rx="6" fill="#d9ebe9" stroke="#14706b" stroke-width="1.5"/><text x="506" y="50" font-weight="600" fill="#14706b">implement_gate</text><text x="506" y="66" fill="#14706b">범위·codestyle·컴파일(ninja)</text><text x="506" y="82" fill="#14706b">--commits 커밋마다 · 관문 짝</text>
+<rect x="710" y="30" width="150" height="60" rx="6" fill="none" stroke="currentColor"/><text x="720" y="50" font-weight="600">검증</text><text x="720" y="66" opacity=".75">tools/ab (정합·시간)</text><text x="720" y="82" opacity=".75">CTP 부분 실행</text>
+<rect x="884" y="30" width="162" height="60" rx="6" fill="none" stroke="currentColor"/><text x="894" y="50" font-weight="600">자기 리뷰 → PR</text><text x="894" y="66" opacity=".75">run full --sha 로컬 rev</text><text x="894" y="82" fill="#a85b16">★ push·게시 승인</text>
+<text x="14" y="130" font-size="11" opacity=".6">산출물 ~/dev/utils/harness-out/impl/&lt;CBRD-n&gt;/ : implement_request*.md · threads.{json,md} · plan.json · gate.json · codegraph{,.after}.sqlite3</text>
+</g>
+<g stroke="currentColor" fill="none" opacity=".55" marker-end="url(#a)"><line x1="186" y1="60" x2="204" y2="60"/><line x1="340" y1="60" x2="358" y2="60"/><line x1="474" y1="60" x2="492" y2="60"/><line x1="688" y1="60" x2="706" y2="60"/><line x1="862" y1="60" x2="880" y2="60"/></g>
+</svg></div>
+
+<h2>3. 도구 위치 — <code>~/dev/docs/dev4-review-workspace/</code></h2>
+<table><thead><tr><th>경로</th><th>무엇</th><th>비고</th></tr></thead><tbody>
+<tr><td><code>tools/harness/run.py</code> · <code>pipeline.py</code></td><td>CLI 와 YAML 러너. 노드 = 레지스트리 이름, 단계 순서는 yaml 이 소유</td><td><code>--pr N [--findings f] [--sha rev --base ref]</code></td></tr>
+<tr><td><code>harness/pipelines/{full,review,design,adjudicate}.yaml</code></td><td>실행 그래프</td><td>full 이 권장</td></tr>
+<tr><td><code>tools/harness/codegraph.py</code></td><td>tree-sitter C/C++ → 함수·호출·관문 fact · SQLite. 파싱 품질(잃은 함수) 기록</td><td>문법 <code>~/dev/utils/tree-sitter/langs.so</code></td></tr>
+<tr><td><code>context_pack.py</code> · <code>arch_infer.py</code> · <code>reachability.py</code></td><td>팩 조립(예산·우선순위) · 계층 간선·include 간선·리스크 · 관문 경로 BFS</td><td></td></tr>
+<tr><td><code>perf_claims.py</code> · <code>or_buf.py</code> · <code>pr_refs.py</code></td><td>본문 성능 주장(MEAS-01/04/05/06/07) · 요청 버퍼 크기 · 참조 PR 상태·커밋 존재</td><td>전부 결정론, 자동 finding</td></tr>
+<tr><td><code>adjudicate.py</code></td><td>finding 판정(의무 5 + 그래프 + 언급 함수), 통과/실패 이유, 컴파일 self-check(ninja)</td><td><code>harness/schemas/finding.json</code></td></tr>
+<tr><td><code>episodic.py</code></td><td>게시 코멘트 + 로컬 판정 → <code>examples/episodic/PR-n.json</code>, 다음 팩의 우선순위 6 절</td><td></td></tr>
+<tr><td><code>implement_pack.py</code> · <code>implement_gate.py</code> · <code>compile_check.py</code></td><td>구현 팩 · 게이트 · 파일/커밋 단위 컴파일</td><td><code>harness/schemas/plan.json</code></td></tr>
+<tr><td><code>review_threads.py</code></td><td>미해결 스레드 → 대응 필요 / resolve 대기</td><td><code>~/dev/utils/harness-out/threads/&lt;pr&gt;/</code></td></tr>
+<tr><td><code>tools/ab/</code></td><td>A/B 표준: pick_ref · ab_sa(정합) · ab_time+ab_summarize(교대·median·MAD) · mkbench_numeric</td><td>측정-규칙</td></tr>
+<tr><td><code>rules/</code> · <code>references/</code></td><td>성능·설계 리뷰 규칙(ID 인용) · 성능규칙집 2568줄·사전설계문서·Lakos</td><td>팩의 rules 절이 여기서 온다</td></tr>
+<tr><td><code>skills/*/SKILL.md</code></td><td>팀 스킬 12개 (code-review·design-review·harness-*·review-*·record·design-doc·oracle-reference)</td><td><code>~/.claude/skills</code> 심링크</td></tr>
+<tr><td><code>examples/</code></td><td>리뷰보고서 예시 22편 · 설계리뷰 덱 · episodic</td><td>팩의 예시 절</td></tr>
+</tbody></table>
+
+<h2>4. 나머지 위치</h2>
+<table><thead><tr><th>위치</th><th>무엇</th></tr></thead><tbody>
+<tr><td><code>~/dev/docs/claude-workspace/</code></td><td>개인: <code>memory/</code>(rules·howto·hosts, 자동 로드 심링크) · <code>skills/</code>(pre-clear·post-merge·agent-board·jira-task·design-deck·cubrid-build/ctp/server) · <code>projects/CBRD-n/</code>(세션기록·리뷰보고서·리뷰대응·덱·repro) · <code>projects/현황.md</code> · <code>tools/</code>(memory_link·skill_link) · <code>notes/workflows/</code></td></tr>
+<tr><td><code>~/dev/docs/dev4-ai-source/</code></td><td>소스 지식: <code>modules/*.md</code> §1~§4 · <code>staging/</code> 환류 대기 · <code>reference-dbms/database-reference/</code> · 스킬 source-learning</td></tr>
+<tr><td><code>~/dev/docs/dev4-tc-workspace/</code></td><td>TC: tc-analysis · gha-ci · shell TC 인덱스</td></tr>
+<tr><td><code>~/dev/utils/harness-out/</code></td><td>실행 산출물 (리포 밖, 420M). <code>&lt;pr&gt;/&lt;sha9&gt;/</code>, <code>impl/&lt;CBRD-n&gt;/</code>, <code>threads/&lt;pr&gt;/</code>, 워크트리 <code>wt-&lt;sha9&gt;</code>(실행 중에만)</td></tr>
+<tr><td><code>~/.claude/CLAUDE.md</code> · <code>~/.claude/skills/</code></td><td>공통+호스트 규약(<code>hosts/build.sh</code> 산출) · 스킬 심링크 24개</td></tr>
+<tr><td><code>~/bin/goto.sh</code> · <code>~/bin/host_idle_guard.sh</code></td><td>빌드·설치본 전환 · 측정 전 호스트 유휴 확인</td></tr>
+<tr><td><code>agent-todo</code> (GitHub Issues) · 보드 8826/8827</td><td>카드·worklog · review-to-do 보드</td></tr>
+</tbody></table>
+
+<h2>5. 정직한 신호 세 개 (2026-09-30 이후 보는 법)</h2>
+<table><thead><tr><th>신호</th><th>어디</th><th>뜻</th></tr></thead><tbody>
+<tr><td><span class="tag g">codegraph_complete</span> + <code>parse_quality</code></td><td>manifest.json · 팩 머리</td><td>파서가 잃은 함수 수/정의 수. 10% 초과이며 3개 이상 잃은 파일이 있으면 false — 그 파일의 관문 판정은 불완전</td></tr>
+<tr><td><span class="tag c">GATE OK*</span></td><td>implement_gate 출력</td><td>건너뛴 검사가 있다(컴파일을 확인한 것이 아니다). <code>GATE OK</code> 만 신뢰</td></tr>
+<tr><td><span class="tag p">통과: …</span> / <code>reasons</code></td><td>report.md 지적마다</td><td>valid 도 어떤 의무를 통과했는지 적힌다. 비어 있으면 판정기가 돈 것이 아니다</td></tr>
+</tbody></table>
+</main></body></html>

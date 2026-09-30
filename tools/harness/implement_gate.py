@@ -27,7 +27,13 @@ def main():
     plan_files = {c['file'] for c in plan.get('changes', [])}
     # plan 의 function 칸은 사람이 "a / b / c" 나 "(선언 3곳: a, b)" 처럼 여러 이름을 적기도 한다 — 식별자 토큰 전부를 인정한다 (2026-09-30)
     import re as _re
-    plan_fns = {(c['file'], tok) for c in plan.get('changes', []) for tok in _re.findall(r'[A-Za-z_][A-Za-z0-9_]*', c['function']) if len(tok) > 2}
+    plan_fns = set()
+    for c in plan.get('changes', []):
+        toks = [t for t in _re.findall(r'[A-Za-z_][A-Za-z0-9_]*', c['function']) if len(t) > 2]; prev = None
+        for t in toks:
+            if t.startswith('_') and prev:   # "heap_attr_readval_int / _bigint / _short" 식 축약: 앞 이름의 마지막 조각을 바꾼다
+                t = prev.rsplit('_', 1)[0] + t
+            plan_fns.add((c['file'], t)); prev = t
     plan_wild = {c['file'] for c in plan.get('changes', []) if '*' in c['function']}   # "file: *" 는 그 파일 전체 허용
     for f in changed_files:
         if f not in plan_files: fail('scope', f'plan 밖 파일 변경: {f}')
