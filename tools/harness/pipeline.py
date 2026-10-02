@@ -3,7 +3,7 @@
 - manifest.json 에 결정론 기록: pr/head, harness git sha, pipeline yaml sha, rules sha, skills(prompt) sha, codegraph fingerprint, model_id(환경 HARNESS_MODEL).
 - 외부 호출은 gh 만. LLM 호출은 없고, LLM 산출물(findings.json)은 adjudicate 파이프라인의 입력이다.
 """
-import hashlib, json, os, subprocess, sys, time
+import hashlib, json, os, re, subprocess, sys, time
 import yaml
 from . import codegraph as CG, context_pack as CP, arch_infer as AI, adjudicate as AD, perf_claims as PC, episodic as EP, or_buf as OB, pr_refs as PR
 from .run_support import Worktree, sh
@@ -112,8 +112,65 @@ def _mandatory(rules_dir):
             if any(('## ' + part).startswith(sec) for sec in secs): out.append(f'### [{fn}] ' + part.strip()[:6000])
     return '\n\n'.join(out)
 
+_PACK_RE = re.compile(r'^context_pack\.batch(\d+)\.md$')
+
+def _pack_batches(out_dir):
+    """context_pack.batch<N>.md 를 **N 의 수치 순**으로 돌려준다 [(N, filename), ...].
+    파일명 문자열 정렬(batch1, batch10, batch100 …)은 배치가 10개를 넘는 순간 번호를 어긋나게 한다
+    — review_request.batch8 안에 context_pack.batch105 가 들어가던 버그(2026-10-02, PR#8022 154배치에서 발견)."""
+    items = [(int(m.group(1)), f) for f in os.listdir(out_dir) for m in [_PACK_RE.match(f)] if m]
+    if items: return sorted(items)
+    return [(0, 'context_pack.md')] if os.path.isfile(os.path.join(out_dir, 'context_pack.md')) else []
+
+def _pack_files(path):
+    """팩 안 '## changed function <file>:<fn>' 에서 파일별 변경 함수 수."""
+    cnt = {}
+    for l in open(path, encoding='utf-8', errors='replace'):
+        if l.startswith('## changed function '):
+            f = l[len('## changed function '):].split(':', 1)[0].strip()
+            cnt[f] = cnt.get(f, 0) + 1
+    return cnt
+
+def _batch_index(out_dir, batches, max_group=12, chunk=4):
+    """배치 색인 + 그룹 계획. 팬아웃 오케스트레이터가 '어느 에이전트에 어느 배치' 를 **팩 내용 기준**으로 정하고,
+    세션 한도에 걸리지 않게 몇 개씩 끊어 돌릴지 정하는 데 쓴다(2026-10-02: 15개 동시 × 10배치로 한도 3회 소진)."""
+    per = [(n, f, _pack_files(os.path.join(out_dir, f))) for n, f in batches]
+    groups, cur = [], []
+    def primary(c): return max(c.items(), key=lambda kv: (kv[1], kv[0]))[0] if c else ''
+    for n, f, c in per:
+        if cur and (primary(c) != primary(cur[-1][2]) or len(cur) >= max_group):
+            groups.append(cur); cur = []
+        cur.append((n, f, c))
+    if cur: groups.append(cur)
+    gj = []
+    for i, g in enumerate(groups):
+        agg = {}
+        for _, _, c in g:
+            for k, v in c.items(): agg[k] = agg.get(k, 0) + v
+        gj.append({'code': f'G{i+1}', 'batches': [n for n, _, _ in g], 'primary': primary(agg),
+                   'files': dict(sorted(agg.items(), key=lambda kv: -kv[1]))})
+    json.dump({'n_batches': len(per), 'chunk_hint': chunk, 'max_group': max_group, 'groups': gj},
+              open(os.path.join(out_dir, 'batch_index.json'), 'w'), ensure_ascii=False, indent=1)
+    md = ['# 배치 색인 — 어느 배치가 어느 파일을 담고 있나', '',
+          f'배치 {len(per)}개 · 제안 그룹 {len(gj)}개 · 동시 실행 제안 **{chunk}개씩**.', '',
+          '## 읽는 법 (팬아웃할 때)',
+          '- 공통 지시·의무 항목·finding 스키마는 **`preamble.md` 에 한 번만** 있다. 에이전트는 그걸 한 번 읽고,',
+          '  배정된 `review_request.batch<N>.md`(= 팩) 만 읽는다. 배치 파일에 지시문을 매번 싣지 않는다.',
+          '- `review_request.batch<N>.md` 의 N 은 `context_pack.batch<N>.md` 의 N 과 **같다**(수치 정렬).',
+          f'- 한 번에 {chunk}개 그룹씩 끊어 돌린다 — 그래야 중간에 한도에 걸려도 끝난 그룹의 결과가 남는다.', '',
+          '## 그룹 제안', '', '| 그룹 | 배치 | 주 파일 | 파일(변경 함수 수) |', '|---|---|---|---|']
+    for g in gj:
+        bs = g['batches']; rng = f"{bs[0]}-{bs[-1]}" if len(bs) > 2 and bs == list(range(bs[0], bs[-1]+1)) else ','.join(map(str, bs))
+        md.append(f"| {g['code']} | {rng} | `{g['primary']}` | " + ', '.join(f"{k}({v})" for k, v in list(g['files'].items())[:6]) + ' |')
+    md += ['', '## 배치별', '', '| 배치 | 파일(변경 함수 수) |', '|---|---|']
+    for n, _, c in per:
+        md.append(f"| {n} | " + (', '.join(f"{k}({v})" for k, v in sorted(c.items(), key=lambda kv: -kv[1])) or '(없음)') + ' |')
+    open(os.path.join(out_dir, 'batch_index.md'), 'w', encoding='utf-8').write('\n'.join(md) + '\n')
+    return gj
+
 def n_review_request(c, a):
-    """LLM 에 줄 단일 입력. 배치가 여럿이면 배치마다 하나. 지시는 스킬 두 개의 산출물 절을 요약한 고정 문구."""
+    """LLM 에 줄 입력. 공통 지시(preamble.md)는 **한 번만** 쓰고, 배치 파일에는 팩만 담는다.
+    배치가 하나면 종전처럼 자립 파일(review_request.md)로 쓴다."""
     rules_dir = os.path.join(ROOT, 'rules'); mand = _mandatory(rules_dir)
     arch_p = os.path.join(c['out'], 'arch.json'); arch = json.load(open(arch_p, encoding='utf-8')) if os.path.isfile(arch_p) else None
     auto_p = os.path.join(c['out'], 'findings.auto.json'); auto = json.load(open(auto_p, encoding='utf-8')) if os.path.isfile(auto_p) else []
@@ -149,14 +206,31 @@ def n_review_request(c, a):
 {schema}
 ```
 """
-    packs = sorted(f for f in os.listdir(c['out']) if f.startswith('context_pack') and f.endswith('.md'))
-    batches = [f for f in packs if '.batch' in f] or ['context_pack.md']
-    written = []
-    for i, b in enumerate(batches):
-        name = 'review_request.md' if len(batches) == 1 else f'review_request.batch{i+1}.md'
+    batches = _pack_batches(c['out'])
+    if not batches: c['log']('review_request: no context pack'); return []
+    open(os.path.join(c['out'], 'preamble.md'), 'w', encoding='utf-8').write(head)
+    written = ['preamble.md']
+    title = f"PR #{c['pr']} {c['meta']['title']} ({c['meta']['headRefOid'][:9]}, {c['meta']['jira']})"
+    if len(batches) == 1:
+        n, b = batches[0]
         body = open(os.path.join(c['out'], b), encoding='utf-8').read()
-        open(os.path.join(c['out'], name), 'w', encoding='utf-8').write(head + f"\n## 컨텍스트 팩 ({b})\n" + body); written.append(name)
-    c['log'](f'review_request: {len(written)} file(s) → {written}'); return written
+        open(os.path.join(c['out'], 'review_request.md'), 'w', encoding='utf-8').write(head + f"\n## 컨텍스트 팩 ({b})\n" + body)
+        written.append('review_request.md')
+    else:
+        for n, b in batches:
+            files = _pack_files(os.path.join(c['out'], b))
+            thin = (f"# review_request — {title} — batch {n}/{len(batches)}\n\n"
+                    f"공통 지시·의무 항목·finding 스키마는 이 디렉터리의 **`preamble.md`** 에 한 번만 있다 — 먼저 한 번 읽고, "
+                    f"배치 파일은 팩만 읽는다(여러 배치를 맡아도 지시문은 한 번).\n"
+                    f"이 배치의 파일: " + (', '.join(f'`{k}`({v})' for k, v in sorted(files.items(), key=lambda kv: -kv[1])) or '(없음)') +
+                    f"\n배치 전체 지도: `batch_index.md`\n\n## 컨텍스트 팩 ({b})\n")
+            open(os.path.join(c['out'], f'review_request.batch{n}.md'), 'w', encoding='utf-8').write(
+                thin + open(os.path.join(c['out'], b), encoding='utf-8').read())
+            written.append(f'review_request.batch{n}.md')
+    gj = _batch_index(c['out'], batches)
+    written += ['batch_index.md', 'batch_index.json']
+    c['log'](f'review_request: {len(batches)} batch file(s) + preamble.md + batch_index (그룹 제안 {len(gj)}개)')
+    return written
 
 def n_report(c, a):
     """findings.adjudicated.json → report.md (skills/code-review §5 형식의 골격: TL;DR·[설계 리뷰]·[코드 리뷰]·돌릴 것)."""

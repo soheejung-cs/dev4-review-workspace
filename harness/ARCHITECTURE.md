@@ -84,7 +84,7 @@ DB 서버·CTP 는 이 CLI 가 띄우지 않는다(`review-testing` 스킬의 �
 \* `self_check` 는 `HARNESS_COMPILE_COMMANDS`(기본: 빌드트리의 `compile_commands.json`)가 없으면 **조용히 건너뛴다**
   — `ran=False`. 그 상태에서는 "게이트 OK" 가 컴파일 확인을 뜻하지 않는다. 만드는 법은 README 의 `ninja -t compdb` 한 줄.
 
-`run full --pr N` 은 리뷰용·설계용을 **한 번**에 돈다: initialize → context(성능 규칙 행 + 설계 불변조건 + episodic) → infer(arch) → **review_request.md**(LLM 단일 입력: 지시·두 규칙의 의무 항목·자동 MEAS finding·arch 요약·finding 스키마·컨텍스트 팩, 배치별) → [LLM 이 findings.json 작성] → `--findings` 로 verify(validate→gate→self_check→report.md) → memory(episodic). 층 구분은 finding 의 `layer` 필드와 게시 코멘트 첫 줄 태그로만 남는다. review/design/adjudicate yaml 은 이 그래프의 부분집합이다(디버그용).
+`run full --pr N` 은 리뷰용·설계용을 **한 번**에 돈다: initialize → context(성능 규칙 행 + 설계 불변조건 + episodic) → infer(arch) → **review_request**(LLM 입력: 공통 지시·두 규칙의 의무 항목·자동 MEAS finding·arch 요약·finding 스키마는 `preamble.md` 에 **한 번**, 컨텍스트 팩은 `review_request.batch<N>.md` 에 배치별 — 배치가 하나면 둘을 합친 `review_request.md`. 배치 지도·그룹 제안은 `batch_index.{md,json}`. **배치 번호 N 은 `context_pack.batch<N>.md` 의 N 과 같다** — 2026-10-02 이전 산출물은 파일명 문자열 정렬 때문에 10번부터 어긋나 있다) → [LLM 이 findings.json 작성] → `--findings` 로 verify(validate→gate→self_check→report.md) → memory(episodic). 층 구분은 finding 의 `layer` 필드와 게시 코멘트 첫 줄 태그로만 남는다. review/design/adjudicate yaml 은 이 그래프의 부분집합이다(디버그용).
 
 ### 두 층의 경계(finding 단위)
 | | 리뷰용(review) | 설계용(design) |

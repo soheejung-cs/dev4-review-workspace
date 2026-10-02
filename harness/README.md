@@ -26,8 +26,8 @@ Claude Code 에서 **`/harness-review <PR번호>`** — `skills/harness-review/S
 > **Python ≥ 3.7** (`dataclasses`). 기본 `python3` 이 3.6 인 컨테이너(.52)는 아래 명령의 `python3` 을 `python3.11` 로 바꿔 돌린다 — 의존성도 그 인터프리터에 (`python3.11 -m ensurepip --user && python3.11 -m pip install --user jsonschema pyyaml "tree_sitter<0.21"`). 정소희(.52) 2026-09-17
 ```
 cd ~/dev/docs/dev4-review-workspace
-python3 -m tools.harness.run full --pr 7937                        # 1) 코드+설계+성능 입력 한 번에: review_request[.batchN].md, arch.json, findings.auto.json
-#   2) LLM(이 에이전트)이 review_request*.md 를 읽고 out/<pr>/<sha>/findings.json 을 쓴다 (스키마 harness/schemas/finding.json)
+python3 -m tools.harness.run full --pr 7937                        # 1) 코드+설계+성능 입력: preamble.md(지시·스키마 1회) + review_request.batch<N>.md(팩) + batch_index.md, arch.json, findings.auto.json
+#   2) LLM(이 에이전트)이 preamble.md 1회 + review_request.batch*.md 를 읽고 out/<pr>/<sha>/findings.json 을 쓴다 (스키마 harness/schemas/finding.json)
 python3 -m tools.harness.run full --pr 7937 --findings <out>/findings.json   # 3) 검증→판정→requery.json→report.md→episodic
 ```
 부분 실행(디버그용):

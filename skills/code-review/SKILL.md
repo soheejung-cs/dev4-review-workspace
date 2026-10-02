@@ -59,4 +59,4 @@ description: CUBRID 엔진 C/C++ 변경의 구현 리뷰 — 정확한가, 핫�
 - 새로 확인한 코드 사실 → `dev4-ai-source/staging/환류대기.md` (`record` 스킬).
 
 ## 하네스로 시작하기 (2026-09-16)
-리뷰 전에 `python3 -m tools.harness.run full --pr <n>` 을 돌려 `out/<pr>/<sha>/review_request[.batchN].md` 를 읽는다(코드+설계+성능 입력이 한 파일: 지시·의무 항목·자동 MEAS·arch 요약·팩). 지적은 `findings.json`(스키마 `harness/schemas/finding.json`, `layer` 로 코드/설계 구분) 으로 쓰고 `run full --pr <n> --findings <파일>` 로 판정·report.md·episodic 까지 이어간 뒤 보고서를 다듬는다. 설계: `arch.json`/`arch.mmd` 의 계층 간선과 리스크를 인용한다. 상세 `harness/ARCHITECTURE.md`.
+리뷰 전에 `python3 -m tools.harness.run full --pr <n>` 을 돌려 `out/<pr>/<sha>/` 의 **`preamble.md`**(지시·의무 항목·자동 MEAS·arch 요약·스키마)를 한 번 읽고 **`review_request.batch<N>.md`**(팩)를 번호 순으로 읽는다(배치가 하나면 `review_request.md` 하나로 자립). 배치가 많으면 `batch_index.md` 의 배치별 파일·그룹 제안을 먼저 본다. 지적은 `findings.json`(스키마 `harness/schemas/finding.json`, `layer` 로 코드/설계 구분) 으로 쓰고 `run full --pr <n> --findings <파일>` 로 판정·report.md·episodic 까지 이어간 뒤 보고서를 다듬는다. 설계: `arch.json`/`arch.mmd` 의 계층 간선과 리스크를 인용한다. 상세 `harness/ARCHITECTURE.md`.

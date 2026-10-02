@@ -13,7 +13,8 @@ description: 통합 리뷰 하네스 실행 — `/harness-review <PR번호>`. �
 ## 절차 (LLM 호출 = 이 세션의 나)
 1. `cd ~/dev/docs/dev4-review-workspace && python3 -m tools.harness.run full --pr <PR>` → 마지막 줄이 산출 디렉터리 `OUT`.
    **미push 커밋을 자기 리뷰**할 때는 `--sha <로컬 rev> --base <기준>`(기준 생략 시 upstream/develop; 머지 커밋을 주면 그 뒤 커밋만) — PR head 대신 로컬 리비전으로 팩을 만든다(2026-09-30). manifest 의 `local_head: true`.
-2. `OUT/review_request*.md` 를 **배치 순서대로 전부** 읽는다(다른 파일은 열지 않는다 — 팩에 없는 코드는 "없음"). `manifest.json` 의 `codegraph_complete` 가 false 면 보고서에 적고 `codegraph_parse_quality`(파일별 파서가 잃은 줄 비율)의 파일은 팩이 불완전할 수 있다고 본다.
+2. `OUT/preamble.md`(공통 지시·의무 항목·finding 스키마)를 **한 번** 읽고, `OUT/review_request.batch<N>.md`(팩)를 **번호 순으로 전부** 읽는다(다른 파일은 열지 않는다 — 팩에 없는 코드는 "없음"). 배치가 하나면 자립 파일 `review_request.md` 하나다.
+   배치가 많으면 **`OUT/batch_index.md` 를 먼저** 본다 — 배치별 파일·변경 함수 수와 **그룹 제안**(연속 배치를 주 파일로 묶은 것)이 있다. 어느 배치에 무엇이 들었는지 번호로 짐작하지 않는다. `manifest.json` 의 `codegraph_complete` 가 false 면 보고서에 적고 `codegraph_parse_quality`(파일별 파서가 잃은 줄 비율)의 파일은 팩이 불완전할 수 있다고 본다.
    본문이 기대는 외부 사실은 `python3 -m tools.harness.pr_refs --pr <PR>` 로 한 번 확인한다 — 참조 PR 의 상태(미머지로 닫힌 것을 "포트했다" 고 적었나), 언급한 커밋 해시가 head 에 있나. 어긋나면 그 자체가 지적(`문서 제안` 또는 `설계 판정`)이다.
 3. 지적을 `OUT/findings.json` 으로 쓴다 — 스키마 `harness/schemas/finding.json`. **모든 지적에 `why`(왜 문제가 되는지: 이대로 두면 누가/무엇이 어떻게 되나 + 근거)** 를 쓴다. 게시 코멘트에도 그 문단을 `왜 문제가 되는지:` 로 붙인다. **`category`·`importance`(첫 줄 `[층] [카테고리] 🔴/🟡/🟢`, `review-response` 표 참조) 와 `proposal`(제안+예시) 도 필수** — 주석 관련이면 확정 문구를 GitHub ```suggestion 블록으로(한 줄 앵커: 주석 + 원래 줄), 코드는 스케치, 문서는 문구, 테스트는 TC 시나리오. **에러 우려**(데드락·크래시·누수·오답·UB) 는 게시 전에 확인한다 — 관련 함수를 직접 읽어 순서·초기화를 확정(static)하거나 빌드해 재현(dynamic)하고 `verification` 에 방법·결과를 적는다; 확인 못 하면 `question` 으로 게시한다(사용자 지시 2026-09-17) — 지적만 있고 결과가 없는 코멘트는 작성자가 우선순위를 판단할 수 없다(사용자 지시 2026-09-17). `layer` 코드/설계, `evidence` 는 팩 안의 `file:line` 또는 `pr-body:N`, 성능 지적은 `rule_ids`, 설계 지적은 `arch_edge`. `findings.auto.json`(MEAS) 은 건드리지 않는다(러너가 합친다).
 4. `python3 -m tools.harness.run full --pr <PR> --findings OUT/findings.json` → `findings.adjudicated.json`, `requery.json`, `report.md`.
@@ -24,6 +25,10 @@ description: 통합 리뷰 하네스 실행 — `/harness-review <PR번호>`. �
 ## 여러 에이전트로 쪼갤 때
 단계마다 추론 강도를 다르게 준다 — **수집은 낮추고 판정·종합·반증은 유지**, 애매하면 올려보낸다.
 등급표와 탈출구(escalate) 스키마는 [`harness/모델-선택.md`](../../harness/모델-선택.md).
+
+배치가 수십 개인 대형 PR 은 **동시에 다 띄우지 않는다** — `batch_index.json` 의 `chunk_hint`(기본 4)만큼
+끊어 돌리고, 그룹은 `batch_index.md` 의 제안을 쓴다. 에이전트에는 `preamble.md` 를 한 번만 읽히고
+배치 파일은 팩만 읽힌다. 근거와 한도 실측은 모델-선택 §한도에 걸리지 않게.
 
 ## 하지 않는 것
 - 팩 밖 저장소 탐색, 줄 번호 추측, 판정 없이 게시, CTP/벤치 실행(`review-testing` 으로 제안만).
