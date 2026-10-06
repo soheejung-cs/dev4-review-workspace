@@ -213,11 +213,6 @@ def render(rows, now, orphans=()):
     by = {}
     for r in rows:
         by.setdefault(r['tracked'][0], []).append(r)
-    tot_unres = sum(r['unresolved'] for r in rows)
-    tot_wait = sum(1 for r in rows if r['requested'])
-    tot_noapr = sum(1 for r in rows if not r.get('approvers'))
-    tot_stuck = sum(1 for r in rows if not r.get('approvers') and not r['unresolved'])
-    tot_agent = sum(1 for r in rows if r['agent_n'])
     css = """
     :root{--bg:#eef0f3;--surface:#fff;--ink:#161a20;--muted:#6b7684;--line:#d5dae1;--gate:#14706b;--warn:#a85b16;--bad:#a3262b;--soft:#f6f7f9}
     @media (prefers-color-scheme:dark){:root{--bg:#0e1218;--surface:#161b23;--ink:#e7ebf0;--muted:#8a95a3;--line:#2a323c;--gate:#46b3a8;--warn:#d98b45;--bad:#e06c70;--soft:#1b2128}}
@@ -242,7 +237,10 @@ def render(rows, now, orphans=()):
     """
     h = ['<!doctype html><html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>review-to-do</title><style>%s</style></head><body><div class="wrap">' % css]
     h.append('<h1>review-to-do</h1><div class="meta">스냅샷 %s · assignee ∈ {%s} · open · non-draft · 미해결 스레드는 리뷰 코멘트 기준 · CI 는 보지 않음(사용자 지시) · TC PR 은 JIRA 키/cubrid#n 으로 엔진 PR 하위에 연동</div>' % (now, ', '.join(TRACKED)))
-    h.append('<div class="facts"><div class="fact"><b>%d</b><span>추적 PR</span></div><div class="fact"><b class="%s">%d</b><span>미해결 스레드 합</span></div><div class="fact"><b>%d</b><span>리뷰 미착수 PR</span></div><div class="fact"><b class="%s">%d</b><span>승인 0 PR</span></div><div class="fact"><b class="%s">%d</b><span>승인만 남은 PR</span></div><div class="fact"><b>%d / %d</b><span>에이전트가 리뷰한 PR (%s)</span></div></div>' % (len(rows), 'warn' if tot_unres else 'ok', tot_unres, tot_wait, 'warn' if tot_noapr else 'ok', tot_noapr, 'bad' if tot_stuck else 'ok', tot_stuck, tot_agent, len(rows), esc(','.join(sorted(AGENT)))))
+    # 머리 통계는 '미완료 PR 건수' 하나만 (사용자 지시 2026-10-06)
+    # 미완료 = 머지 가능이 아닌 것 = 미해결 스레드가 남았거나 승인자가 0
+    tot_open = sum(1 for r in rows if r['unresolved'] or not r.get('approvers'))
+    h.append('<div class="facts"><div class="fact"><b class="%s">%d</b><span>미완료 PR <span class="muted">/ 전체 %d</span></span></div></div>' % ('bad' if tot_open else 'ok', tot_open, len(rows)))
     # 툴바: 리뷰어 필터 + 에이전트 열 토글 (사용자 지시 2026-10-06)
     h.append('<div class="bar"><span class="lbl">내가 리뷰어인 PR</span>'
              + '<button class="btn on" data-rev-filter="">전체</button>'
@@ -252,29 +250,27 @@ def render(rows, now, orphans=()):
              + '<label class="lbl" style="cursor:pointer"><input type="checkbox" id="agentToggle"> 에이전트 리뷰 열 보기</label>'
              + '</div>')
     h.append('<div class="meta" style="margin:6px 0 2px">누구 차례인가 — <b>미해결 &gt; 0</b>: 작성자 · <b>미해결 0 + 승인자 0</b>: 리뷰어(승인 필요, "승인만 남은 PR") · <b>미해결 0 + 승인자 ≥ 1</b>: 머지 가능. 리뷰어 필 — <span class="pill req">미착수</span> 요청됐고 리뷰 이력 없음 · <span class="pill pend">승인 전</span> 리뷰했으나 승인 안 함(GitHub 은 리뷰 제출 시 요청 목록에서 빼므로 이 상태가 따로 필요하다)</div>')
-    # 업무 부하표: 본인 PR / 리뷰 중(미착수 + 승인 전) / 합계 — 추적 ID 전원
-    # 추천 리뷰어 열은 제거했다 (사용자 지시 2026-10-06) — 생성 시간 1.5분도 같이 빠진다
-    def walk_tc(r):
-        for t in r.get('linked_tc', []):
-            yield t
+    # 사람별 미완료 PR (사용자 지시 2026-10-06: 업무 부하표 대신 이것)
+    # 미완료 = 머지 가능이 아닌 것 — 미해결 스레드가 남았거나 승인자가 0.
+    # 본인이 assignee 인 것(=작성자가 움직일 차례)과 본인이 리뷰어인 것(=내가 움직일 차례)을 나눈다.
     people = list(TRACKED)
-    load = {c: {'own': [], 'reviewing': []} for c in people}
+    mine = {c: {'own': [], 'rev': []} for c in people}
     for r in rows:
-        if r['author'] in load: load[r['author']]['own'].append(r['number'])
-        for c in r.get('requested', []) + r.get('pending_approval', []):
-            if c in load and r['number'] not in load[c]['reviewing']: load[c]['reviewing'].append(r['number'])
-        for t in walk_tc(r):
-            for c in t.get('requested', []) + t.get('pending_approval', []):
-                if c in load and ('tc#%d' % t['number']) not in load[c]['reviewing']: load[c]['reviewing'].append('tc#%d' % t['number'])
-    tot = {c: len(v['own']) + len(v['reviewing']) for c, v in load.items()}
+        if not (r['unresolved'] or not r.get('approvers')):
+            continue                                     # 머지 가능한 것은 세지 않는다
+        for c in r.get('tracked', []):
+            if c in mine and r['number'] not in mine[c]['own']: mine[c]['own'].append(r['number'])
+        for c in set(r.get('requested', []) + r.get('pending_approval', [])):
+            if c in mine and r['number'] not in mine[c]['rev']: mine[c]['rev'].append(r['number'])
+    tot = {c: len(v['own']) + len(v['rev']) for c, v in mine.items()}
     mx = max(tot.values() or [1])
-    h.append('<h2>업무 부하 <span class="meta">본인 PR + 리뷰 중(미착수·승인 전, TC PR 포함)</span></h2>')
-    h.append('<table><tr><th>사람</th><th>본인 PR</th><th>리뷰 중</th><th>합계</th><th></th></tr>')
+    h.append('<h2>미완료 PR <span class="meta">미해결 스레드가 남았거나 승인자가 0 — 내 PR(작성자 차례) / 내가 리뷰어(내 차례)</span></h2>')
+    h.append('<table><tr><th>사람</th><th>내 PR</th><th>내가 리뷰어</th><th>합계</th><th></th></tr>')
+    fmt = lambda xs: '<span class="muted" style="font-size:11px">%s</span>' % esc(' '.join('#%d' % x for x in sorted(xs))) if xs else ''
     for c in sorted(people, key=lambda c: -tot[c]):
-        v = load[c]; bar = '<div style="height:8px;border-radius:4px;background:var(--gate);width:%d%%;opacity:.7"></div>' % (100 * tot[c] // mx if mx else 0)
-        fmt = lambda xs: '<span class="muted" style="font-size:11px">%s</span>' % esc(' '.join('#%s' % x if isinstance(x, int) else x for x in xs)) if xs else ''
+        v = mine[c]; bar = '<div style="height:8px;border-radius:4px;background:var(--gate);width:%d%%;opacity:.7"></div>' % (100 * tot[c] // mx if mx else 0)
         h.append('<tr><td class="n">%s</td><td class="n">%d %s</td><td class="n">%d %s</td><td class="n"><b class="%s">%d</b></td><td style="width:180px">%s</td></tr>' % (
-            esc(c), len(v['own']), fmt(v['own']), len(v['reviewing']), fmt(v['reviewing']), 'bad' if tot[c] >= mx and mx >= 6 else '', tot[c], bar))
+            esc(c), len(v['own']), fmt(v['own']), len(v['rev']), fmt(v['rev']), 'bad' if tot[c] >= mx and mx >= 6 else '', tot[c], bar))
     h.append('</table>')
     for who in TRACKED:
         rs = by.get(who, [])
