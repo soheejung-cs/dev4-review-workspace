@@ -70,6 +70,23 @@ description: CUBRID 엔진 C/C++ 변경의 구현 리뷰 — 정확한가, 핫�
 | **결정이 필요한 것 Q1~Qn** — 닫힌 질문, 선택지별 비용 | 요청자가 할 일이 명확해진다 |
 
 그다음에 판정 → 영역 판정 → 확인했고 문제 없던 것 → 지적 → 보류 → 돌릴 것 순서다.
+
+### §2 변경 지도는 **변경 함수 전수**다 (사용자 지시 2026-10-06)
+"어디 파일의 어디 함수가 원래 무슨 기능이었고, 지금은 무슨 기능이고, 뭘 바꿨는지" 를 읽는 사람이 알아야 한다.
+`findings` 는 **결함**만 담는 그릇이라 이게 들어갈 자리가 없다 — 그래서 `function_notes`(스키마 `harness/schemas/review_output.json`)를
+따로 받아 보고서 §2 에 **파일 → 함수 표**로 전부 깐다. 결함이 없는 함수도 쓴다.
+
+> 실패 사례: PR#8022(89파일 856함수) 보고서가 **24파일만 언급하고 함수명은 3종**뿐이었다.
+> 에이전트가 `source_facts` 183 + `verified_ok` 163 을 이미 모아 놓고도 종합에서 버렸다.
+
+### 한국어 주석 리뷰 PR (`annotate`)
+`function_notes` 를 PR head 소스에 `/* [리뷰] … */` 로 심어 **fork 안에** draft PR 을 연다 —
+Files changed 한 화면에서 원 변경 + 한국어 설명 + 지적 번호를 같이 읽는다. 보고서와 diff 를 왕복하지 않아도 된다.
+```bash
+python3 -m tools.harness.annotate --pr <N> --head <sha> --notes notes.json --push --pr-create
+```
+base `review/pr<N>-base`(merge-base) ← head `review/pr<N>-ko`(PR head + 주석 커밋).
+**upstream 에 열지 않는다** — 팀 PR 목록·알림에 끼지 않게 fork(`soheejung-cs/cubrid`) 안에서 연다.
 **확인 퀴즈는 이 절이 다 채워진 뒤에 낸다** — 요청자가 읽을 것을 안 주고 묻지 않는다.
 
 **보고서**: `imports/xmilex-git/skills/cubrid-pr-review/SKILL.md` 형식(TL;DR 판정 / Summary / Findings / JIRA / Existing Comments, 80줄 상한, 이모지·화살표 기호 금지, 한 지적 = 파일:라인 + 한 문장 + 근거)을 따르되 **Findings 를 `### [설계 리뷰]` 와 `### [코드 리뷰]` 로 나눈다**(설계 층은 영역 판정 문장으로 시작, 코드 층은 Blocking / Non-blocking / Questions). 끝에 `## 돌릴 것 (제안 -- 확인 후 실행)` 을 붙여 `review-testing` 매트릭스 제안을 적고 요청자 확인을 받는다. 예: `examples/리뷰보고서-예시-PR7899.md`. 보고서는 `claude-workspace/projects/<JIRA>/리뷰보고서-PR<n>.md` 에도 둔다(보드가 찾는다).

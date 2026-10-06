@@ -1,0 +1,34 @@
+{
+ "$schema": "http://json-schema.org/draft-07/schema#",
+ "title": "harness review output — 한 모듈 그룹이 내는 전부",
+ "description": "findings(결함)만으로는 '이 함수가 원래 무엇이었고 지금 무엇인가'가 담길 자리가 없어 보고서가 지적 목록이 된다(사용자 지적 2026-10-06: PR#8022 보고서가 89파일 중 24개만 언급, 함수명 3종). function_notes 는 결함이 없어도 **배정된 변경 함수 전수**에 쓴다.",
+ "type": "object",
+ "required": ["summary", "function_notes", "findings", "verified_ok", "escalations", "pack_quality", "source_facts"],
+ "properties": {
+  "summary": {"type": "string", "description": "이 그룹의 코드가 무엇을 하는가 — 자료구조·수명·호출 시점 중심 3~8줄"},
+  "function_notes": {
+   "type": "array",
+   "description": "배정 팩의 '## changed function' **전부**. 결함이 없어도 쓴다 — 이것이 보고서 §2 변경 지도와 한국어 주석 PR 의 원천이다.",
+   "items": {
+    "type": "object",
+    "required": ["file", "function", "line", "role", "before", "after", "changed"],
+    "properties": {
+     "file": {"type": "string", "description": "src/… 리포 상대경로"},
+     "function": {"type": "string"},
+     "line": {"type": "integer", "minimum": 1, "description": "PR head 기준 함수 시작 줄 — 주석은 이 줄 위에 삽입된다"},
+     "role": {"type": "string", "minLength": 15, "description": "이 함수가 시스템에서 맡은 일 한 문장 — 누가 부르고 무엇을 돌려주나"},
+     "before": {"type": "string", "minLength": 15, "description": "develop 에서는 어떻게 동작했나(그 코드를 읽고 쓴다, 추측 금지)"},
+     "after": {"type": "string", "minLength": 15, "description": "이 PR 에서는 어떻게 동작하나"},
+     "changed": {"type": "string", "description": "무엇이 바뀌었나 — 추가/삭제 줄 수와 바뀐 것의 성격(시그니처·분기·자료구조·삭제)"},
+     "finding_ids": {"type": "array", "items": {"type": "string"}, "description": "이 함수에 달린 지적 id (없으면 생략)"},
+     "risk": {"type": "string", "enum": ["none", "watch", "defect"], "description": "none=문제 없음 확인 / watch=계약이 암묵적 / defect=지적 있음"}
+    }
+   }
+  },
+  "findings": {"type": "array", "items": {"$ref": "finding.json"}},
+  "verified_ok": {"type": "array", "items": {"type": "string"}},
+  "escalations": {"type": "array", "items": {"type": "object", "required": ["question", "where"], "properties": {"question": {"type": "string"}, "where": {"type": "string"}}}},
+  "pack_quality": {"type": "string"},
+  "source_facts": {"type": "array", "items": {"type": "string"}}
+ }
+}
