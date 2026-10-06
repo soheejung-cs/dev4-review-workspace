@@ -13,6 +13,11 @@
     "category": {"enum": ["버그 가능성", "성능 검토", "설계 판정", "주석 제안", "문서 제안", "테스트 제안", "측정 요청", "확인 질문"], "description": "코멘트 첫 줄 두 번째 태그"},
     "importance": {"enum": ["높음", "중간", "낮음"], "description": "🔴 높음(오답·정지·회복 불가·머지 차단) / 🟡 중간(수정 권고, 회귀·비결정성) / 🟢 낮음(주석·문서·표기). 비우면 판정기가 severity·category 로 채운다"},
     "arch_edge": {"type": "string", "description": "설계 층: arch.json 의 connections[source->target] 또는 risks[kind]"},
+    "baseline": {"type": "object", "description": "develop(기준 rev) 과의 관계를 주장하는 지적은 필수 — '회귀·새로 생김·하나만 고침·develop 은 X 였다' 류. 기준 rev 의 같은 함수를 실제로 읽은 file:line 을 적는다 (PR#8022 헛지적 2026-10-06: 4건이 기준 소스를 읽지 않고 썼다)",
+      "properties": {"claim": {"enum": ["same", "differs", "new"], "description": "same = develop 도 같은 동작(선재 결함, 별도 이슈 후보) / differs = 이 PR 이 바꿨다 / new = develop 에 없는 코드"},
+                     "evidence": {"type": "array", "items": {"type": "string", "pattern": "^[^:\\s]+:\\d+"}, "minItems": 1, "description": "기준 rev(merge-base) 의 file:line. new 면 호출자나 대응 코드의 자리"}},
+      "required": ["claim", "evidence"]},
+    "reach_trace": {"type": "array", "items": {"type": "string", "pattern": "^[^:\\s]+:\\d+"}, "minItems": 2, "description": "'이 분기에 닿는다/사용자에게 보인다' 류 도달 가능성 주장은 필수 — 실패 조건을 만드는 쪽(표 생성·등록·호출자 전처리)까지 읽은 file:line 을 2곳 이상. 분기 하나만 보고 쓴 지적은 판정에서 거절된다"},
     "status": {"enum": ["valid", "invalid", "inconclusive"], "description": "adjudicate 가 채움"},
     "obligations": {"type": "object"}, "reasons": {"type": "array", "items": {"type": "string"}}
   } }

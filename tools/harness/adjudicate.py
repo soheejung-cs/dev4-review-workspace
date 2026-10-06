@@ -13,12 +13,31 @@ def _line_exists(repo: str, file: str, line: int) -> bool:
     with open(p, 'rb') as f:
         return sum(1 for _ in f) >= line
 
+def _base_rev(repo: str) -> str:
+    """기준 rev: worktree HEAD 와 upstream/develop 의 merge-base (없으면 origin/develop). 실패하면 ''."""
+    for ref in ('upstream/develop', 'origin/develop'):
+        r = subprocess.run(['git', '-C', repo, 'merge-base', 'HEAD', ref], stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True)
+        if r.returncode == 0 and r.stdout.strip(): return r.stdout.strip()
+    return ''
+
+def _line_exists_at(repo: str, rev: str, file: str, line: int) -> bool:
+    """rev 의 file 에 line 번째 줄이 있나 — baseline 근거 해석용 (worktree 는 head 라 git show 로 본다)."""
+    if not rev: return False
+    r = subprocess.run(['git', '-C', repo, 'show', f'{rev}:{file}'], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, universal_newlines=True)
+    return r.returncode == 0 and line <= r.stdout.count('\n') + 1
+
+# develop 과의 관계를 주장하는 문구 — 기준 소스를 읽은 근거(baseline) 가 있어야 valid (PR#8022 답변 대조 2026-10-06: 4건이 헛지적)
+BASELINE_WORDS = r'develop|기준선|회귀|regress|하나만 고|새로 (도입|생긴|들어)|그대로 옮'
+# 도달 가능성 주장 — 실패 조건의 생산자까지 읽은 근거(reach_trace) 가 있어야 valid
+REACH_WORDS = r'닿는|닿을|도달|보이는 경로|사용자에게 보이|사용자가 받는|reachab|행 경로는 .* 낸다'
+
 def _in_diff(changed: Dict[str, List[int]], file: str, line: int, slack: int = 3) -> bool:
     return any(abs(l - line) <= slack for l in changed.get(file, []))
 
 def adjudicate(repo: str, g: CodeGraph, changed: Dict[str, List[int]], findings: List[Dict], rules_text: str) -> List[Dict]:
     out = []
     rule_ids = set(re.findall(r'\b([A-Z]{2,5}-\d{2})\b', rules_text))
+    base_rev = _base_rev(repo)
     for f in findings:
         obligations = {'anchor_exists': False, 'anchor_in_diff': False, 'evidence_resolves': False, 'rule_known': False, 'graph_supports': None, 'why_present': False, 'proposal_present': False, 'verified_if_error': True}
         status = 'inconclusive'; reasons = []
@@ -54,6 +73,32 @@ def adjudicate(repo: str, g: CodeGraph, changed: Dict[str, List[int]], findings:
             known = {n for n in names if g.db.execute('SELECT 1 FROM functions WHERE name=? LIMIT 1', (n,)).fetchone()}
             obligations['mentions_resolve'] = (len(known), len(names))
             if len(known) < len(names): reasons.append(f'언급한 함수 중 그래프에 없는 것: {sorted(names - known)[:6]} (팩 밖·오타·매크로 생성?)')
+        # 기준선 주장: "develop 은 X 였다 / 이 PR 이 바꿨다·하나만 고쳤다" 는 기준 rev 의 코드를 읽은 file:line 이 있어야 한다.
+        # 2026-10-06 PR#8022 — 셀 비대칭(1903)·날짜 오류 코드(h:101)·IMPLICIT JSON(7470) 지적이 모두 기준 코드를 읽지 않아 작성자가 반박했다.
+        text = claim + ' ' + why
+        obligations['baseline_ok'] = True
+        if re.search(BASELINE_WORDS, text, re.I):
+            b = f.get('baseline') or {}
+            bev = b.get('evidence') or []
+            bok = [e for e in bev if (m := re.match(r'([^:\s]+):(\d+)', e)) and _line_exists_at(repo, base_rev, m.group(1), int(m.group(2)))]
+            obligations['baseline_ok'] = b.get('claim') in ('same', 'differs', 'new') and bool(bev) and len(bok) == len(bev)
+            if not obligations['baseline_ok']:
+                reasons.append(f'develop 과의 관계를 주장했는데 baseline(기준 rev {base_rev[:9] or "?"} 의 file:line, claim same/differs/new) 이 없거나 해석 안 됨 {len(bok)}/{len(bev)} — 기준 소스의 같은 함수를 읽고 적어야 한다')
+            elif b.get('claim') == 'same':
+                # 선재 결함: 작성자는 "develop 과 같다 → 별도 이슈" 로 답한다. 머지 차단·높음으로 올리지 않고 그 사실을 첫 줄에 드러낸다
+                f['preexisting'] = True
+                if f.get('severity') == 'blocking': f['severity'] = 'non-blocking'; reasons.append('baseline.claim=same(develop 동일) → blocking 을 non-blocking 으로 내림')
+                if f.get('importance') == '높음': f['importance'] = '중간'
+        # 도달 가능성 주장: 분기 하나가 아니라 그 조건을 만드는 쪽(표 생성·등록·호출자 전처리)까지 읽었어야 한다.
+        # 2026-10-06 PR#8022 — query_evaluator.c:321 의 -1383 이 "사용자에게 보이는 경로" 라 했지만 표 생성(domain_element_type)이 모든 값 타입을 덮었다.
+        obligations['reach_ok'] = True
+        vdyn = (f.get('verification') or {}).get('method') == 'dynamic' and bool(((f.get('verification') or {}).get('result') or '').strip())
+        if f.get('category') in ('버그 가능성', '확인 질문') and re.search(REACH_WORDS, text, re.I) and not vdyn:   # 재현(dynamic)이 있으면 도달은 증명된 것
+            rt = f.get('reach_trace') or []
+            rok = [e for e in rt if (m := re.match(r'([^:\s]+):(\d+)', e)) and _line_exists(repo, m.group(1), int(m.group(2)))]
+            obligations['reach_ok'] = len(rok) >= 2 and len(rok) == len(rt)
+            if not obligations['reach_ok']:
+                reasons.append(f'도달 가능성을 주장했는데 reach_trace(실패 조건의 생산자까지 file:line 2곳 이상) 가 없거나 해석 안 됨 {len(rok)}/{len(rt)} — 분기 하나만 보고 "사용자에게 보인다" 고 쓰지 않는다')
         rids = set(f.get('rule_ids') or [])
         obligations['rule_known'] = bool(rids) and rids <= rule_ids
         if rids and not obligations['rule_known']: reasons.append(f'모르는 규칙 ID {sorted(rids - rule_ids)}')
@@ -67,7 +112,7 @@ def adjudicate(repo: str, g: CodeGraph, changed: Dict[str, List[int]], findings:
                     obligations['graph_supports'] = any(v > 0 for v in pair.values())
                     if obligations['graph_supports'] is False: reasons.append(f'그래프 상 관문 짝은 균형({pair}) — 주장과 모순(조건 분기 확인 필요)')
         # 결정론적 게이트
-        if obligations['why_present'] and obligations['proposal_present'] and obligations['anchor_exists'] and obligations['evidence_resolves'] and obligations['graph_supports'] is not False and (f.get('layer') != '코드' or obligations['anchor_in_diff']):
+        if obligations['why_present'] and obligations['proposal_present'] and obligations['anchor_exists'] and obligations['evidence_resolves'] and obligations['graph_supports'] is not False and obligations['baseline_ok'] and obligations['reach_ok'] and (f.get('layer') != '코드' or obligations['anchor_in_diff']):
             status = 'valid'
         elif obligations['graph_supports'] is False or not obligations['anchor_exists']:
             status = 'invalid' if not obligations['anchor_exists'] else 'inconclusive'
@@ -79,6 +124,9 @@ def adjudicate(repo: str, g: CodeGraph, changed: Dict[str, List[int]], findings:
         if obligations['proposal_present']: passed.append('proposal 있음')
         if rids and obligations['rule_known']: passed.append(f'rule {sorted(rids)} 규칙집에 있음')
         if obligations['graph_supports'] is True: passed.append('그래프가 관문 짝 불균형을 뒷받침')
+        b = f.get('baseline') or {}
+        if b and obligations['baseline_ok']: passed.append(f"baseline [{b['claim']}] 기준 rev {base_rev[:9]} 의 {len(b['evidence'])}곳 해석" + (' — 선재 결함(별도 이슈 후보)' if b['claim'] == 'same' else ''))
+        if f.get('reach_trace') and obligations['reach_ok']: passed.append(f"reach_trace {len(f['reach_trace'])}곳 해석")
         mr = obligations.get('mentions_resolve')
         if mr and mr[0] == mr[1]: passed.append(f'언급 함수 {mr[1]}개 모두 그래프에 있음')
         v = f.get('verification') or {}
@@ -250,4 +298,6 @@ def fill_importance(f: Dict) -> Dict:
 def comment_header(f: Dict) -> str:
     """게시 코멘트 첫 줄: [층] [카테고리] 이모지 — 예) [코드 리뷰] [주석 제안] 🟢"""
     layer = '설계 리뷰' if f.get('layer') == '설계' else '코드 리뷰'
-    return f"[{layer}] [{f.get('category', '확인 질문')}] {IMPORTANCE_EMOJI.get(f.get('importance', '중간'), '🟡')}"
+    head = f"[{layer}] [{f.get('category', '확인 질문')}] {IMPORTANCE_EMOJI.get(f.get('importance', '중간'), '🟡')}"
+    # 선재 결함은 첫 줄에서 드러낸다 — 작성자가 "develop 도 같다" 로 답하고 끝나는 왕복을 줄인다 (2026-10-06)
+    return head + (' (develop 동일 — 별도 이슈 후보)' if f.get('preexisting') or (f.get('baseline') or {}).get('claim') == 'same' else '')
