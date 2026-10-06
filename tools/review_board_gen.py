@@ -166,70 +166,9 @@ def main():
     now = datetime.datetime.now().strftime('%Y-%m-%d %H:%M KST')
     os.makedirs(OUT, exist_ok=True)
     dump = lambda: json.dump({'generated': now, 'tracked': TRACKED, 'prs': rows, 'unlinked_tc_prs': orphans}, open(os.path.join(OUT, 'board.json'), 'w', encoding='utf-8'), ensure_ascii=False, indent=1)
-    dump()                       # 1차: 부하 계산(load_from_board)이 이 스냅샷을 읽는다
-    attach_recommendations(rows)  # 리뷰어 추천 (사용자 지시 2026-09-30)
     dump()
     open(os.path.join(OUT, 'index.html'), 'w', encoding='utf-8').write(render(rows, now, orphans))
     print('%s review board: %d PRs (tracked %d ids) -> %s/index.html' % (now, len(rows), len(TRACKED), OUT))
-
-def attach_recommendations(rows):
-    """review_recommend.py 로 PR 마다 난이도·추천 리뷰어를 붙인다. 머지 인덱스가 없으면(한 번만 수집 규약) 건너뛴다."""
-    try:
-        sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-        import review_recommend as rr
-    except Exception as e:
-        print('recommend: import 실패 %s' % e, file=sys.stderr); return
-    if not os.path.exists(rr.INDEX):
-        print('recommend: 인덱스 없음 (%s) — tools/review_recommend.py <PR> 을 한 번 돌려 만든다' % rr.INDEX, file=sys.stderr); return
-    try:
-        roster, cfg = rr.load_roster()
-        pool = list(roster.get('reviewer_pool') or roster['tracked_github'])
-        idx = rr.load_index('CUBRID/cubrid', 18, False)
-        load, load_src = rr.load_from_board(pool, cfg)
-        if load is None:
-            load, load_src = rr.load_from_github(pool, roster.get('repos', ['CUBRID/cubrid']), cfg)
-    except Exception as e:
-        print('recommend: 준비 실패 %s' % e, file=sys.stderr); return
-    # 보드 전체를 한 번에 배정한다 (사용자 지시 2026-09-30 "한 사람에게 로드가 쏠림"):
-    #  · 오래된 PR 부터 차례로 추천하고, 이번 패스에서 추천한 자리를 가상 부하(virtual, 대기 1건과 같은 무게)로 누적해
-    #    다음 PR 계산에 넣는다 → 같은 사람이 연달아 뽑히지 않는다. 이미 요청·리뷰한 사람의 자리는 새 부하로 세지 않는다.
-    #  · 실제 부하(pending·in_progress)는 그대로 밑에 깔린다.
-    import copy
-    w_virtual = cfg.get('load_virtual', cfg.get('load_pending', 1.0))
-    virtual = {c: 0 for c in pool}
-    order = sorted([r for r in rows if r['repo'] == 'CUBRID/cubrid'], key=lambda r: (r['created'], r['number']))
-    # 1패스: PR 메타·난이도만 먼저 받아 전체 자리 수를 알고 1인 상한을 정한다 (자리 수 / (후보 − 1), 최소 2)
-    import math
-    meta = {}
-    for r in order:
-        try:
-            pr = rr.fetch_pr(r['repo'], r['number']); meta[r['number']] = (pr, rr.difficulty(pr, cfg))
-        except Exception as e:
-            r['rec'] = {'error': str(e)[:120]}
-    total_slots = sum(d['n_reviewers'] for _, d in meta.values())
-    cap = max(2, math.ceil(total_slots / max(1, len(pool) - 1)))
-    for r in order:
-        if r['number'] not in meta:
-            continue
-        try:
-            pr, diff = meta[r['number']]
-            inter = rr.interest(pr, idx, pool, cfg)
-            load2 = copy.deepcopy(load)
-            for c in pool:
-                load2[c]['virtual'] = virtual[c]
-                load2[c]['score'] = load2[c].get('score', 0.0) + w_virtual * virtual[c] + (100.0 if virtual[c] >= cap else 0.0)  # 상한 넘으면 뒤로
-            _rows, picks, deferred, _m = rr.recommend(pr, diff, inter, load2, pool, cfg)
-            for x in picks:
-                if not x.get('already'):
-                    virtual[x['login']] += 1
-            r['rec'] = {'tier': diff['tier'], 'points': diff['points'], 'n': diff['n_reviewers'],
-                        'picks': [{'login': x['login'], 'learner': bool(x.get('learner')), 'already': x.get('already', '')} for x in picks],
-                        'deferred': [x['login'] for x in deferred], 'why': diff['why'], 'load_src': load_src,
-                        'load_at_pick': {c: round(load2[c]['score'], 1) for c in pool}}
-        except Exception as e:
-            r['rec'] = {'error': str(e)[:120]}
-    print('recommend: 자리 %d, 1인 상한 %d, 배정 분포 ' % (total_slots, cap) + ', '.join('%s %d' % kv for kv in sorted(virtual.items(), key=lambda kv: -kv[1])), file=sys.stderr)
-
 
 def esc(s):
     return html.escape(str(s))
@@ -262,12 +201,13 @@ def render(rows, now, orphans=()):
     h.append('<h1>review-to-do</h1><div class="meta">스냅샷 %s · assignee ∈ {%s} · open · non-draft · 미해결 스레드는 리뷰 코멘트 기준 · CI 는 보지 않음(사용자 지시) · TC PR 은 JIRA 키/cubrid#n 으로 엔진 PR 하위에 연동</div>' % (now, ', '.join(TRACKED)))
     h.append('<div class="facts"><div class="fact"><b>%d</b><span>추적 PR</span></div><div class="fact"><b class="%s">%d</b><span>미해결 스레드 합</span></div><div class="fact"><b>%d</b><span>리뷰 미착수 PR</span></div><div class="fact"><b class="%s">%d</b><span>승인 0 PR</span></div><div class="fact"><b class="%s">%d</b><span>승인만 남은 PR</span></div><div class="fact"><b>%d / %d</b><span>에이전트가 리뷰한 PR (%s)</span></div></div>' % (len(rows), 'warn' if tot_unres else 'ok', tot_unres, tot_wait, 'warn' if tot_noapr else 'ok', tot_noapr, 'bad' if tot_stuck else 'ok', tot_stuck, tot_agent, len(rows), esc(','.join(sorted(AGENT)))))
     h.append('<div class="meta" style="margin:6px 0 2px">누구 차례인가 — <b>미해결 &gt; 0</b>: 작성자 · <b>미해결 0 + 승인자 0</b>: 리뷰어(승인 필요, "승인만 남은 PR") · <b>미해결 0 + 승인자 ≥ 1</b>: 머지 가능. 리뷰어 필 — <span class="pill req">미착수</span> 요청됐고 리뷰 이력 없음 · <span class="pill pend">승인 전</span> 리뷰했으나 승인 안 함(GitHub 은 리뷰 제출 시 요청 목록에서 빼므로 이 상태가 따로 필요하다)</div>')
-    # 업무 부하표 (사용자 지시 2026-09-30): 본인 PR / 리뷰 중(미착수 + 승인 전) / 추천받은 PR / 합계 — 추적 ID 전원
+    # 업무 부하표: 본인 PR / 리뷰 중(미착수 + 승인 전) / 합계 — 추적 ID 전원
+    # 추천 리뷰어 열은 제거했다 (사용자 지시 2026-10-06) — 생성 시간 1.5분도 같이 빠진다
     def walk_tc(r):
         for t in r.get('linked_tc', []):
             yield t
     people = list(TRACKED)
-    load = {c: {'own': [], 'reviewing': [], 'recommended': []} for c in people}
+    load = {c: {'own': [], 'reviewing': []} for c in people}
     for r in rows:
         if r['author'] in load: load[r['author']]['own'].append(r['number'])
         for c in r.get('requested', []) + r.get('pending_approval', []):
@@ -275,24 +215,22 @@ def render(rows, now, orphans=()):
         for t in walk_tc(r):
             for c in t.get('requested', []) + t.get('pending_approval', []):
                 if c in load and ('tc#%d' % t['number']) not in load[c]['reviewing']: load[c]['reviewing'].append('tc#%d' % t['number'])
-        for x in (r.get('rec') or {}).get('picks', []):
-            if x['login'] in load and not x['already']: load[x['login']]['recommended'].append(r['number'])
-    tot = {c: len(v['own']) + len(v['reviewing']) + len(v['recommended']) for c, v in load.items()}
+    tot = {c: len(v['own']) + len(v['reviewing']) for c, v in load.items()}
     mx = max(tot.values() or [1])
-    h.append('<h2>업무 부하 <span class="meta">본인 PR + 리뷰 중(미착수·승인 전, TC PR 포함) + 추천받은 PR</span></h2>')
-    h.append('<table><tr><th>사람</th><th>본인 PR</th><th>리뷰 중</th><th>추천받음</th><th>합계</th><th></th></tr>')
+    h.append('<h2>업무 부하 <span class="meta">본인 PR + 리뷰 중(미착수·승인 전, TC PR 포함)</span></h2>')
+    h.append('<table><tr><th>사람</th><th>본인 PR</th><th>리뷰 중</th><th>합계</th><th></th></tr>')
     for c in sorted(people, key=lambda c: -tot[c]):
         v = load[c]; bar = '<div style="height:8px;border-radius:4px;background:var(--gate);width:%d%%;opacity:.7"></div>' % (100 * tot[c] // mx if mx else 0)
         fmt = lambda xs: '<span class="muted" style="font-size:11px">%s</span>' % esc(' '.join('#%s' % x if isinstance(x, int) else x for x in xs)) if xs else ''
-        h.append('<tr><td class="n">%s</td><td class="n">%d %s</td><td class="n">%d %s</td><td class="n">%d %s</td><td class="n"><b class="%s">%d</b></td><td style="width:180px">%s</td></tr>' % (
-            esc(c), len(v['own']), fmt(v['own']), len(v['reviewing']), fmt(v['reviewing']), len(v['recommended']), fmt(v['recommended']), 'bad' if tot[c] >= mx and mx >= 6 else '', tot[c], bar))
+        h.append('<tr><td class="n">%s</td><td class="n">%d %s</td><td class="n">%d %s</td><td class="n"><b class="%s">%d</b></td><td style="width:180px">%s</td></tr>' % (
+            esc(c), len(v['own']), fmt(v['own']), len(v['reviewing']), fmt(v['reviewing']), 'bad' if tot[c] >= mx and mx >= 6 else '', tot[c], bar))
     h.append('</table>')
     for who in TRACKED:
         rs = by.get(who, [])
         h.append('<h2>@%s <span class="meta">%d PR</span></h2>' % (esc(who), len(rs)))
         if not rs:
             h.append('<div class="muted">추적 대상 없음 (open·non-draft·assignee 기준)</div>'); continue
-        h.append('<table><tr><th>PR</th><th>제목 / JIRA</th><th>미해결</th><th>리뷰어</th><th>추천 리뷰어</th><th>에이전트 리뷰</th><th>갱신</th><th>연동된 테스트케이스</th><th>리뷰 문서(내부망)</th></tr>')
+        h.append('<table><tr><th>PR</th><th>제목 / JIRA</th><th>미해결</th><th>리뷰어</th><th>에이전트 리뷰</th><th>갱신</th><th>연동된 테스트케이스</th><th>리뷰 문서(내부망)</th></tr>')
         for r in rs:
             unres = ('<span class="%s">%d</span> / %d' % ('bad' if r['unresolved'] else 'ok', r['unresolved'], r['threads_total']))
             if r['unresolved_by']:
@@ -301,25 +239,14 @@ def render(rows, now, orphans=()):
             rev += ''.join('<span class="pill req">%s 미착수</span>' % esc(a) for a in r['requested'])
             rev += ''.join('<span class="pill pend">%s 승인 전</span>' % esc(a) for a in r.get('pending_approval', []))
             rev += '<div class="muted" style="font-size:11px">decision: %s</div>' % esc(r['decision'])
-            rc = r.get('rec') or {}
-            if rc.get('picks') is not None:
-                pills = ''.join('<span class="pill %s" title="%s">%s%s</span>' % ('ok' if not x['already'] else 'pend', esc(x['already'] or '새 추천'), esc(x['login']), ' (학습)' if x['learner'] else '') for x in rc['picks'])
-                lvl = '<span class="pill %s" title="%s">%s</span>' % ({'쉬움': 'ok', '간단': 'ok', '보통': 'pend', '어려움': 'bad', '어려움 (대규모)': 'bad'}.get(rc['tier'], ''), esc(' / '.join(rc.get('why', []))), esc(rc['tier']))
-                rec = ('%s <span class="muted">팀장 리뷰만 받고 진행</span>' % lvl) if rc['n'] == 0 else ('<div>%s <span class="muted">%d명</span></div>%s' % (lvl, rc['n'], pills))
-                if rc.get('deferred'):
-                    rec += '<div class="muted" style="font-size:11px">과부하로 뒤로: %s</div>' % esc(','.join(rc['deferred']))
-            elif rc.get('error'):
-                rec = '<span class="warn" title="%s">실패</span>' % esc(rc['error'])
-            else:
-                rec = '<span class="muted">-</span>'
             ag = ('<span class="ok">✓ %s</span><div class="muted" style="font-size:11px">%d건 · %s</div>' % (esc(r['agent_last']), r['agent_n'], esc('/'.join(r['agent_kinds'])))) if r['agent_n'] else '<span class="warn">아직</span>'
             tcl = ''.join('<div><a href="%s">%s#%d</a> <span class="muted">미해결 %d/%d%s</span></div>' % (esc(t['url']), esc(t['repo'].split('/')[1].replace('cubrid-testcases','tc')), t['number'], t['unresolved'], t['threads_total'], (' · ' + ','.join(esc(a) + ' 미착수' for a in t['requested'])) if t['requested'] else '') for t in r['linked_tc']) or '<span class="muted">없음</span>'
             docs = ''.join('<a href="%s%s">%s</a>' % (DOCS_HTTP_BASE, quote(d), esc(d)) for d in r['docs']) or '<span class="muted">없음</span>'
             others = [a for a in r['assignees'] if a != r['tracked'][0]]
-            h.append('<tr><td class="n"><a href="%s">%s#%d</a>%s</td><td>%s<div class="meta">%s · by %s%s</div></td><td class="n">%s</td><td>%s</td><td style="font-size:12px">%s</td><td class="n">%s</td><td class="n">%s<div class="muted" style="font-size:11px">생성 %s</div></td><td class="docs" style="font-size:12px">%s</td><td class="docs">%s</td></tr>' % (
+            h.append('<tr><td class="n"><a href="%s">%s#%d</a>%s</td><td>%s<div class="meta">%s · by %s%s</div></td><td class="n">%s</td><td>%s</td><td class="n">%s</td><td class="n">%s<div class="muted" style="font-size:11px">생성 %s</div></td><td class="docs" style="font-size:12px">%s</td><td class="docs">%s</td></tr>' % (
                 esc(r['url']), esc(r['repo'].split('/')[1]), r['number'], '<div class="muted" style="font-size:11px">%s</div>' % esc(r['tracked'][0]) if len(rs) and who != r['tracked'][0] else '',
-                esc(r['title']), esc(r['jira'] or '-'), esc(r['author']), ((' · assignees +' + ','.join(others)) if others else '') + ((' · 난이도 <b>%s</b>' % esc(rc['tier'])) if rc.get('tier') else ''),
-                unres, rev, rec, ag, esc(r['updated']), esc(r['created']), tcl, docs))
+                esc(r['title']), esc(r['jira'] or '-'), esc(r['author']), (' · assignees +' + ','.join(others)) if others else '',
+                unres, rev, ag, esc(r['updated']), esc(r['created']), tcl, docs))
         h.append('</table>')
     if orphans:
         h.append('<h2>연동 대상 없는 TC PR <span class="meta">%d</span></h2><table><tr><th>PR</th><th>제목</th><th>미해결</th><th>리뷰 미착수</th></tr>' % len(orphans))
