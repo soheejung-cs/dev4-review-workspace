@@ -96,14 +96,20 @@ def main():
     print(f'base={base[:9]} ({bb})  head={a.head[:9]} ({kb})')
 
     cur = sh('git rev-parse --abbrev-ref HEAD', cwd=a.repo)
-    dirty = sh('git status --porcelain', cwd=a.repo)
+    # 서브모듈(cubrid-cci·cubridmanager)은 빌드가 흔들어 놓기 일쑤고 주석은 일반 소스만 건드리므로 제외한다.
+    subs = set()
+    gm = os.path.join(a.repo, '.gitmodules')
+    if os.path.isfile(gm):
+        subs = set(re.findall(r'path\s*=\s*(\S+)', open(gm, encoding='utf-8').read()))
+    dirty = [l for l in sh('git status --porcelain', cwd=a.repo).split('\n')
+             if l.strip() and l.split(None, 1)[-1].strip() not in subs]  # sh() 가 strip 하므로 열 자르기 금지
     if dirty:
-        raise SystemExit('워킹트리가 dirty 다 — 커밋하거나 비우고 다시 (goto 와 같은 이유)')
+        raise SystemExit('워킹트리가 dirty 다 — 커밋하거나 비우고 다시 (goto 와 같은 이유)\n  ' + '\n  '.join(dirty[:8]))
 
     sh(f'git checkout -q -B {kb} {a.head}', cwd=a.repo)
     n = apply_notes(a.repo, notes)
     print(f'주석 {n}곳 삽입')
-    sh('git add -A', cwd=a.repo)
+    sh(['git', 'add', '--', 'src'], cwd=a.repo)  # 서브모듈 포인터를 커밋에 끌어들이지 않는다
     msg = (f'[리뷰주석] PR #{a.pr} 변경 함수 {n}곳에 한국어 설명\n\n'
            '리뷰 전용 커밋이다 — 머지 대상이 아니다. 각 변경 함수 위에\n'
            'develop 에서 무엇이었고 / 이 PR 에서 무엇이 되었고 / 무엇이 바뀌었는지와\n'
