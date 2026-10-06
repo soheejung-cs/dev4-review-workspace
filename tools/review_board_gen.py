@@ -173,6 +173,42 @@ def main():
 def esc(s):
     return html.escape(str(s))
 
+TOOLBAR_JS = """<script>
+(function () {
+  var body = document.body;
+  // 에이전트 리뷰 열 — 기본 숨김, 체크해야 보인다. 선택은 브라우저에 기억된다.
+  var chk = document.getElementById('agentToggle');
+  try { if (localStorage.getItem('showAgent') === '1') { body.classList.add('show-agent'); chk.checked = true; } } catch (e) {}
+  chk.addEventListener('change', function () {
+    body.classList.toggle('show-agent', chk.checked);
+    try { localStorage.setItem('showAgent', chk.checked ? '1' : '0'); } catch (e) {}
+  });
+  // 리뷰어 필터 — 그 사람이 리뷰어(미착수·승인 전·승인자)인 행만 남기고, 빈 섹션은 접는다.
+  var btns = [].slice.call(document.querySelectorAll('[data-rev-filter]'));
+  function apply(who, pendOnly) {
+    [].forEach.call(document.querySelectorAll('tr[data-rev]'), function (tr) {
+      var list = (tr.getAttribute(pendOnly ? 'data-pend' : 'data-rev') || '').split(',');
+      var hit = !who ? (pendOnly ? list.filter(Boolean).length > 0 : true) : list.indexOf(who) >= 0;
+      tr.classList.toggle('hidden', !hit);
+    });
+    [].forEach.call(document.querySelectorAll('section.who'), function (sec) {
+      var vis = sec.querySelectorAll('tr[data-rev]:not(.hidden)').length;
+      sec.classList.toggle('hidden', vis === 0);
+      var m = sec.querySelector('h2 .meta');
+      if (m && !m.dataset.all) m.dataset.all = m.textContent;
+      if (m) m.textContent = (who || pendOnly) ? (vis + ' PR (필터)') : m.dataset.all;
+    });
+  }
+  btns.forEach(function (b) {
+    b.addEventListener('click', function () {
+      btns.forEach(function (x) { x.classList.remove('on'); });
+      b.classList.add('on');
+      apply(b.getAttribute('data-rev-filter'), b.hasAttribute('data-pend-only'));
+    });
+  });
+})();
+</script>"""
+
 def render(rows, now, orphans=()):
     by = {}
     for r in rows:
@@ -196,10 +232,25 @@ def render(rows, now, orphans=()):
     .pill{display:inline-block;font-family:"IBM Plex Mono",monospace;font-size:11px;padding:1px 7px;border-radius:999px;border:1px solid var(--line);margin:1px 2px 1px 0;white-space:nowrap}
     .pill.APPROVED{color:var(--gate);border-color:var(--gate)}.pill.CHANGES_REQUESTED{color:var(--bad);border-color:var(--bad)}.pill.req{color:var(--warn);border-color:var(--warn)}.pill.pend{color:var(--muted);border-color:var(--muted)}
     a{color:inherit} .docs a{display:block;font-size:12px;font-family:"IBM Plex Mono",monospace;color:var(--gate)} .muted{color:var(--muted)}
+    /* 에이전트 리뷰 열은 켜지 않는 한 보이지 않는다 (사용자 지시 2026-10-06: 헷갈린다) */
+    .col-agent{display:none} body.show-agent .col-agent{display:table-cell}
+    .bar{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:16px 0 4px;padding:10px 12px;background:var(--surface);border:1px solid var(--line);border-radius:8px}
+    .bar .lbl{font-family:"IBM Plex Mono",monospace;font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
+    .btn{font:inherit;font-size:12px;font-family:"IBM Plex Mono",monospace;padding:3px 10px;border-radius:999px;border:1px solid var(--line);background:var(--soft);color:var(--ink);cursor:pointer}
+    .btn:hover{border-color:var(--gate)} .btn.on{background:var(--gate);border-color:var(--gate);color:#fff}
+    .hidden{display:none}
     """
     h = ['<!doctype html><html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>review-to-do</title><style>%s</style></head><body><div class="wrap">' % css]
     h.append('<h1>review-to-do</h1><div class="meta">스냅샷 %s · assignee ∈ {%s} · open · non-draft · 미해결 스레드는 리뷰 코멘트 기준 · CI 는 보지 않음(사용자 지시) · TC PR 은 JIRA 키/cubrid#n 으로 엔진 PR 하위에 연동</div>' % (now, ', '.join(TRACKED)))
     h.append('<div class="facts"><div class="fact"><b>%d</b><span>추적 PR</span></div><div class="fact"><b class="%s">%d</b><span>미해결 스레드 합</span></div><div class="fact"><b>%d</b><span>리뷰 미착수 PR</span></div><div class="fact"><b class="%s">%d</b><span>승인 0 PR</span></div><div class="fact"><b class="%s">%d</b><span>승인만 남은 PR</span></div><div class="fact"><b>%d / %d</b><span>에이전트가 리뷰한 PR (%s)</span></div></div>' % (len(rows), 'warn' if tot_unres else 'ok', tot_unres, tot_wait, 'warn' if tot_noapr else 'ok', tot_noapr, 'bad' if tot_stuck else 'ok', tot_stuck, tot_agent, len(rows), esc(','.join(sorted(AGENT)))))
+    # 툴바: 리뷰어 필터 + 에이전트 열 토글 (사용자 지시 2026-10-06)
+    h.append('<div class="bar"><span class="lbl">내가 리뷰어인 PR</span>'
+             + '<button class="btn on" data-rev-filter="">전체</button>'
+             + ''.join('<button class="btn" data-rev-filter="%s">%s</button>' % (esc(c), esc(c)) for c in TRACKED)
+             + '<button class="btn" data-rev-filter="" data-pend-only="1">승인 전·미착수만</button>'
+             + '<span style="flex:1"></span>'
+             + '<label class="lbl" style="cursor:pointer"><input type="checkbox" id="agentToggle"> 에이전트 리뷰 열 보기</label>'
+             + '</div>')
     h.append('<div class="meta" style="margin:6px 0 2px">누구 차례인가 — <b>미해결 &gt; 0</b>: 작성자 · <b>미해결 0 + 승인자 0</b>: 리뷰어(승인 필요, "승인만 남은 PR") · <b>미해결 0 + 승인자 ≥ 1</b>: 머지 가능. 리뷰어 필 — <span class="pill req">미착수</span> 요청됐고 리뷰 이력 없음 · <span class="pill pend">승인 전</span> 리뷰했으나 승인 안 함(GitHub 은 리뷰 제출 시 요청 목록에서 빼므로 이 상태가 따로 필요하다)</div>')
     # 업무 부하표: 본인 PR / 리뷰 중(미착수 + 승인 전) / 합계 — 추적 ID 전원
     # 추천 리뷰어 열은 제거했다 (사용자 지시 2026-10-06) — 생성 시간 1.5분도 같이 빠진다
@@ -227,10 +278,10 @@ def render(rows, now, orphans=()):
     h.append('</table>')
     for who in TRACKED:
         rs = by.get(who, [])
-        h.append('<h2>@%s <span class="meta">%d PR</span></h2>' % (esc(who), len(rs)))
+        h.append('<section class="who"><h2>@%s <span class="meta">%d PR</span></h2>' % (esc(who), len(rs)))
         if not rs:
-            h.append('<div class="muted">추적 대상 없음 (open·non-draft·assignee 기준)</div>'); continue
-        h.append('<table><tr><th>PR</th><th>제목 / JIRA</th><th>미해결</th><th>리뷰어</th><th>에이전트 리뷰</th><th>갱신</th><th>연동된 테스트케이스</th><th>리뷰 문서(내부망)</th></tr>')
+            h.append('<div class="muted">추적 대상 없음 (open·non-draft·assignee 기준)</div></section>'); continue
+        h.append('<table><tr><th>PR</th><th>제목 / JIRA</th><th>미해결</th><th>리뷰어</th><th class="col-agent">에이전트 리뷰</th><th>갱신</th><th>연동된 테스트케이스</th><th>리뷰 문서(내부망)</th></tr>')
         for r in rs:
             unres = ('<span class="%s">%d</span> / %d' % ('bad' if r['unresolved'] else 'ok', r['unresolved'], r['threads_total']))
             if r['unresolved_by']:
@@ -243,7 +294,10 @@ def render(rows, now, orphans=()):
             tcl = ''.join('<div><a href="%s">%s#%d</a> <span class="muted">미해결 %d/%d%s</span></div>' % (esc(t['url']), esc(t['repo'].split('/')[1].replace('cubrid-testcases','tc')), t['number'], t['unresolved'], t['threads_total'], (' · ' + ','.join(esc(a) + ' 미착수' for a in t['requested'])) if t['requested'] else '') for t in r['linked_tc']) or '<span class="muted">없음</span>'
             docs = ''.join('<a href="%s%s">%s</a>' % (DOCS_HTTP_BASE, quote(d), esc(d)) for d in r['docs']) or '<span class="muted">없음</span>'
             others = [a for a in r['assignees'] if a != r['tracked'][0]]
-            h.append('<tr><td class="n"><a href="%s">%s#%d</a>%s</td><td>%s<div class="meta">%s · by %s%s</div></td><td class="n">%s</td><td>%s</td><td class="n">%s</td><td class="n">%s<div class="muted" style="font-size:11px">생성 %s</div></td><td class="docs" style="font-size:12px">%s</td><td class="docs">%s</td></tr>' % (
+            revs = sorted(set(r.get('requested', []) + r.get('pending_approval', []) + r.get('approvers', [])))
+            pend_revs = sorted(set(r.get('requested', []) + r.get('pending_approval', [])))
+            h.append('<tr data-rev="%s" data-pend="%s"><td class="n"><a href="%s">%s#%d</a>%s</td><td>%s<div class="meta">%s · by %s%s</div></td><td class="n">%s</td><td>%s</td><td class="n col-agent">%s</td><td class="n">%s<div class="muted" style="font-size:11px">생성 %s</div></td><td class="docs" style="font-size:12px">%s</td><td class="docs">%s</td></tr>' % (
+                esc(','.join(revs)), esc(','.join(pend_revs)),
                 esc(r['url']), esc(r['repo'].split('/')[1]), r['number'], '<div class="muted" style="font-size:11px">%s</div>' % esc(r['tracked'][0]) if len(rs) and who != r['tracked'][0] else '',
                 esc(r['title']), esc(r['jira'] or '-'), esc(r['author']), (' · assignees +' + ','.join(others)) if others else '',
                 unres, rev, ag, esc(r['updated']), esc(r['created']), tcl, docs))
@@ -252,7 +306,8 @@ def render(rows, now, orphans=()):
         h.append('<h2>연동 대상 없는 TC PR <span class="meta">%d</span></h2><table><tr><th>PR</th><th>제목</th><th>미해결</th><th>리뷰 미착수</th></tr>' % len(orphans))
         for t in orphans:
             h.append('<tr><td class="n"><a href="%s">%s#%d</a></td><td>%s</td><td class="n">%d/%d</td><td>%s</td></tr>' % (esc(t['url']), esc(t['repo'].split('/')[1]), t['number'], esc(t['title']), t['unresolved'], t['threads_total'], esc(','.join(t['requested'])) or '-'))
-        h.append('</table>')
+        h.append('</table></section>')
+    h.append(TOOLBAR_JS)
     h.append('<p class="meta" style="margin-top:26px">생성기 dev4-review-workspace/tools/review_board_gen.py · 갱신 규약 skills/review-board/SKILL.md · 추적 ID 는 tools/roster.json</p></div></body></html>')
     return '\n'.join(h)
 
