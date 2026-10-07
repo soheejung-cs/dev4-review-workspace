@@ -31,5 +31,7 @@
     "soheejung-cs"
   ],
   "agent_marker": "Claude-Session:|Generated with \\[Claude Code\\]|session_01[0-9A-Za-z]{6,}",
-  "_comment_agent": "agent_github: 이 에이전트(Claude 세션)가 리뷰를 게시하는 GitHub 로그인. 팀 공유 계정으로 바꾸면 여기만 고친다. agent_marker: 본문에 이 정규식이 있으면 로그인이 달라도 에이전트 리뷰로 센다."
+  "_comment_agent": "agent_github: 이 에이전트(Claude 세션)가 리뷰를 게시하는 GitHub 로그인. 팀 공유 계정으로 바꾸면 여기만 고친다. agent_marker: 본문에 이 정규식이 있으면 로그인이 달라도 에이전트 리뷰로 센다.",
+  "_comment_teams": "Teams 알림(tools/review_board_notify.py)용. {github 로그인: {name: 표시이름, email: Teams UPN}}. email 이 있으면 카드에서 @멘션, 없으면 이름만 굵게. 웹훅 URL 은 여기 두지 않는다(~/.config/review-board/teams_webhook).",
+  "teams": {}
 }

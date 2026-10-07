@@ -59,3 +59,16 @@ python3 ~/dev/docs/dev4-review-workspace/tools/review_board_gen.py [out_dir]   #
 - **추천 리뷰어 열**(2026-09-30 도입 → **2026-10-06 사용자 지시로 제거**). 난이도·추천 필·`과부하로 뒤로`·업무부하의 `추천받음` 열이 함께 빠졌고, `attach_recommendations()` 와 `review_recommend` 호출도 지웠다 — 생성 시간이 1.5분 줄었다. 추천이 다시 필요하면 `review-recommend` 스킬을 PR 단위로 쓴다(보드에는 싣지 않는다).
 
 - **머리 통계·사람별 표는 '미완료 PR' 하나다**(사용자 지시 2026-10-06). 미완료 = 머지 가능이 아닌 것 = **미해결 스레드가 남았거나 승인자가 0**. 머리에는 전체 건수(`18 / 전체 21`), 표에는 사람별로 **내 PR**(assignee, 작성자가 움직일 차례)과 **내가 리뷰어**(미착수·승인 전)를 나눠 센다. 구 '업무 부하표'(본인 PR+리뷰 중 합계)는 대체됐다.
+
+## Teams 알림 (2026-10-07 사용자 지시)
+보드에서 달라진 것을 10분마다 감지해 팀 채널 웹훅으로 알린다. **토큰을 쓰지 않는 파이썬 데몬**이고, 보드 생성 데몬과 별개 프로세스다.
+```bash
+nohup ~/bin/review_board_notify.sh --daemon 10 > /dev/null 2>&1 &   # 재부팅 후 재기동
+~/bin/review_board_notify.sh --dry                                    # 보내지 않고 카드만 출력(상태 미갱신)
+tail ~/dev/utils/review-board/state/notify.log
+```
+- **감지**: 새 인라인 코멘트(→ PR 담당자) · **답글**(→ 담당자 + 그 스레드에 앞서 글 쓴 사람) · 리뷰 승인/변경요청/의견(→ 담당자) · PR 대화 코멘트 · 새 리뷰 요청(→ 요청받은 사람) · 내가 남긴 스레드의 해결. 수신 대상은 `tracked_github` 만, 봇 계정·본인 글은 제외.
+- **처음 한 번은 기준선만** 잡고 알리지 않는다. 새로 잡힌 PR 은 리뷰 요청만 알린다. 한 주기의 변화는 **카드 한 장**(사람별 최대 8줄)으로 묶는다.
+- **웹훅 URL**: `~/.config/review-board/teams_webhook`(chmod 600) 또는 `REVIEW_BOARD_TEAMS_WEBHOOK`. **파일이 없으면 보내지 않고** `notify.log` 에 "NO WEBHOOK — would send …" 만 남긴다(드라이런, 상태는 갱신). 전송 실패 시 상태를 갱신하지 않아 다음 주기에 재시도한다.
+- **멘션**: `roster.json` 의 `teams: {로그인: {name, email}}` 를 채우면 `<at>` 멘션, 비우면 로그인 이름만 굵게.
+- 상태 파일 `~/dev/utils/review-board/state/notify_state.json` 은 site/ 밖이다(웹 노출 없음). 규약 예외는 메모리 `rules/메일-발신-금지.md` §예외.
