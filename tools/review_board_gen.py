@@ -178,9 +178,9 @@ TOOLBAR_JS = """<script>
   var body = document.body;
   // 에이전트 리뷰 열 — 기본 숨김, 체크해야 보인다. 선택은 브라우저에 기억된다.
   var chk = document.getElementById('agentToggle');
-  try { if (localStorage.getItem('showAgent') === '1') { body.classList.add('show-agent'); chk.checked = true; } } catch (e) {}
+  try { if (localStorage.getItem('showAgent') === '1') { body.classList.add('show-mine'); chk.checked = true; } } catch (e) {}
   chk.addEventListener('change', function () {
-    body.classList.toggle('show-agent', chk.checked);
+    body.classList.toggle('show-mine', chk.checked);
     try { localStorage.setItem('showAgent', chk.checked ? '1' : '0'); } catch (e) {}
   });
   // 리뷰어 필터 — 그 사람이 리뷰어(미착수·승인 전·승인자)인 행만 남기고, 빈 섹션은 접는다.
@@ -231,7 +231,12 @@ def render(rows, now, orphans=()):
     .pill.APPROVED{color:var(--gate);border-color:var(--gate)}.pill.CHANGES_REQUESTED{color:var(--bad);border-color:var(--bad)}.pill.req{color:var(--warn);border-color:var(--warn)}.pill.pend{color:var(--muted);border-color:var(--muted)}
     a{color:inherit} .docs a{display:block;font-size:12px;font-family:"IBM Plex Mono",monospace;color:var(--gate)} .muted{color:var(--muted)}
     /* 에이전트 리뷰 열은 켜지 않는 한 보이지 않는다 (사용자 지시 2026-10-06: 헷갈린다) */
-    .col-agent{display:none} body.show-agent .col-agent{display:table-cell}
+    /* 내 전용 열(에이전트 리뷰 · 리뷰 문서)은 켜지 않는 한 보이지 않는다 */
+    .col-mine{display:none} body.show-mine .col-mine{display:table-cell}
+    /* resolve 안 한 코멘트가 남은 PR 은 행을 붉게 (사용자 지시 2026-10-07) */
+    tr.unres td:first-child{box-shadow:inset 3px 0 0 var(--bad)}
+    tr.unres td{background:color-mix(in srgb, var(--bad) 6%, transparent)}
+    tr.unres .n a{color:var(--bad);font-weight:600}
     .bar{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:16px 0 4px;padding:10px 12px;background:var(--surface);border:1px solid var(--line);border-radius:8px}
     .bar .lbl{font-family:"IBM Plex Mono",monospace;font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
     .btn{font:inherit;font-size:12px;font-family:"IBM Plex Mono",monospace;padding:3px 10px;border-radius:999px;border:1px solid var(--line);background:var(--soft);color:var(--ink);cursor:pointer}
@@ -250,7 +255,7 @@ def render(rows, now, orphans=()):
              + ''.join('<button class="btn" data-rev-filter="%s">%s</button>' % (esc(c), esc(c)) for c in TRACKED)
              + '<button class="btn" data-rev-filter="" data-pend-only="1">승인 전·미착수만</button>'
              + '<span style="flex:1"></span>'
-             + '<label class="lbl" style="cursor:pointer"><input type="checkbox" id="agentToggle"> 에이전트 리뷰 열 보기</label>'
+             + '<label class="lbl" style="cursor:pointer"><input type="checkbox" id="agentToggle"> 내 전용 열 보기 <span class="muted" style="text-transform:none;letter-spacing:0">에이전트 리뷰 · 리뷰 문서</span></label>'
              + '</div>')
     h.append('<div class="meta" style="margin:6px 0 2px">누구 차례인가 — <b>미해결 &gt; 0</b>: 작성자 · <b>미해결 0 + 승인자 0</b>: 리뷰어(승인 필요, "승인만 남은 PR") · <b>미해결 0 + 승인자 ≥ 1</b>: 머지 가능. 리뷰어 필 — <span class="pill req">미착수</span> 요청됐고 리뷰 이력 없음 · <span class="pill pend">승인 전</span> 리뷰했으나 승인 안 함(GitHub 은 리뷰 제출 시 요청 목록에서 빼므로 이 상태가 따로 필요하다)</div>')
     # 사람별 미완료 PR (사용자 지시 2026-10-06: 업무 부하표 대신 이것)
@@ -280,7 +285,7 @@ def render(rows, now, orphans=()):
         h.append('<section class="who"><h2>@%s <span class="meta">%d PR</span></h2>' % (esc(who), len(rs)))
         if not rs:
             h.append('<div class="muted">추적 대상 없음 (open·non-draft·assignee 기준)</div></section>'); continue
-        h.append('<table><tr><th>PR</th><th>제목 / JIRA</th><th>미해결</th><th>리뷰어</th><th class="col-agent">에이전트 리뷰</th><th>갱신</th><th>연동된 테스트케이스</th><th>리뷰 문서(내부망)</th></tr>')
+        h.append('<table><tr><th>PR</th><th>제목 / JIRA</th><th>미해결</th><th>리뷰어</th><th class="col-mine">에이전트 리뷰</th><th>갱신</th><th>연동된 테스트케이스</th><th class="col-mine">리뷰 문서(내부망)</th></tr>')
         for r in rs:
             unres = ('<span class="%s">%d</span> / %d' % ('bad' if r['unresolved'] else 'ok', r['unresolved'], r['threads_total']))
             if r['unresolved_by']:
@@ -296,8 +301,8 @@ def render(rows, now, orphans=()):
             revs = sorted(set(r.get('requested', []) + r.get('pending_approval', []) + r.get('approvers', [])))
             pend_revs = sorted(set(r.get('requested', []) + r.get('pending_approval', [])))
             owns = sorted(set(r.get('assignees', []) + r.get('tracked', [])))   # 담당자 (이현욱 요청 2026-10-07)
-            h.append('<tr data-rev="%s" data-pend="%s" data-own="%s"><td class="n"><a href="%s">%s#%d</a>%s</td><td>%s<div class="meta">%s · by %s%s</div></td><td class="n">%s</td><td>%s</td><td class="n col-agent">%s</td><td class="n">%s<div class="muted" style="font-size:11px">생성 %s</div></td><td class="docs" style="font-size:12px">%s</td><td class="docs">%s</td></tr>' % (
-                esc(','.join(revs)), esc(','.join(pend_revs)), esc(','.join(owns)),
+            h.append('<tr class="%s" data-rev="%s" data-pend="%s" data-own="%s"><td class="n"><a href="%s">%s#%d</a>%s</td><td>%s<div class="meta">%s · by %s%s</div></td><td class="n">%s</td><td>%s</td><td class="n col-mine">%s</td><td class="n">%s<div class="muted" style="font-size:11px">생성 %s</div></td><td class="docs" style="font-size:12px">%s</td><td class="docs col-mine">%s</td></tr>' % (
+                'unres' if r['unresolved'] else '', esc(','.join(revs)), esc(','.join(pend_revs)), esc(','.join(owns)),
                 esc(r['url']), esc(r['repo'].split('/')[1]), r['number'], '<div class="muted" style="font-size:11px">%s</div>' % esc(r['tracked'][0]) if len(rs) and who != r['tracked'][0] else '',
                 esc(r['title']), esc(r['jira'] or '-'), esc(r['author']), (' · assignees +' + ','.join(others)) if others else '',
                 unres, rev, ag, esc(r['updated']), esc(r['created']), tcl, docs))
