@@ -19,6 +19,8 @@ HOOK_FILE = os.path.expanduser('~/.config/review-board/teams_webhook')
 TEAMS = G.ROSTER.get('teams', {})          # {github_login: {"name": "표시이름", "email": "UPN"}}
 MAX_LINES_PER_PERSON = 8
 DRY = '--dry' in sys.argv
+SIM = '--sim' in sys.argv        # 현재 상태 전부를 '새 변화'로 보고 보낸다(시험 전송 — 상태는 건드리지 않는다)
+DIGEST = '--digest' in sys.argv  # 하루 한 번 정리(리뷰 안 한 PR · 머지 안 한 PR) — 상태와 무관
 
 Q = '''query($o:String!,$n:String!,$num:Int!){repository(owner:$o,name:$n){pullRequest(number:$num){
   assignees(first:10){nodes{login}}
@@ -118,9 +120,9 @@ def G_name(login):
 BOARD_URL = 'http://192.168.6.51:8827/'
 
 
-def card(items):
+def card(items, title='리뷰 보드 알림'):
     """items: {login: [(PR 제목줄, 종류, 상세, url, PR url)]} → 사람마다 종류별 'N건' 한 줄만 담은 Adaptive Card."""
-    body = [{'type': 'TextBlock', 'text': '리뷰 보드 알림 — [%s](%s)' % (BOARD_URL, BOARD_URL), 'weight': 'Bolder', 'wrap': True}]
+    body = [{'type': 'TextBlock', 'text': '%s — [%s](%s)' % (title, BOARD_URL, BOARD_URL), 'weight': 'Bolder', 'wrap': True}]
     ents = []
     for who in sorted(items):
         t = TEAMS.get(who) or {}
@@ -152,6 +154,41 @@ def card(items):
     return {'type': 'message', 'attachments': [{'contentType': 'application/vnd.microsoft.card.adaptive', 'content': content}]}
 
 
+def digest_card():
+    """board.json(보드 갱신 데몬이 10분마다 쓴다)에서 사람마다 '리뷰하지 않은 PR' · '머지하지 않은 PR' 링크 모음."""
+    b = json.load(open(os.path.expanduser('~/dev/utils/review-board/site/board.json'), encoding='utf-8'))
+    prs = b['prs']
+    def lk(r):
+        return '[#%d](%s) %s' % (r['number'], r['url'], snip(r['title'], 50))
+    body = [{'type': 'TextBlock', 'text': '리뷰 보드 일일 정리 — [%s](%s)' % (BOARD_URL, BOARD_URL), 'weight': 'Bolder', 'wrap': True}]
+    ents = []
+    for who in sorted(G.TRACKED):
+        unreviewed = [r for r in prs if who in r['requested']]                       # 요청됐고 리뷰 이력 0
+        unmerged = [r for r in prs if who in r['assignees']]                         # 내 PR 중 머지 전(보드 대상은 open·non-draft)
+        if not unreviewed and not unmerged:
+            continue
+        t = TEAMS.get(who) or {}
+        if t.get('email'):
+            tag = '<at>%s</at>' % G_name(who)
+            ents.append({'type': 'mention', 'text': tag, 'mentioned': {'id': t['email'], 'name': G_name(who)}})
+        else:
+            tag = '**%s**' % G_name(who)
+        md = [tag]
+        if unreviewed:
+            md.append('- 리뷰하지 않은 PR **%d건**' % len(unreviewed))
+            md += ['  - ' + lk(r) for r in unreviewed]
+        if unmerged:
+            md.append('- 머지하지 않은 PR **%d건**' % len(unmerged))
+            for r in unmerged:
+                st = '미해결 %d' % r['unresolved'] if r['unresolved'] else ('승인 %d' % len(r['approvers']) if r['approvers'] else '승인 대기')
+                md.append('  - %s — %s' % (lk(r), st))
+        body.append({'type': 'TextBlock', 'text': '\n'.join(md), 'wrap': True})
+    content = {'$schema': 'http://adaptivecards.io/schemas/adaptive-card.json', 'type': 'AdaptiveCard', 'version': '1.4', 'body': body}
+    if ents:
+        content['msteams'] = {'entities': ents}
+    return {'type': 'message', 'attachments': [{'contentType': 'application/vnd.microsoft.card.adaptive', 'content': content}]}
+
+
 def webhook():
     u = os.environ.get('REVIEW_BOARD_TEAMS_WEBHOOK')
     if not u and os.path.exists(HOOK_FILE):
@@ -167,6 +204,11 @@ def post(url, payload):
 
 def main():
     os.makedirs(STATE_DIR, exist_ok=True)
+    if DIGEST:
+        payload, url = digest_card(), webhook()
+        if DRY or not url:
+            print(json.dumps(payload, ensure_ascii=False, indent=1)); return
+        log('digest sent HTTP %s' % post(url, payload)); return
     old_all = json.load(open(STATE, encoding='utf-8')) if os.path.exists(STATE) else None
     prs = []
     for repo in G.REPOS:
@@ -183,18 +225,26 @@ def main():
             continue
         snap = snapshot(d)
         new_all[key] = snap
-        if old_all is None:
+        if old_all is None and not SIM:
             continue
         head = '#%d %s' % (p['number'], snip(p['title'], 40))
         if p['repo'] != 'CUBRID/cubrid':
             head = '[TC] ' + head
-        for who, kind, detail, url in events(key, d, old_all.get(key) or {'c': [], 'r': [], 'i': [], 'q': [], 't': []}, key not in old_all):
+        empty = {'c': [], 'r': [], 'i': [], 'q': [], 't': []}
+        evs = events(key, d, old_all.get(key) or empty, key not in old_all)
+        if SIM:                                    # 현재 상태 전부를 새 변화로: 새 PR + 리뷰 요청 + 답글류
+            evs += events(key, d, empty, True) + events(key, d, empty, False)
+        seen_e = set()
+        for who, kind, detail, url in evs:
+            if (who, kind, url) in seen_e:
+                continue
+            seen_e.add((who, kind, url))
             items.setdefault(who, []).append((head, kind, detail, url or p['url'], p['url']))
     n = sum(len(v) for v in items.values())
-    if old_all is None:
+    if old_all is None and not SIM:
         log('baseline: %d PRs, no notifications' % len(new_all))
     elif n:
-        payload = card(items)
+        payload = card(items, '리뷰 보드 알림 [시험 전송: 현재 상태 전체를 새 변화로 간주]' if SIM else '리뷰 보드 알림')
         url = webhook()
         summary = '; '.join('%s×%d' % (w, len(v)) for w, v in sorted(items.items()))
         if DRY:
@@ -215,7 +265,7 @@ def main():
                     log('   -> %s | %s | %s %s' % (who, kind, head, detail))
     else:
         log('no changes (%d PRs)' % len(new_all))
-    if not DRY:
+    if not DRY and not SIM:
         json.dump(new_all, open(STATE + '.tmp', 'w', encoding='utf-8'))
         os.replace(STATE + '.tmp', STATE)
 

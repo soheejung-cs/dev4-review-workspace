@@ -67,8 +67,10 @@ nohup ~/bin/review_board_notify.sh --daemon 10 > /dev/null 2>&1 &   # 재부팅 
 ~/bin/review_board_notify.sh --dry                                    # 보내지 않고 카드만 출력(상태 미갱신)
 tail ~/dev/utils/review-board/state/notify.log
 ```
-- **감지**: 새 인라인 코멘트(→ PR 담당자) · **답글**(→ 담당자 + 그 스레드에 앞서 글 쓴 사람) · 리뷰 승인/변경요청/의견(→ 담당자) · PR 대화 코멘트 · 새 리뷰 요청(→ 요청받은 사람) · 내가 남긴 스레드의 해결. 수신 대상은 `tracked_github` 만, 봇 계정·본인 글은 제외.
-- **처음 한 번은 기준선만** 잡고 알리지 않는다. 새로 잡힌 PR 은 리뷰 요청만 알린다. 한 주기의 변화는 **카드 한 장**(사람별 최대 8줄)으로 묶는다.
+- **감지(4종, 사용자 지정 문구)**: ① 새로 리뷰해야 할 것이 추가되었습니다(리뷰 요청) ② 새 PR 이 게시되었습니다 ③ 리뷰한 코멘트에 답글이 달렸습니다. Resolve 를 부탁드려요(내가 연 스레드에 남이 답) ④ 리뷰에 답글이 게시되었습니다(스레드 참여자·담당자). 답글에 단 답글도 잡는다(스레드의 N번째 코멘트). 수신 대상은 `tracked_github` 만, 봇 계정·본인 글은 제외. `roster.json` 의 `notify_events` 로 종류를 줄인다.
+- **처음 한 번은 기준선만** 잡고 알리지 않는다. 한 주기의 변화는 **카드 한 장**, 사람마다 종류별 "N건 + PR 링크" 한 줄로 묶는다. 머리에 보드 주소.
+- **일일 정리**: `--daemon` 은 매일 18:00 이후 첫 주기에 `--digest` 를 한 번 보낸다(스탬프 `state/digest.day`). 사람마다 **리뷰하지 않은 PR**(요청됐고 리뷰 이력 0) · **머지하지 않은 PR**(내가 assignee 인 열린 PR + 미해결/승인 상태) 링크 모음. `board.json` 을 읽으므로 보드 데몬이 살아 있어야 한다. 수동: `review_board_notify.py --digest [--dry]`.
+- **시험 전송**: `review_board_notify.py --sim` — 현재 상태 전체를 새 변화로 간주해 4종을 모두 보낸다(머리에 "시험 전송" 표기, 상태 미갱신).
 - **웹훅 URL**: `~/.config/review-board/teams_webhook`(chmod 600) 또는 `REVIEW_BOARD_TEAMS_WEBHOOK`. **파일이 없으면 보내지 않고** `notify.log` 에 "NO WEBHOOK — would send …" 만 남긴다(드라이런, 상태는 갱신). 전송 실패 시 상태를 갱신하지 않아 다음 주기에 재시도한다.
 - **멘션**: `roster.json` 의 `teams: {로그인: {name, email}}` 를 채우면 `<at>` 멘션, 비우면 로그인 이름만 굵게.
 - 상태 파일 `~/dev/utils/review-board/state/notify_state.json` 은 site/ 밖이다(웹 노출 없음). 규약 예외는 메모리 `rules/메일-발신-금지.md` §예외.
