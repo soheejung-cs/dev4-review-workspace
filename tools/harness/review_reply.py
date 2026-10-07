@@ -31,6 +31,39 @@ def sanitize_markdown(body):
         fatal.append(f'코드 울타리가 홀수개({n}) — 열고 닫지 않았다. 게시하면 뒤 본문이 통째로 코드블록이 된다')
     return body, fixes, fatal
 
+# ── 가독성 교정 ────────────────────────────────────────────────────────
+# 실측(2026-10-06 PR#8034): 한 지적의 여러 절(왜·반증 보강·완결성 비평·별건 확인)이
+# " / " 로 이어 붙고 ①②③ 열거가 줄바꿈 없이 들어가 3,000자 한 덩어리가 됐다.
+# 내용은 맞는데 읽을 수가 없다 — 절 경계와 열거만 복원해도 크게 달라진다.
+SECTION = r'왜 문제가 되는지|왜 문제인가|반증[^\s:：]*|보강 근거[^\s:：]*|완결성[^\s:：]*|확인 결과[^\s:：]*|검증|제안|별건[^\s:：]*|참고'
+SEC_SPLIT = re.compile(r'[ \t]+/[ \t]+(?=(?:' + SECTION + r'))')
+ENUM = re.compile(r'(?<=[^\n\s])[ \t]+(?=[①②③④⑤⑥⑦⑧⑨])')
+LONG_PARA = 600          # 한 문단이 이보다 길면 읽기 어렵다
+BUDGET = {'🟢': 1200, '🟡': 2500, '🔴': 4000}
+
+def _fmt_prose(seg):
+    seg = SEC_SPLIT.sub('\n\n', seg)      # " / 반증 …:" → 새 절
+    seg = ENUM.sub('\n- ', seg)           # ①②③ 을 각자 줄의 목록으로
+    return seg
+
+def readability(body):
+    """울타리 밖 산문만 손본다. 반환 (고친 본문, 내역, 경고)."""
+    fixes, warns, out, infence = [], [], [], False
+    for ln in body.split('\n'):
+        if FENCE_LINE.match(ln): infence = not infence; out.append(ln); continue
+        out.append(ln if infence else _fmt_prose(ln))
+    body2 = '\n'.join(out)
+    if body2 != body:
+        if SEC_SPLIT.search(body): fixes.append('" / " 로 이어 붙은 절을 문단으로 분리')
+        if ENUM.search(body):      fixes.append('①②③ 열거를 목록으로 분리')
+    for para in body2.split('\n\n'):
+        if not para.startswith('```') and len(para) > LONG_PARA:
+            warns.append(f'문단 하나가 {len(para)}자 — {LONG_PARA}자 넘으면 읽기 어렵다. 절로 쪼갤 것: "{para[:40]}…"')
+    mark = next((m for m in BUDGET if m in body2.split('\n')[0]), None)
+    if mark and len(body2) > BUDGET[mark]:
+        warns.append(f'{mark} 지적인데 {len(body2)}자 — 권장 {BUDGET[mark]}자. 중요도에 견주어 길다(같은 근거를 두 번 적지 않았나?)')
+    return body2, fixes, warns
+
 def parse_draft(path):
     txt = open(path, encoding='utf-8').read(); out = {}
     for m in re.finditer(r'^## (T\d+) —[^\n]*\n(.*?)(?=^## |\Z)', txt, re.S | re.M):
@@ -56,8 +89,11 @@ def main():
         if not t: print(f'| {tid} | — | ⚠ 스레드 없음(번호가 바뀌었나?) | | |'); continue
         st = t['class'] + (' · resolved' if t['resolved'] else '')
         body, fixes, fatal = sanitize_markdown(body)
+        body, rfix, rwarn = readability(body)
+        fixes += rfix
         print(f"| {tid} | {t['path']}:{t['line']} | {st} | {body.splitlines()[0][:70] if body else '(비어 있음)'} | {len(body)} |")
         for f in fixes: print(f'  ↻ {tid} 교정: {f}')
+        for w in rwarn:  print(f'  ⚠ {tid} {w}')
         for f in fatal: print(f'  ✗ {tid} {f}')
         if fatal:
             print(f'  → {tid} 는 게시하지 않는다. 초안을 고치고 다시 돌릴 것.'); continue
