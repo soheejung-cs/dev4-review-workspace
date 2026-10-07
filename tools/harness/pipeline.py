@@ -240,7 +240,11 @@ def n_report(c, a):
     res = c.get('adjudicated') or []
     def fmt(r):
         v = r.get('verification') or {}
-        return (f"- {AD.comment_header(r)} `{r.get('file')}:{r.get('line')}` — {r.get('claim')}\n  - 왜 문제인가: {r.get('why', '(없음)')}\n  - 제안: {r.get('proposal', '(없음)')}"
+        # 제안은 ```suggestion 울타리를 품을 수 있다. 목록 항목 뒤에 같은 줄로 붙이면 울타리가
+        # 열리지 않아 본문이 마크다운으로 렌더된다(2026-10-06 실측) → 여러 줄이면 블록으로 분리한다.
+        prop = (r.get('proposal') or '(없음)')
+        prop = f"제안: {prop}" if ('\n' not in prop and '```' not in prop) else "제안:\n\n" + prop
+        return (f"- {AD.comment_header(r)} `{r.get('file')}:{r.get('line')}` — {r.get('claim')}\n  - 왜 문제인가: {r.get('why', '(없음)')}\n  - {prop}"
                 + (f"\n  - 검증: [{v.get('method')}] {v.get('result')}" + (f" ({v.get('artifact')})" if v.get('artifact') else '') if v else '')
                 + f"\n  - status **{r.get('status')}**, {r.get('severity')}, rules {r.get('rule_ids') or '-'}" + (f"; {'; '.join(r.get('reasons'))}" if r.get('reasons') else '')
                 + (f"\n  - 통과: {', '.join(r.get('passed'))}" if r.get('passed') else ''))

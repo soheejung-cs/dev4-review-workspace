@@ -5,6 +5,32 @@
 import argparse, json, os, re, subprocess, sys
 from . import review_threads as RT
 
+# ── 게시 전 마크다운 교정 ──────────────────────────────────────────────
+# 실제로 깨진 사례(2026-10-06, PR#8034 T?): 초안이 "제안: ```suggestion" 처럼
+# 울타리를 문장 뒤 같은 줄에 붙였다. GitHub 은 줄 맨 앞에서 시작하는 울타리만
+# 코드블록으로 읽으므로, 블록이 열리지 않은 채 본문이 마크다운으로 렌더됐고
+# "* domain here …" 줄이 불릿 목록으로 바뀌어 제안 문구가 통째로 망가졌다.
+FENCE_TAIL = re.compile(r'^(?P<pre>.*\S)[ \t]*(?P<fence>`{3,}|~{3,})(?P<info>[A-Za-z0-9_+-]*)[ \t]*$')
+FENCE_LINE = re.compile(r'^[ \t]*(`{3,}|~{3,})')
+
+def sanitize_markdown(body):
+    """게시 전 교정. 반환 (고친 본문, 고친 내역, 치명적 문제 목록)."""
+    fixes, fatal, out = [], [], []
+    for ln in body.split('\n'):
+        m = FENCE_TAIL.match(ln)
+        if m and not FENCE_LINE.match(ln):
+            indent = ln[:len(ln) - len(ln.lstrip())]
+            out.append(m.group('pre').rstrip())
+            out.append(indent + m.group('fence') + m.group('info'))
+            fixes.append(f"울타리를 줄 맨 앞으로 분리: {ln.strip()[:60]}")
+        else:
+            out.append(ln)
+    body = '\n'.join(out)
+    n = sum(1 for ln in body.split('\n') if FENCE_LINE.match(ln))
+    if n % 2:
+        fatal.append(f'코드 울타리가 홀수개({n}) — 열고 닫지 않았다. 게시하면 뒤 본문이 통째로 코드블록이 된다')
+    return body, fixes, fatal
+
 def parse_draft(path):
     txt = open(path, encoding='utf-8').read(); out = {}
     for m in re.finditer(r'^## (T\d+) —[^\n]*\n(.*?)(?=^## |\Z)', txt, re.S | re.M):
@@ -29,7 +55,12 @@ def main():
         t = byidx.get(tid)
         if not t: print(f'| {tid} | — | ⚠ 스레드 없음(번호가 바뀌었나?) | | |'); continue
         st = t['class'] + (' · resolved' if t['resolved'] else '')
+        body, fixes, fatal = sanitize_markdown(body)
         print(f"| {tid} | {t['path']}:{t['line']} | {st} | {body.splitlines()[0][:70] if body else '(비어 있음)'} | {len(body)} |")
+        for f in fixes: print(f'  ↻ {tid} 교정: {f}')
+        for f in fatal: print(f'  ✗ {tid} {f}')
+        if fatal:
+            print(f'  → {tid} 는 게시하지 않는다. 초안을 고치고 다시 돌릴 것.'); continue
         if a.post and body:
             q = 'mutation($id:ID!,$b:String!){addPullRequestReviewThreadReply(input:{pullRequestReviewThreadId:$id, body:$b}){comment{url}}}'
             r = subprocess.run(['gh', 'api', 'graphql', '-f', f'query={q}', '-f', f"id={t['id']}", '-f', f'b={body}'], stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True)
