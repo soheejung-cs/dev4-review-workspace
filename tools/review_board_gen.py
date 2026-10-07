@@ -187,8 +187,11 @@ TOOLBAR_JS = """<script>
   var btns = [].slice.call(document.querySelectorAll('[data-rev-filter]'));
   function apply(who, pendOnly) {
     [].forEach.call(document.querySelectorAll('tr[data-rev]'), function (tr) {
-      var list = (tr.getAttribute(pendOnly ? 'data-pend' : 'data-rev') || '').split(',');
-      var hit = !who ? (pendOnly ? list.filter(Boolean).length > 0 : true) : list.indexOf(who) >= 0;
+      var rev = (tr.getAttribute(pendOnly ? 'data-pend' : 'data-rev') || '').split(',');
+      var own = (tr.getAttribute('data-own') || '').split(',');
+      // 그 사람이 리뷰어이거나 담당자면 남긴다 (이현욱 요청 2026-10-07 — 담당자 PR 이 필터에서 사라지던 것)
+      var hit = !who ? (pendOnly ? rev.filter(Boolean).length > 0 : true)
+                     : (rev.indexOf(who) >= 0 || (!pendOnly && own.indexOf(who) >= 0));
       tr.classList.toggle('hidden', !hit);
     });
     [].forEach.call(document.querySelectorAll('section.who'), function (sec) {
@@ -242,7 +245,7 @@ def render(rows, now, orphans=()):
     tot_open = sum(1 for r in rows if r['unresolved'] or not r.get('approvers'))
     h.append('<div class="facts"><div class="fact"><b class="%s">%d</b><span>미완료 PR <span class="muted">/ 전체 %d</span></span></div></div>' % ('bad' if tot_open else 'ok', tot_open, len(rows)))
     # 툴바: 리뷰어 필터 + 에이전트 열 토글 (사용자 지시 2026-10-06)
-    h.append('<div class="bar"><span class="lbl">내가 리뷰어인 PR</span>'
+    h.append('<div class="bar"><span class="lbl">사람으로 모아 보기 <span class="muted" style="text-transform:none;letter-spacing:0">담당자 + 리뷰어</span></span>'
              + '<button class="btn on" data-rev-filter="">전체</button>'
              + ''.join('<button class="btn" data-rev-filter="%s">%s</button>' % (esc(c), esc(c)) for c in TRACKED)
              + '<button class="btn" data-rev-filter="" data-pend-only="1">승인 전·미착수만</button>'
@@ -292,8 +295,9 @@ def render(rows, now, orphans=()):
             others = [a for a in r['assignees'] if a != r['tracked'][0]]
             revs = sorted(set(r.get('requested', []) + r.get('pending_approval', []) + r.get('approvers', [])))
             pend_revs = sorted(set(r.get('requested', []) + r.get('pending_approval', [])))
-            h.append('<tr data-rev="%s" data-pend="%s"><td class="n"><a href="%s">%s#%d</a>%s</td><td>%s<div class="meta">%s · by %s%s</div></td><td class="n">%s</td><td>%s</td><td class="n col-agent">%s</td><td class="n">%s<div class="muted" style="font-size:11px">생성 %s</div></td><td class="docs" style="font-size:12px">%s</td><td class="docs">%s</td></tr>' % (
-                esc(','.join(revs)), esc(','.join(pend_revs)),
+            owns = sorted(set(r.get('assignees', []) + r.get('tracked', [])))   # 담당자 (이현욱 요청 2026-10-07)
+            h.append('<tr data-rev="%s" data-pend="%s" data-own="%s"><td class="n"><a href="%s">%s#%d</a>%s</td><td>%s<div class="meta">%s · by %s%s</div></td><td class="n">%s</td><td>%s</td><td class="n col-agent">%s</td><td class="n">%s<div class="muted" style="font-size:11px">생성 %s</div></td><td class="docs" style="font-size:12px">%s</td><td class="docs">%s</td></tr>' % (
+                esc(','.join(revs)), esc(','.join(pend_revs)), esc(','.join(owns)),
                 esc(r['url']), esc(r['repo'].split('/')[1]), r['number'], '<div class="muted" style="font-size:11px">%s</div>' % esc(r['tracked'][0]) if len(rs) and who != r['tracked'][0] else '',
                 esc(r['title']), esc(r['jira'] or '-'), esc(r['author']), (' · assignees +' + ','.join(others)) if others else '',
                 unres, rev, ag, esc(r['updated']), esc(r['created']), tcl, docs))
