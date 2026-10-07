@@ -4,7 +4,7 @@
    사용: review_board_notify.py [--dry]      (--dry 는 보내지 않고 로그만, 상태는 갱신하지 않는다)
    웹훅 URL: ~/.config/review-board/teams_webhook (chmod 600) 또는 환경변수 REVIEW_BOARD_TEAMS_WEBHOOK. 없으면 드라이런(로그만, 상태 갱신).
    상태: ~/dev/utils/review-board/state/notify_state.json (site/ 밖 — 웹으로 노출하지 않는다)
-   첫 실행은 기준선만 잡고 알리지 않는다. 새로 잡힌 PR 은 리뷰 요청만 알린다.
+   첫 실행은 기준선만 잡고 알리지 않는다. 알리는 것은 4종류(KINDS) — roster.json 의 notify_events 로 줄일 수 있다.
 """
 import sys, os, re, json, datetime, subprocess, urllib.request
 
@@ -64,63 +64,64 @@ def snapshot(d):
     return s
 
 
+KINDS = [   # (코드, 카드에 쓰는 문구) — 사용자 지정 문구 (2026-10-07)
+    ('review_request', '새로 리뷰해야 할 것이 추가되었습니다.'),
+    ('new_pr', '새 PR 이 게시되었습니다.'),
+    ('reply_resolve', '리뷰한 코멘트에 답글이 달렸습니다. Resolve 를 부탁드려요.'),
+    ('reply', '리뷰에 답글이 게시되었습니다.'),
+]
+KIND_TEXT = dict(KINDS)
+ENABLED = set(G.ROSTER.get('notify_events') or [k for k, _ in KINDS])
+
+
 def events(key, d, old, first_seen):
-    """[(수신자 login, 한 줄, url)] — old 에 없던 것만."""
+    """[(수신자 login, 종류, 상세 한 줄, url)] — old 에 없던 것만."""
     out = []
     assignees = [a['login'] for a in d['assignees']['nodes']]
-    oc, orr, oi, oq, ot = set(old['c']), set(old['r']), set(old['i']), set(old['q']), set(old['t'])
+    oc, oq, ot = set(old['c']), set(old['q']), set(old['t'])
     cur_q = [n['requestedReviewer']['login'] for n in d['reviewRequests']['nodes'] if n.get('requestedReviewer')]
     for who in cur_q:
-        if who not in oq and human(who):
-            out.append((who, '리뷰 요청을 받았습니다', None))
+        if human(who) and (first_seen or who not in oq):
+            out.append((who, 'new_pr' if first_seen else 'review_request', '', None))
     if first_seen:
         return out
     for t in d['reviewThreads']['nodes']:
+        if t['isResolved']:
+            continue                                   # 이미 해결된 스레드의 답글은 Resolve 요청 대상이 아니다
         cs = t['comments']['nodes']
+        opener = (cs[0].get('author') or {}).get('login') if cs else None
         for i, c in enumerate(cs):
             a = (c.get('author') or {}).get('login')
-            if c['id'] in oc or not human(a):
-                continue
-            prior = {(p.get('author') or {}).get('login') for p in cs[:i]}
-            if i == 0:
-                rec, what = set(assignees), '새 리뷰 코멘트를'
-            else:
-                rec, what = set(assignees) | prior, '답글을'
-            for who in sorted(r for r in rec if r and r != a and human(r)):
-                out.append((who, '%s님이 %s 남겼습니다: “%s”' % (G_name(a), what, snip(c['body'])), c['url']))
-        if t['isResolved'] and t['id'] not in ot:
-            rb = (t.get('resolvedBy') or {}).get('login')
-            first = (cs[0].get('author') or {}).get('login') if cs else None
-            if human(first) and first != rb:
-                out.append((first, '남기신 스레드를 %s님이 해결 처리했습니다' % G_name(rb or '?'), cs[0]['url']))
-    for r in d['reviews']['nodes']:
-        a = (r.get('author') or {}).get('login')
-        if r['id'] in orr or not human(a):
-            continue
-        if r['state'] == 'COMMENTED' and not (r.get('body') or '').strip():
-            continue                                    # 인라인 코멘트의 껍데기 — 코멘트 이벤트가 따로 있다
-        label = {'APPROVED': '승인했습니다', 'CHANGES_REQUESTED': '변경을 요청했습니다', 'COMMENTED': '리뷰 의견을 남겼습니다',
-                 'DISMISSED': '리뷰가 기각됐습니다'}.get(r['state'], r['state'])
-        for who in assignees:
-            if who != a and human(who):
-                out.append((who, '%s님이 %s' % (G_name(a), label) + (': “%s”' % snip(r['body']) if (r.get('body') or '').strip() else ''), r['url']))
-    for c in d['comments']['nodes']:
-        a = (c.get('author') or {}).get('login')
-        if c['id'] in oi or not human(a):
-            continue
-        for who in assignees:
-            if who != a and human(who):
-                out.append((who, '%s님이 PR 대화에 글을 남겼습니다: “%s”' % (G_name(a), snip(c['body'])), c['url']))
-    return out
+            if i == 0 or c['id'] in oc or not human(a):
+                continue                               # 첫 글(새 코멘트)은 알리지 않는다 — 답글만
+            detail = '%s님: “%s”' % (G_name(a), snip(c['body']))
+            if opener and opener != a and human(opener):
+                out.append((opener, 'reply_resolve', detail, c['url']))   # 내가 연 스레드에 남이 답했다 → Resolve 요청
+            prior = {(p.get('author') or {}).get('login') for p in cs[:i]} | set(assignees)
+            for who in sorted(r for r in prior if r and r != a and r != opener and human(r)):
+                out.append((who, 'reply', detail, c['url']))
+            if a == opener:                            # 스레드를 연 리뷰어가 다시 답했다 → 작성자(담당자)에게
+                for who in assignees:
+                    if who != a and human(who):
+                        out.append((who, 'reply', detail, c['url']))
+    seen, uniq = set(), []
+    for e in out:                                  # 같은 사람·종류·링크는 한 번만
+        if e[1] in ENABLED and (e[0], e[1], e[3]) not in seen:
+            seen.add((e[0], e[1], e[3])); uniq.append(e)
+    return uniq
 
 
 def G_name(login):
     return (TEAMS.get(login) or {}).get('name') or login
 
 
+BOARD_URL = 'http://192.168.6.51:8827/'
+
+
 def card(items):
-    """items: {login: [(PR 제목줄, 한 줄, url)]} → Teams Adaptive Card payload."""
-    body, ents = [{'type': 'TextBlock', 'text': '리뷰 보드 알림', 'weight': 'Bolder', 'size': 'Medium'}], []
+    """items: {login: [(PR 제목줄, 종류, 상세, url, PR url)]} → 사람마다 종류별 'N건' 한 줄만 담은 Adaptive Card."""
+    body = [{'type': 'TextBlock', 'text': '리뷰 보드 알림 — [%s](%s)' % (BOARD_URL, BOARD_URL), 'weight': 'Bolder', 'wrap': True}]
+    ents = []
     for who in sorted(items):
         t = TEAMS.get(who) or {}
         if t.get('email'):
@@ -128,13 +129,22 @@ def card(items):
             ents.append({'type': 'mention', 'text': tag, 'mentioned': {'id': t['email'], 'name': G_name(who)}})
         else:
             tag = '**%s**' % G_name(who)
-        lines = items[who][:MAX_LINES_PER_PERSON]
-        more = len(items[who]) - len(lines)
-        md = ['%s' % tag]
-        for head, line, url in lines:
-            md.append('- %s — %s%s' % (head, line, (' ([보기](%s))' % url) if url else ''))
-        if more > 0:
-            md.append('- … 외 %d건' % more)
+        md = [tag]
+        for kind, text in KINDS:
+            rows = [r for r in items[who] if r[1] == kind]
+            if not rows:
+                continue
+            prs = []                                    # PR 별로 묶고 순서 유지
+            for head, _k, _d, _u, pr_url in rows:
+                num = head.split('#', 1)[1].split()[0]
+                tc = head.startswith('[TC]')
+                for e in prs:
+                    if e[0] == pr_url:
+                        e[2] += 1; break
+                else:
+                    prs.append([pr_url, ('TC#' if tc else '#') + num, 1])
+            links = ' · '.join('[%s](%s)' % (n, u) + ('×%d' % c if c > 1 else '') for u, n, c in prs)
+            md.append('- %s **%d건** (%s)' % (text, len(rows), links))
         body.append({'type': 'TextBlock', 'text': '\n'.join(md), 'wrap': True})
     content = {'$schema': 'http://adaptivecards.io/schemas/adaptive-card.json', 'type': 'AdaptiveCard', 'version': '1.4', 'body': body}
     if ents:
@@ -178,8 +188,8 @@ def main():
         head = '#%d %s' % (p['number'], snip(p['title'], 40))
         if p['repo'] != 'CUBRID/cubrid':
             head = '[TC] ' + head
-        for who, line, url in events(key, d, old_all.get(key) or {'c': [], 'r': [], 'i': [], 'q': [], 't': []}, key not in old_all):
-            items.setdefault(who, []).append((head, line, url or p['url']))
+        for who, kind, detail, url in events(key, d, old_all.get(key) or {'c': [], 'r': [], 'i': [], 'q': [], 't': []}, key not in old_all):
+            items.setdefault(who, []).append((head, kind, detail, url or p['url'], p['url']))
     n = sum(len(v) for v in items.values())
     if old_all is None:
         log('baseline: %d PRs, no notifications' % len(new_all))
@@ -201,8 +211,8 @@ def main():
         else:
             log('NO WEBHOOK — would send %d events: %s' % (n, summary))
             for who in sorted(items):
-                for head, line, _ in items[who]:
-                    log('   -> %s | %s — %s' % (who, head, line))
+                for head, kind, detail, _u, _p in items[who]:
+                    log('   -> %s | %s | %s %s' % (who, kind, head, detail))
     else:
         log('no changes (%d PRs)' % len(new_all))
     if not DRY:
