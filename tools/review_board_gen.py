@@ -185,6 +185,29 @@ TOOLBAR_JS = """<script>
   });
   // 리뷰어 필터 — 그 사람이 리뷰어(미착수·승인 전·승인자)인 행만 남기고, 빈 섹션은 접는다.
   var btns = [].slice.call(document.querySelectorAll('[data-rev-filter]'));
+  // 붉은 표시는 고른 사람 기준이다 (사용자 지시 2026-10-07):
+  //   내가 담당자  → 머지 전이면 붉다 (이 보드는 open PR 만 싣는다 = 늘 붉다)
+  //   내가 리뷰어  → 내가 아직 승인하지 않았으면 붉다
+  //   아무도 안 고름 → 중립 기준(미해결 스레드가 남았으면 붉다)
+  function paint(who) {
+    [].forEach.call(document.querySelectorAll('tr[data-rev]'), function (tr) {
+      var red;
+      if (!who) {
+        red = tr.dataset.unres === '1';
+      } else if ((tr.getAttribute('data-own') || '').split(',').indexOf(who) >= 0) {
+        red = true;
+      } else if ((tr.getAttribute('data-rev') || '').split(',').indexOf(who) >= 0) {
+        red = (tr.getAttribute('data-appr') || '').split(',').indexOf(who) < 0;
+      } else {
+        red = false;
+      }
+      tr.classList.toggle('unres', red);
+    });
+    var hint = document.getElementById('redHint');
+    if (hint) hint.textContent = who
+      ? ('붉은색 = ' + who + ' 가 움직일 차례 (내 PR: 머지 전 · 내가 리뷰어: 내가 승인 안 함)')
+      : '붉은색 = resolve 안 한 코멘트가 남음';
+  }
   function apply(who, pendOnly) {
     [].forEach.call(document.querySelectorAll('tr[data-rev]'), function (tr) {
       var rev = (tr.getAttribute(pendOnly ? 'data-pend' : 'data-rev') || '').split(',');
@@ -194,6 +217,7 @@ TOOLBAR_JS = """<script>
                      : (rev.indexOf(who) >= 0 || (!pendOnly && own.indexOf(who) >= 0));
       tr.classList.toggle('hidden', !hit);
     });
+    paint(who);
     [].forEach.call(document.querySelectorAll('section.who'), function (sec) {
       var vis = sec.querySelectorAll('tr[data-rev]:not(.hidden)').length;
       sec.classList.toggle('hidden', vis === 0);
@@ -254,7 +278,7 @@ def render(rows, now, orphans=()):
              + '<button class="btn on" data-rev-filter="">전체</button>'
              + ''.join('<button class="btn" data-rev-filter="%s">%s</button>' % (esc(c), esc(c)) for c in TRACKED)
              + '<button class="btn" data-rev-filter="" data-pend-only="1">승인 전·미착수만</button>'
-             + '<span style="flex:1"></span>'
+             + '<span id="redHint" class="muted" style="font-size:11px">붉은색 = resolve 안 한 코멘트가 남음</span><span style="flex:1"></span>'
              + '<label class="lbl" style="cursor:pointer"><input type="checkbox" id="agentToggle"> 내 전용 열 보기 <span class="muted" style="text-transform:none;letter-spacing:0">에이전트 리뷰 · 리뷰 문서</span></label>'
              + '</div>')
     h.append('<div class="meta" style="margin:6px 0 2px">누구 차례인가 — <b>미해결 &gt; 0</b>: 작성자 · <b>미해결 0 + 승인자 0</b>: 리뷰어(승인 필요, "승인만 남은 PR") · <b>미해결 0 + 승인자 ≥ 1</b>: 머지 가능. 리뷰어 필 — <span class="pill req">미착수</span> 요청됐고 리뷰 이력 없음 · <span class="pill pend">승인 전</span> 리뷰했으나 승인 안 함(GitHub 은 리뷰 제출 시 요청 목록에서 빼므로 이 상태가 따로 필요하다)</div>')
@@ -301,8 +325,9 @@ def render(rows, now, orphans=()):
             revs = sorted(set(r.get('requested', []) + r.get('pending_approval', []) + r.get('approvers', [])))
             pend_revs = sorted(set(r.get('requested', []) + r.get('pending_approval', [])))
             owns = sorted(set(r.get('assignees', []) + r.get('tracked', [])))   # 담당자 (이현욱 요청 2026-10-07)
-            h.append('<tr class="%s" data-rev="%s" data-pend="%s" data-own="%s"><td class="n"><a href="%s">%s#%d</a>%s</td><td>%s<div class="meta">%s · by %s%s</div></td><td class="n">%s</td><td>%s</td><td class="n col-mine">%s</td><td class="n">%s<div class="muted" style="font-size:11px">생성 %s</div></td><td class="docs" style="font-size:12px">%s</td><td class="docs col-mine">%s</td></tr>' % (
-                'unres' if r['unresolved'] else '', esc(','.join(revs)), esc(','.join(pend_revs)), esc(','.join(owns)),
+            apprs = sorted(set(r.get('approvers', [])))                          # 승인한 사람
+            h.append('<tr class="%s" data-unres="%s" data-rev="%s" data-pend="%s" data-own="%s" data-appr="%s"><td class="n"><a href="%s">%s#%d</a>%s</td><td>%s<div class="meta">%s · by %s%s</div></td><td class="n">%s</td><td>%s</td><td class="n col-mine">%s</td><td class="n">%s<div class="muted" style="font-size:11px">생성 %s</div></td><td class="docs" style="font-size:12px">%s</td><td class="docs col-mine">%s</td></tr>' % (
+                'unres' if r['unresolved'] else '', '1' if r['unresolved'] else '0', esc(','.join(revs)), esc(','.join(pend_revs)), esc(','.join(owns)), esc(','.join(apprs)),
                 esc(r['url']), esc(r['repo'].split('/')[1]), r['number'], '<div class="muted" style="font-size:11px">%s</div>' % esc(r['tracked'][0]) if len(rs) and who != r['tracked'][0] else '',
                 esc(r['title']), esc(r['jira'] or '-'), esc(r['author']), (' · assignees +' + ','.join(others)) if others else '',
                 unres, rev, ag, esc(r['updated']), esc(r['created']), tcl, docs))
