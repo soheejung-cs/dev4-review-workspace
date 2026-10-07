@@ -60,17 +60,4 @@ python3 ~/dev/docs/dev4-review-workspace/tools/review_board_gen.py [out_dir]   #
 
 - **머리 통계·사람별 표는 '미완료 PR' 하나다**(사용자 지시 2026-10-06). 미완료 = 머지 가능이 아닌 것 = **미해결 스레드가 남았거나 승인자가 0**. 머리에는 전체 건수(`18 / 전체 21`), 표에는 사람별로 **내 PR**(assignee, 작성자가 움직일 차례)과 **내가 리뷰어**(미착수·승인 전)를 나눠 센다. 구 '업무 부하표'(본인 PR+리뷰 중 합계)는 대체됐다.
 
-## Teams 알림 (2026-10-07 사용자 지시)
-보드에서 달라진 것을 10분마다 감지해 팀 채널 웹훅으로 알린다. **토큰을 쓰지 않는 파이썬 데몬**이고, 보드 생성 데몬과 별개 프로세스다.
-```bash
-nohup ~/bin/review_board_notify.sh --daemon 10 > /dev/null 2>&1 &   # 재부팅 후 재기동
-~/bin/review_board_notify.sh --dry                                    # 보내지 않고 카드만 출력(상태 미갱신)
-tail ~/dev/utils/review-board/state/notify.log
-```
-- **감지(4종, 사용자 지정 문구)**: ① 새로 리뷰해야 할 것이 추가되었습니다(리뷰 요청) ② 새 PR 이 게시되었습니다 ③ 리뷰한 코멘트에 답글이 달렸습니다. Resolve 를 부탁드려요(내가 연 스레드에 남이 답) ④ 리뷰에 답글이 게시되었습니다(스레드 참여자·담당자). 답글에 단 답글도 잡는다(스레드의 N번째 코멘트). 수신 대상은 `tracked_github` 만, 봇 계정·본인 글은 제외. `roster.json` 의 `notify_events` 로 종류를 줄인다.
-- **처음 한 번은 기준선만** 잡고 알리지 않는다. 한 주기의 변화는 **카드 한 장**, 사람마다 종류별 "N건 + PR 링크" 한 줄로 묶는다. 머리에 보드 주소.
-- **일일 정리**: `--daemon` 은 매일 18:00 이후 첫 주기에 `--digest` 를 한 번 보낸다(스탬프 `state/digest.day`). 사람마다 **리뷰하지 않은 PR**(요청됐고 리뷰 이력 0) · **머지하지 않은 PR**(내가 assignee 인 열린 PR + 미해결/승인 상태) 링크 모음. `board.json` 을 읽으므로 보드 데몬이 살아 있어야 한다. 수동: `review_board_notify.py --digest [--dry]`.
-- **시험 전송**: `review_board_notify.py --sim` — 현재 상태 전체를 새 변화로 간주해 4종을 모두 보낸다(머리에 "시험 전송" 표기, 상태 미갱신).
-- **웹훅 URL**: `~/.config/review-board/teams_webhook`(chmod 600) 또는 `REVIEW_BOARD_TEAMS_WEBHOOK`. **파일이 없으면 보내지 않고** `notify.log` 에 "NO WEBHOOK — would send …" 만 남긴다(드라이런, 상태는 갱신). 전송 실패 시 상태를 갱신하지 않아 다음 주기에 재시도한다.
-- **멘션**: `roster.json` 의 `teams: {로그인: {name, email}}` 를 채우면 `<at>` 멘션, 비우면 로그인 이름만 굵게.
-- 상태 파일 `~/dev/utils/review-board/state/notify_state.json` 은 site/ 밖이다(웹 노출 없음). 규약 예외는 메모리 `rules/메일-발신-금지.md` §예외.
+- **Teams 알림 데몬**(2026-10-07 도입 → **같은 날 사용자 지시로 제거**). 다른 담당자가 Hermes agent 로 적응형 알림(false alarm 방지)을 만들며 이 기능을 모두 포함하기로 해 중복이라 뺐다. 알림은 그쪽 agents 채널이 맡고, 보드는 10분 갱신만 한다. 되살릴 때는 커밋 `1eef5a3` 의 `tools/review_board_notify.py`(4종 감지·`--digest`·`--sim`)를 참고.
