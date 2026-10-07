@@ -25,6 +25,8 @@ description: 적대적 SQL 차분 테스트 — 같은 SQL 세트를 develop·PR
 | **안 타는 가지 / 상수와 섞기** | `CASE WHEN a > ? THEN 1/? ELSE 0 END`, `NVL(a, ?)` 에 NULL 행 없음, `(PRIOR w) * ? + w * 2 - ? + 0.5` | 행 의존 가지 안 상수식 선계산(PR 회귀), 변환은 미리 안 함 |
 | **부작용 있는 상수** | 가지 안 `시리얼.NEXT_VALUE + ?`, `RANDOM() + ?`, `SYS_GUID()`, `SYSDATE + ?` — 값 대신 **횟수·DISTINCT 수·범위** 를 본다 | 선계산되면 시리얼이 한 번만 소비됨(이번엔 정상) |
 | **구조 조합** | 뷰(식 푸시다운·세션변수 읽는 뷰·GROUP BY/UNION 뷰), 계층 뷰 위 윈도우, 윈도우 뷰 위 CONNECT BY, 3단 서브쿼리, CTE+EXISTS, MERGE(DELETE 절·GROUP BY/윈도우 소스), INSERT…SELECT, 다중 VALUES, ON DUPLICATE KEY, REPLACE | **CONNECT BY + `?` 가진 파생 테이블 → 로드 -1383**(PR 결함) |
+| **재컴파일 경로** | 같은 문장을 (a) 새 PREPARE→EXECUTE (b) `/*+ RECOMPILE */` 힌트 (c) PREPARE → 그 테이블 `ALTER ADD COLUMN`/`CREATE INDEX` → EXECUTE (d) `max_plan_cache_entries=0` 로 돌려 비교. (b)(c)는 **바인드 값을 아는 상태의 재컴파일**이라 첫 PREPARE 와 다른 스트림이 간다 | PR#8022 `UPDATE SET d = DATE'…' + ?` 가 (b)(c)에서만 -1383 (2026-10-07) |
+| **리터럴 단독** | 바인드 없는 리터럴 문장(`SUM(NULL)`, `CAST(NULL AS …)` 인자)도 세트에 넣고 **raw diff 줄수**를 본다 — 짝 분류기는 리터럴 단독 diff 를 못 잡는다 | PR#8022 `SUM(NULL)` -1383 (2026-10-07) |
 | **모드 on/off** | `modes.sh`: 기본 / oracle 호환 / concat·escape·normalization·string_max / `max_plan_cache_entries=0` / `max_plan_cache_clones=0` (+ `review-testing` §1-1 의 신호별 모드) | 캐시 0 에서 원인 오류 대신 -1383, query 인자 빈 문자열 |
 | **세션 파라미터** | `SET NAMES`, `SET SYSTEM PARAMETERS`, 세션변수 `@v` 타입 바꿈(INT→'3'→2.5→NULL), 같은 PREPARE 유지 | A5(세션변수 타입 고정) 적용 범위 |
 | **실행 사이 스키마 변경** | 같은 PREPARE 두고 `ALTER TABLE MODIFY` 타입 변경·`CREATE INDEX`·`ADD COLUMN`·`UPDATE STATISTICS` | 재실행이 새 열 타입을 따라가나 |
