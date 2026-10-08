@@ -20,6 +20,7 @@ description: 통합 리뷰 하네스 실행 — `/harness-review <PR번호>`. �
 4. `python3 -m tools.harness.run full --pr <PR> --findings OUT/findings.json` → `findings.adjudicated.json`, `requery.json`, `report.md`.
 5. `requery.json` 이 비어 있지 않으면 **한 번만** 그 항목을 다시 검토해 findings.json 을 고치고 4 를 재실행한다(그래도 inconclusive 면 보고서 "판정 보류"에 남긴다).
 6. `report.md` 를 사람 말투로 다듬되, **맨 앞에 `## 0. 먼저 알아야 할 것` 을 직접 쓴다** — 하네스 골격에는 없다(`code-review` §5 의 표 9항목: 무엇을 바꾸나 · 사용자가 보게 되는 변화 · TC·CI · **요청자 PR 과의 충돌** · 리뷰 신뢰도 · revert 비용 · 리뷰 분담 · 게시 비용 · 결정 Q). 그다음에 `examples/리뷰보고서-예시-PR<PR>.md` 와 `claude-workspace/projects/<JIRA>/리뷰보고서-PR<PR>.md` 에 둔다. **게시는 하지 않는다** — 사용자에게 "N번 코멘트 — [층] 본문" 초안을 보이고 승인 후 `review-response` 규약(인라인)으로 게시.
+   **전달물은 보고서 파일이 아니라 7 의 리뷰 전용 PR 이다**(사용자 지시 2026-10-08): 보고서를 다듬은 뒤 반드시 7 로 가서 fork 에 draft PR 을 만들고 보고서 전문을 PR 본문에 넣어 그 링크를 건넨다. 본문 교체는 `gh pr edit --body-file` 이 Projects(classic) GraphQL 오류로 조용히 실패하므로 `gh api -X PATCH repos/soheejung-cs/cubrid/pulls/<n> --input body.json` 으로 하고 `gh pr view --json body` 로 줄 수를 확인한다. `function_notes` 항목에는 그 함수에 달린 지적의 `finding_ids` 를 넣는다(주석에 `[지적 A1]` 로 찍힌다).
 7. **변경 지도·주석 PR**: 리뷰 단계가 `function_notes` 를 냈으면 `OUT/function_notes.json` 으로 모아 두면 `report` 가 §변경 지도를 자동으로 깐다. 읽기용 PR 이 필요하면
    `python3 -m tools.harness.annotate --pr <N> --head <sha> --notes OUT/function_notes.json --push --pr-create` (fork 안 draft, upstream 아님).
 8. 기록: `record` 스킬(episodic 은 러너가 이미 적재).
