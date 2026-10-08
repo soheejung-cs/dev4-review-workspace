@@ -9,6 +9,8 @@ description: 내 PR 에 달린 리뷰 코멘트(봇·사람)에 대응하는 규
 > 게시는 `python3 -m tools.harness.review_reply --pr <PR> --draft <replies.md>`(기본 dry-run: 초안 `## T<idx>` 절 ↔ 스레드 매핑표) → 사용자 승인 뒤 `--post`. 사람이 연 스레드는 resolve 하지 않는다.
 > 스레드 수집은 `python3 -m tools.harness.review_threads --pr <PR>` — 미해결 스레드를 **대응 필요**(리뷰어가 마지막)와 **resolve 대기**(작성자가 마지막)로 갈라 `threads.md/json` 으로 준다(2026-09-30). 답글 초안은 그 T번호·URL 기준으로 쓴다.
 
+> **서브에이전트 (2026-10-08)**: 수집은 `harness-threads`, 결함 주장의 재현은 `harness-repro`, 답글 초안은 게시 전에 **`harness-gatekeeper`** 에 통과시킨다(재현 절차 완전성·층 태그·울타리·길이·제품명·한국어). 게시 후 `harness-auditor` 로 §6·§7 점검. 정의·흐름은 `agents/README.md`.
+
 ## 0. 누구 PR 인가
 - **내(soheejung-cs) PR**: 수정 가능. 답글 → 작성자가 **봇이면 resolve**, **사람이면 resolve 안 함**(리뷰어가 닫는다).
   리뷰어가 "종결하겠습니다" 한 스레드는 그대로 둔다.

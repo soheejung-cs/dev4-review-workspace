@@ -24,9 +24,16 @@ description: 통합 리뷰 하네스 실행 — `/harness-review <PR번호>`. �
    `python3 -m tools.harness.annotate --pr <N> --head <sha> --notes OUT/function_notes.json --push --pr-create` (fork 안 draft, upstream 아님).
 8. 기록: `record` 스킬(episodic 은 러너가 이미 적재).
 
-## 여러 에이전트로 쪼갤 때
-단계마다 추론 강도를 다르게 준다 — **수집은 낮추고 판정·종합·반증은 유지**, 애매하면 올려보낸다.
-등급표와 탈출구(escalate) 스키마는 [`harness/모델-선택.md`](../../harness/모델-선택.md).
+## 서브에이전트 구성 (2026-10-08, 사용자 지시 "서브에이전트를 여러 개 두고 감시 역할")
+정의는 `agents/*.md`(링크 `tools/agent_link.sh` → `~/.claude/agents/`), 표와 흐름은 [`agents/README.md`](../../agents/README.md). 등급·강도는 [`harness/모델-선택.md`](../../harness/모델-선택.md).
+절차 2~3 을 아래로 바꾼다 (메인 루프 = 나는 **승인·게시·사용자 대화만**):
+1. `batch_index.md` 의 그룹 제안대로 **4그룹씩** `Agent(subagent_type="harness-pack-reader")` → `observations.<g>.json`; 이어 `harness-reviewer` → `findings.<g>.json`. 프롬프트에는 `OUT`·`preamble.md` 경로·배치 파일 목록·그룹 이름만(지시문을 복사하지 않는다).
+2. `harness-refuter` 에 findings 전부 → `refute.<g>.json`.
+3. `harness-synthesizer` → `OUT/findings.json`·`comments.draft.md`·`report.head.md`.
+4. 절차 4~5(`--findings` 판정·requery) 는 그대로.
+5. **`harness-gatekeeper`** 에 `comments.draft.md` 와 재현 스크립트 경로 → `gate.*.md`. 차단급이 있으면 고쳐서 다시 돌린다 — 게시하지 않는다.
+6. 사용자 승인 → 게시(review-response 규약) → **`harness-auditor`** 로 기록·배운것·보드·환경 복원 점검 → 미완이면 처리.
+에이전트는 이 대화를 보지 못한다: 입력은 파일 경로, 출력은 파일. `needs_judgment` 가 올라오면 그 항목만 내가 판정한다.
 
 배치가 수십 개인 대형 PR 은 **동시에 다 띄우지 않는다** — `batch_index.json` 의 `chunk_hint`(기본 4)만큼
 끊어 돌리고, 그룹은 `batch_index.md` 의 제안을 쓴다. 에이전트에는 `preamble.md` 를 한 번만 읽히고
