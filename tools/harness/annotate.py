@@ -96,6 +96,8 @@ def main():
     print(f'base={base[:9]} ({bb})  head={a.head[:9]} ({kb})')
 
     cur = sh('git rev-parse --abbrev-ref HEAD', cwd=a.repo)
+    if cur == 'HEAD':   # detached (goto 가 만든 상태): 브랜치 이름이 없으므로 sha 로 돌아간다
+        cur = sh('git rev-parse HEAD', cwd=a.repo)
     # 서브모듈(cubrid-cci·cubridmanager)은 빌드가 흔들어 놓기 일쑤고 주석은 일반 소스만 건드리므로 제외한다.
     subs = set()
     gm = os.path.join(a.repo, '.gitmodules')
