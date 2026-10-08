@@ -7,6 +7,11 @@ import os, re, subprocess
 from typing import Dict, List, Tuple
 from .codegraph import CodeGraph
 
+
+def _ref_ok(e, check):
+    m = re.match(r'([^:\s]+):(\d+)', e)
+    return bool(m) and check(m)
+
 def _line_exists(repo: str, file: str, line: int) -> bool:
     p = os.path.join(repo, file)
     if not os.path.isfile(p): return False
@@ -80,7 +85,7 @@ def adjudicate(repo: str, g: CodeGraph, changed: Dict[str, List[int]], findings:
         if re.search(BASELINE_WORDS, text, re.I):
             b = f.get('baseline') or {}
             bev = b.get('evidence') or []
-            bok = [e for e in bev if (m := re.match(r'([^:\s]+):(\d+)', e)) and _line_exists_at(repo, base_rev, m.group(1), int(m.group(2)))]
+            bok = [e for e in bev if _ref_ok(e, lambda m: _line_exists_at(repo, base_rev, m.group(1), int(m.group(2))))]
             obligations['baseline_ok'] = b.get('claim') in ('same', 'differs', 'new') and bool(bev) and len(bok) == len(bev)
             if not obligations['baseline_ok']:
                 reasons.append(f'develop 과의 관계를 주장했는데 baseline(기준 rev {base_rev[:9] or "?"} 의 file:line, claim same/differs/new) 이 없거나 해석 안 됨 {len(bok)}/{len(bev)} — 기준 소스의 같은 함수를 읽고 적어야 한다')
@@ -95,7 +100,7 @@ def adjudicate(repo: str, g: CodeGraph, changed: Dict[str, List[int]], findings:
         vdyn = (f.get('verification') or {}).get('method') == 'dynamic' and bool(((f.get('verification') or {}).get('result') or '').strip())
         if f.get('category') in ('버그 가능성', '확인 질문') and re.search(REACH_WORDS, text, re.I) and not vdyn:   # 재현(dynamic)이 있으면 도달은 증명된 것
             rt = f.get('reach_trace') or []
-            rok = [e for e in rt if (m := re.match(r'([^:\s]+):(\d+)', e)) and _line_exists(repo, m.group(1), int(m.group(2)))]
+            rok = [e for e in rt if _ref_ok(e, lambda m: _line_exists(repo, m.group(1), int(m.group(2))))]
             obligations['reach_ok'] = len(rok) >= 2 and len(rok) == len(rt)
             if not obligations['reach_ok']:
                 reasons.append(f'도달 가능성을 주장했는데 reach_trace(실패 조건의 생산자까지 file:line 2곳 이상) 가 없거나 해석 안 됨 {len(rok)}/{len(rt)} — 분기 하나만 보고 "사용자에게 보인다" 고 쓰지 않는다')
