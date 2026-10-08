@@ -151,6 +151,8 @@ class TreeSitterProvider:
                 d = d.child_by_field_name('declarator') if d.child_by_field_name('declarator') is not None else (d.children[0] if d.children else None)
             return text(d) if d is not None else None
 
+        scope, seen = [], set()   # enclosing struct/class names; fids already used in this file
+
         def walk(node, cur_fid):
             t = node.type
             if t == 'function_definition':
@@ -163,7 +165,12 @@ class TreeSitterProvider:
                     pl = fd.child_by_field_name('parameters'); params = text(pl) if pl is not None else ''
                 name = declarator_name(fd if fd is not None else decl) or '?'
                 is_static = any(text(c) == 'static' for c in node.children if c.type == 'storage_class_specifier')
+                if scope and '::' not in name:
+                    name = '::'.join(scope) + '::' + name   # in-class member: qualify like an out-of-class definition
                 fid = f'{rel}:{name}'
+                if fid in seen:
+                    fid += f'@{node.start_point[0] + 1}'   # overload (operator(), ctor...): keep every definition
+                seen.add(fid)
                 funcs.append(FunctionNode(fid, name, rel, node.start_point[0] + 1, node.end_point[0] + 1, params, is_static))
                 cur_fid = fid
             elif t == 'call_expression' and cur_fid is not None:
@@ -193,8 +200,13 @@ class TreeSitterProvider:
                 nm = node.child_by_field_name('name')
                 if nm is not None:
                     structs.append({'name': text(nm), 'file': rel, 'start_line': node.start_point[0] + 1, 'end_line': node.end_point[0] + 1})
+            pushed = False
+            if t in ('struct_specifier', 'class_specifier') and node.child_by_field_name('body') is not None and node.child_by_field_name('name') is not None:
+                scope.append(text(node.child_by_field_name('name'))); pushed = True
             for c in node.children:
                 walk(c, cur_fid)
+            if pushed:
+                scope.pop()
         walk(tree.root_node, None)
         return funcs, calls, facts, structs, sorted(set(types))
 
@@ -217,7 +229,7 @@ class CtagsProvider:
         return funcs, [], [], [], []
 
 class CodeGraph:
-    SCHEMA_VERSION = '2'
+    SCHEMA_VERSION = '3'
     def __init__(self, db_path: str, repo_root: str = ''):
         self.repo_root = repo_root
         self.db = sqlite3.connect(db_path)
