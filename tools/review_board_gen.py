@@ -173,6 +173,26 @@ def main():
 def esc(s):
     return html.escape(str(s))
 
+def render_headless(limit=20):
+    """헤드리스 리뷰(tools/headless_review.sh) 실행 기록·비용 — <out>/headless/cost.jsonl 을 읽는다 (FinOps, 2026-10-13).
+       내 전용 열(col-mine)처럼 토글 뒤에 숨긴다 — 팀원에겐 소음이다."""
+    f = os.path.join(OUT, 'headless', 'cost.jsonl')
+    if not os.path.exists(f):
+        return ''
+    rows = [json.loads(l) for l in open(f, encoding='utf-8') if l.strip()]
+    if not rows:
+        return ''
+    tot = sum(r.get('cost_usd') or 0 for r in rows)
+    h = ['<section class="col-mine" style="display:none"><h2>헤드리스 리뷰 실행 <span class="meta">%d회 · 누적 $%.2f · tools/headless_review.sh</span></h2>' % (len(rows), tot)]
+    h.append('<table><tr><th>시각</th><th>PR</th><th>결과</th><th>비용</th><th>턴</th><th>시간</th><th>모델별 토큰(in/out/cache-read)</th><th>마지막 메시지</th></tr>')
+    for r in reversed(rows[-limit:]):
+        st = '<span class="bad">실패 rc=%s</span>' % r.get('rc') if r.get('error') or r.get('rc') else '<span class="ok">완료</span>'
+        models = '<br>'.join('<span class="muted">%s</span> %s/%s/%s' % (esc(m.replace('claude-', '')), u.get('inputTokens', '-'), u.get('outputTokens', '-'), u.get('cacheReadInputTokens', '-')) for m, u in (r.get('models') or {}).items())
+        h.append('<tr><td class="n">%s</td><td class="n"><a href="https://github.com/CUBRID/cubrid/pull/%d">#%d</a> <a class="muted" href="headless/%s" style="font-size:11px">json</a></td><td>%s</td><td class="n">$%.3f</td><td class="n">%s</td><td class="n">%ss</td><td style="font-size:12px">%s</td><td class="muted" style="font-size:11px">%s</td></tr>' % (
+            esc(r.get('ts', '')), r['pr'], r['pr'], esc(r.get('json', '')), st, r.get('cost_usd') or 0, r.get('turns'), r.get('duration_s'), models, esc((r.get('result_tail') or '')[-160:])))
+    h.append('</table></section>')
+    return '\n'.join(h)
+
 TOOLBAR_JS = """<script>
 (function () {
   var body = document.body;
@@ -258,7 +278,7 @@ def render(rows, now, orphans=()):
     a{color:inherit} .docs a{display:block;font-size:12px;font-family:"IBM Plex Mono",monospace;color:var(--gate)} .muted{color:var(--muted)}
     /* 에이전트 리뷰 열은 켜지 않는 한 보이지 않는다 (사용자 지시 2026-10-06: 헷갈린다) */
     /* 내 전용 열(에이전트 리뷰 · 리뷰 문서)은 켜지 않는 한 보이지 않는다 */
-    .col-mine{display:none} body.show-mine .col-mine{display:table-cell}
+    .col-mine{display:none} body.show-mine .col-mine{display:table-cell} body.show-mine section.col-mine{display:block!important}
     /* resolve 안 한 코멘트가 남은 PR 은 행을 붉게 (사용자 지시 2026-10-07) */
     tr.unres td:first-child{box-shadow:inset 3px 0 0 var(--bad)}
     tr.unres td{background:color-mix(in srgb, var(--bad) 6%, transparent)}
@@ -358,6 +378,7 @@ def render(rows, now, orphans=()):
                 ('unres' if t['unresolved'] else ('ready' if ready else '')), '1' if t['unresolved'] else '0', '1' if ready else '0', esc(','.join(revs)), esc(','.join(pend_revs)), esc(','.join(owns)), esc(','.join(apprs)),
                 esc(t['url']), esc(t['repo'].split('/')[1]), t['number'], esc(t['title']), esc(', '.join(owns)), t['unresolved'], t['threads_total'], rev or '-'))
         h.append('</table></section>')
+    h.append(render_headless())
     h.append(TOOLBAR_JS)
     h.append('<p class="meta" style="margin-top:26px">생성기 dev4-review-workspace/tools/review_board_gen.py · 갱신 규약 skills/review-board/SKILL.md · 추적 ID 는 tools/roster.json</p></div></body></html>')
     return '\n'.join(h)

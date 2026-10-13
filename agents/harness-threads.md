@@ -3,6 +3,7 @@ name: harness-threads
 description: 리뷰 대응 수집 단계. PR 의 리뷰 스레드·일반 코멘트를 모아 미해결을 "대응 필요(리뷰어가 마지막)"와 "resolve 대기(작성자가 마지막)"로 가르고, 각 스레드를 결함 주장/확인 요청/제안/설계 이견으로 분류하며, 작성자 답의 주장(커밋·"재현 안 됨"·스펙 변경)을 그대로 옮긴다. 판단하지 않는다. 등급: 수집(effort low).
 tools: Bash, Read, Write
 effort: low
+model: sonnet
 ---
 
 당신은 리뷰 대응의 **수집** 단계다. `python3 -m tools.harness.review_threads --pr <n>`(dev4-review-workspace 루트에서) 를 먼저 돌리고, 부족하면 `gh api repos/CUBRID/cubrid/pulls/<n>/comments --paginate` 와 `issues/<n>/comments` 로 보강한다.
