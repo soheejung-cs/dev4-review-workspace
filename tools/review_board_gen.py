@@ -13,9 +13,6 @@ TRACKED = ROSTER.get('tracked_github', [])
 AGENT = set(ROSTER.get('agent_github', []))
 AGENT_MARK = re.compile(ROSTER.get('agent_marker') or r'Claude-Session:')
 REPOS = ROSTER.get('repos', ['CUBRID/cubrid'])
-# 이 컨테이너의 "나" = roster.members 에 등록한 github 로그인. 연동 대상 없는 TC PR 은 전원이 아니라 내가 assignee 인 것만 보인다
-# (사용자 지시 2026-10-13). members 가 비어 있으면 종전처럼 tracked 전체.
-ME = {m['github'] for m in ROSTER.get('members', []) if m.get('github')} or set(TRACKED)
 OUT = sys.argv[1] if len(sys.argv) > 1 else os.path.expanduser('~/dev/utils/review-board/site')
 # 산출물 디렉터리는 사람마다 다르다 — 이 리포는 팀이 공유하므로 개인 경로를 하드코딩하지 않는다.
 # DEV4_RECORDS_ROOT > roster.json 의 records_root > 기본값(이 리포를 만든 사람의 배치) 순.
@@ -164,7 +161,7 @@ def main():
             home['linked_tc'].append(t); t['linked'] = True
         else:
             t['linked'] = False
-    orphans = [t for t in tcs if not t.get('linked') and ME & set(t['assignees'])]   # 내가 assignee 인 것만 (2026-10-13)
+    orphans = [t for t in tcs if not t.get('linked')]
     rows.sort(key=lambda r: (r['tracked'][0], -r['unresolved'], r['updated']))
     now = datetime.datetime.now().strftime('%Y-%m-%d %H:%M KST')
     os.makedirs(OUT, exist_ok=True)
@@ -343,11 +340,23 @@ def render(rows, now, orphans=()):
                 esc(r['url']), esc(r['repo'].split('/')[1]), r['number'], '<div class="muted" style="font-size:11px">%s</div>' % esc(r['tracked'][0]) if len(rs) and who != r['tracked'][0] else '',
                 esc(r['title']), esc(r['jira'] or '-'), esc(r['author']), (' · assignees +' + ','.join(others)) if others else '',
                 unres, rev, ag, esc(r['updated']), esc(r['created']), tcl, docs))
-        h.append('</table>')
+        h.append('</table></section>')
     if orphans:
-        h.append('<h2>연동 대상 없는 TC PR <span class="meta">%d · assignee ∈ {%s}</span></h2><table><tr><th>PR</th><th>제목</th><th>미해결</th><th>리뷰 미착수</th></tr>' % (len(orphans), esc(', '.join(sorted(ME)))))
+        # 본문 PR 행과 같은 data-own/data-rev 속성을 붙여 툴바의 사람 필터가 여기에도 걸리게 한다 — 사람을 클릭하면
+        # 그 사람이 담당자(assignee)이거나 리뷰어인 TC PR 만 남고, 0건이면 절이 접힌다 (사용자 지시 2026-10-13).
+        h.append('<section class="who"><h2>연동 대상 없는 TC PR <span class="meta">%d</span></h2><table><tr><th>PR</th><th>제목</th><th>담당자</th><th>미해결</th><th>리뷰어</th></tr>' % len(orphans))
         for t in orphans:
-            h.append('<tr><td class="n"><a href="%s">%s#%d</a></td><td>%s</td><td class="n">%d/%d</td><td>%s</td></tr>' % (esc(t['url']), esc(t['repo'].split('/')[1]), t['number'], esc(t['title']), t['unresolved'], t['threads_total'], esc(','.join(t['requested'])) or '-'))
+            revs = sorted(set(t.get('requested', []) + t.get('pending_approval', []) + t.get('approvers', [])))
+            pend_revs = sorted(set(t.get('requested', []) + t.get('pending_approval', [])))
+            owns = sorted(set(t.get('assignees', []) + t.get('tracked', [])))
+            apprs = sorted(set(t.get('approvers', [])))
+            ready = (not t['unresolved']) and bool(apprs)
+            rev = ''.join('<span class="pill req">%s 미착수</span>' % esc(a) for a in t['requested'])
+            rev += ''.join('<span class="pill pend">%s 승인 전</span>' % esc(a) for a in t.get('pending_approval', []))
+            rev += ''.join('<span class="pill APPROVED">%s ✓</span>' % esc(a) for a in apprs)
+            h.append('<tr class="%s" data-unres="%s" data-ready="%s" data-rev="%s" data-pend="%s" data-own="%s" data-appr="%s"><td class="n"><a href="%s">%s#%d</a></td><td>%s</td><td>%s</td><td class="n">%d/%d</td><td>%s</td></tr>' % (
+                ('unres' if t['unresolved'] else ('ready' if ready else '')), '1' if t['unresolved'] else '0', '1' if ready else '0', esc(','.join(revs)), esc(','.join(pend_revs)), esc(','.join(owns)), esc(','.join(apprs)),
+                esc(t['url']), esc(t['repo'].split('/')[1]), t['number'], esc(t['title']), esc(', '.join(owns)), t['unresolved'], t['threads_total'], rev or '-'))
         h.append('</table></section>')
     h.append(TOOLBAR_JS)
     h.append('<p class="meta" style="margin-top:26px">생성기 dev4-review-workspace/tools/review_board_gen.py · 갱신 규약 skills/review-board/SKILL.md · 추적 ID 는 tools/roster.json</p></div></body></html>')
