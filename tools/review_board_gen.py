@@ -13,6 +13,9 @@ TRACKED = ROSTER.get('tracked_github', [])
 AGENT = set(ROSTER.get('agent_github', []))
 AGENT_MARK = re.compile(ROSTER.get('agent_marker') or r'Claude-Session:')
 REPOS = ROSTER.get('repos', ['CUBRID/cubrid'])
+# 이 컨테이너의 "나" = roster.members 에 등록한 github 로그인. 연동 대상 없는 TC PR 은 전원이 아니라 내가 assignee 인 것만 보인다
+# (사용자 지시 2026-10-13). members 가 비어 있으면 종전처럼 tracked 전체.
+ME = {m['github'] for m in ROSTER.get('members', []) if m.get('github')} or set(TRACKED)
 OUT = sys.argv[1] if len(sys.argv) > 1 else os.path.expanduser('~/dev/utils/review-board/site')
 # 산출물 디렉터리는 사람마다 다르다 — 이 리포는 팀이 공유하므로 개인 경로를 하드코딩하지 않는다.
 # DEV4_RECORDS_ROOT > roster.json 의 records_root > 기본값(이 리포를 만든 사람의 배치) 순.
@@ -161,7 +164,7 @@ def main():
             home['linked_tc'].append(t); t['linked'] = True
         else:
             t['linked'] = False
-    orphans = [t for t in tcs if not t.get('linked')]
+    orphans = [t for t in tcs if not t.get('linked') and ME & set(t['assignees'])]   # 내가 assignee 인 것만 (2026-10-13)
     rows.sort(key=lambda r: (r['tracked'][0], -r['unresolved'], r['updated']))
     now = datetime.datetime.now().strftime('%Y-%m-%d %H:%M KST')
     os.makedirs(OUT, exist_ok=True)
@@ -342,7 +345,7 @@ def render(rows, now, orphans=()):
                 unres, rev, ag, esc(r['updated']), esc(r['created']), tcl, docs))
         h.append('</table>')
     if orphans:
-        h.append('<h2>연동 대상 없는 TC PR <span class="meta">%d</span></h2><table><tr><th>PR</th><th>제목</th><th>미해결</th><th>리뷰 미착수</th></tr>' % len(orphans))
+        h.append('<h2>연동 대상 없는 TC PR <span class="meta">%d · assignee ∈ {%s}</span></h2><table><tr><th>PR</th><th>제목</th><th>미해결</th><th>리뷰 미착수</th></tr>' % (len(orphans), esc(', '.join(sorted(ME)))))
         for t in orphans:
             h.append('<tr><td class="n"><a href="%s">%s#%d</a></td><td>%s</td><td class="n">%d/%d</td><td>%s</td></tr>' % (esc(t['url']), esc(t['repo'].split('/')[1]), t['number'], esc(t['title']), t['unresolved'], t['threads_total'], esc(','.join(t['requested'])) or '-'))
         h.append('</table></section>')
