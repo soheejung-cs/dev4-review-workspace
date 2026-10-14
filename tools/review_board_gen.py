@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""review-to-do 보드 생성기 — roster.json 의 tracked_github 가 assignee 인 open·non-draft PR 을 추적한다.
+"""review-to-do 보드 생성기 — roster.json 의 tracked_github 가 assignee 인(없으면 작성자인) open·non-draft PR 을 추적한다.
    출력: <out_dir>/index.html (자립 HTML, charset utf-8) + <out_dir>/board.json
    사용: review_board_gen.py [out_dir]   (기본 ~/dev/utils/review-board/site)
    의존: gh CLI(인증됨). 이 컨테이너의 리뷰 문서(claude-workspace/projects/CBRD-*, dev4-review-workspace/examples|reviews)를 링크한다.
@@ -37,9 +37,14 @@ def list_prs(repo):
             continue
         ass = [a['login'] for a in p.get('assignees', [])]
         hit = [a for a in ass if a in TRACKED]
+        via = 'assignee'
+        # assignee 에 추적 ID 가 없으면 작성자(author)로도 잡는다 — assignee 를 비워 둔 PR 이 보드에서 빠지던 것(사용자 지시 2026-10-14).
+        # open·non-draft 조건은 같다. 행에는 '작성자 기준' 을 표시한다.
+        if not hit and (p.get('author') or {}).get('login') in TRACKED:
+            hit = [p['author']['login']]; via = 'author'
         if not hit:
             continue
-        p['repo'] = repo; p['tracked'] = hit; p['assignee_logins'] = ass
+        p['repo'] = repo; p['tracked'] = hit; p['assignee_logins'] = ass; p['tracked_via'] = via
         out.append(p)
     return out
 
@@ -145,7 +150,7 @@ def main():
         d = details(p['repo'], p['number'])
         key = jira_key(p['title'])
         rec = {'repo': p['repo'], 'number': p['number'], 'title': p['title'], 'url': p['url'], 'author': p['author']['login'],
-               'assignees': p['assignee_logins'], 'tracked': p['tracked'], 'created': p['createdAt'][:10], 'updated': p['updatedAt'][:10],
+               'assignees': p['assignee_logins'], 'tracked': p['tracked'], 'tracked_via': p.get('tracked_via', 'assignee'), 'created': p['createdAt'][:10], 'updated': p['updatedAt'][:10],
                'jira': key, 'docs': local_docs(key, p['number']), 'linked_tc': [], **d}
         rec['agent_n'], rec['agent_last'], rec['agent_kinds'] = agent_reviewed(p['repo'], p['number'])
         if p['repo'] == 'CUBRID/cubrid':
@@ -293,7 +298,7 @@ def render(rows, now, orphans=()):
     .hidden{display:none}
     """
     h = ['<!doctype html><html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>review-to-do</title><style>%s</style></head><body><div class="wrap">' % css]
-    h.append('<h1>review-to-do</h1><div class="meta">스냅샷 %s · assignee ∈ {%s} · open · non-draft · 미해결 스레드는 리뷰 코멘트 기준 · CI 는 보지 않음(사용자 지시) · TC PR 은 JIRA 키/cubrid#n 으로 엔진 PR 하위에 연동</div>' % (now, ', '.join(TRACKED)))
+    h.append('<h1>review-to-do</h1><div class="meta">스냅샷 %s · assignee(없으면 작성자) ∈ {%s} · open · non-draft · 미해결 스레드는 리뷰 코멘트 기준 · CI 는 보지 않음(사용자 지시) · TC PR 은 JIRA 키/cubrid#n 으로 엔진 PR 하위에 연동</div>' % (now, ', '.join(TRACKED)))
     # 머리 통계는 '미완료 PR 건수' 하나만 (사용자 지시 2026-10-06)
     # 미완료 = 머지 가능이 아닌 것 = 미해결 스레드가 남았거나 승인자가 0
     tot_open = sum(1 for r in rows if r['unresolved'] or not r.get('approvers'))
@@ -336,7 +341,7 @@ def render(rows, now, orphans=()):
         rs = by.get(who, [])
         h.append('<section class="who"><h2>@%s <span class="meta">%d PR</span></h2>' % (esc(who), len(rs)))
         if not rs:
-            h.append('<div class="muted">추적 대상 없음 (open·non-draft·assignee 기준)</div></section>'); continue
+            h.append('<div class="muted">추적 대상 없음 (open·non-draft·assignee 또는 작성자 기준)</div></section>'); continue
         h.append('<table><tr><th>PR</th><th>제목 / JIRA</th><th>미해결</th><th>리뷰어</th><th class="col-mine">에이전트 리뷰</th><th>갱신</th><th>연동된 테스트케이스</th><th class="col-mine">리뷰 문서(내부망)</th></tr>')
         for r in rs:
             unres = ('<span class="%s">%d</span> / %d' % ('bad' if r['unresolved'] else 'ok', r['unresolved'], r['threads_total']))
@@ -358,7 +363,7 @@ def render(rows, now, orphans=()):
             h.append('<tr class="%s" data-unres="%s" data-ready="%s" data-rev="%s" data-pend="%s" data-own="%s" data-appr="%s"><td class="n"><a href="%s">%s#%d</a>%s</td><td>%s<div class="meta">%s · by %s%s</div></td><td class="n">%s</td><td>%s</td><td class="n col-mine">%s</td><td class="n">%s<div class="muted" style="font-size:11px">생성 %s</div></td><td class="docs" style="font-size:12px">%s</td><td class="docs col-mine">%s</td></tr>' % (
                 ('unres' if r['unresolved'] else ('ready' if ready else '')), '1' if r['unresolved'] else '0', '1' if ready else '0', esc(','.join(revs)), esc(','.join(pend_revs)), esc(','.join(owns)), esc(','.join(apprs)),
                 esc(r['url']), esc(r['repo'].split('/')[1]), r['number'], '<div class="muted" style="font-size:11px">%s</div>' % esc(r['tracked'][0]) if len(rs) and who != r['tracked'][0] else '',
-                esc(r['title']), esc(r['jira'] or '-'), esc(r['author']), (' · assignees +' + ','.join(others)) if others else '',
+                esc(r['title']), esc(r['jira'] or '-'), esc(r['author']), ((' · assignees +' + ','.join(others)) if others else '') + (' · <span class="warn">작성자 기준(assignee 없음)</span>' if r.get('tracked_via') == 'author' else ''),
                 unres, rev, ag, esc(r['updated']), esc(r['created']), tcl, docs))
         h.append('</table></section>')
     if orphans:

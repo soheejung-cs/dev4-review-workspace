@@ -1,12 +1,12 @@
 ---
 name: review-board
-description: 리뷰 보드 갱신 — review-to-do 웹 보드(http://192.168.6.51:8827/)를 다시 생성·호스팅한다. 추적 GitHub ID 가 assignee 인 open·non-draft PR 의 미해결 스레드 수, 리뷰어 응답 상태, CI, 이 컨테이너의 리뷰 문서 링크를 보여준다. "리뷰 보드 갱신", "리뷰 현황 보여줘", 추적 ID 추가 요청 때.
+description: 리뷰 보드 갱신 — review-to-do 웹 보드(http://192.168.6.51:8827/)를 다시 생성·호스팅한다. 추적 GitHub ID 가 assignee(없으면 작성자)인 open·non-draft PR 의 미해결 스레드 수, 리뷰어 응답 상태, CI, 이 컨테이너의 리뷰 문서 링크를 보여준다. "리뷰 보드 갱신", "리뷰 현황 보여줘", 추적 ID 추가 요청 때.
 ---
 
 # 리뷰 보드 갱신 (review-board)
 
 ## 무엇을 보여주나
-`tools/roster.json` 의 **`tracked_github`** 에 든 로그인이 **assignee** 인 PR 중 **open 이고 draft 가 아닌 것**만
+`tools/roster.json` 의 **`tracked_github`** 에 든 로그인이 **assignee** 인(assignee 에 추적 ID 가 없으면 **작성자**인) PR 중 **open 이고 draft 가 아닌 것**만
 (사용자 지시 2026-09-16: 머지된 것·draft 는 추적 안 함, 기준은 JIRA 가 아니라 GitHub). PR 마다:
 - 미해결 리뷰 스레드 수 / 전체 스레드 수, 미해결 스레드를 남긴 사람별 개수
 - 리뷰어: 최신 리뷰 상태(✓ APPROVED · ✗ CHANGES_REQUESTED · … COMMENTED), reviewDecision, 그리고 **두 갈래의 남은 일**:
@@ -52,7 +52,7 @@ python3 ~/dev/docs/dev4-review-workspace/tools/review_board_gen.py [out_dir]   #
 - 리뷰 문서가 "없음"인 PR 을 리뷰하게 되면 먼저 `record` 스킬대로 `projects/<JIRA키>/` 를 만든다.
 
 ## 한계
-- assignee 가 비어 있는 PR 은 잡히지 않는다(작성자만으로는 추적하지 않음 — 사용자 지시).
+- assignee 에 추적 ID 가 없으면 **작성자**로 잡는다(사용자 지시 2026-10-14 — 그 전엔 작성자만으로는 추적하지 않아 assignee 를 비운 PR 이 빠졌다). 그런 행은 제목 아래에 `작성자 기준(assignee 없음)` 으로 표시되고 `board.json` 의 `tracked_via` 가 `author` 다.
 - 리뷰 문서는 `http://192.168.6.51:8827/docs/<리포>/…` 로 열린다(`site/docs → ~/dev/docs` 심링크, `.md`/`.sh` 는 text/plain 으로 바로 표시). 내부망 어디서든 접근 가능.
 
 ## 제거된 것
