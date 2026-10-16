@@ -1,9 +1,10 @@
 /*
  * CBRD-27659 (prototype) -- a Bloom filter of the first-materialized hash join input's keys, checked before the second
  * input writes a row to its list (src/query/query_hash_join.c hjoin_bloom_*, server mode). New code: the base has no
- * hjoin_bloom_*, so the suite runs on head only (requires: hjoin_bloom_attach). Written for 5a8c0b7d8 (branch
- * CBRD-27659), moved to the v2 layout (branch CBRD-27659-v2, e55956083 + fdc3fcd32): the trace counters live in
- * HASHJOIN_PROC_NODE.bloom_stats (HASHJOIN_BLOOM_STATS used / keys / tested / skipped), not in the stats_group.
+ * hjoin_bloom_*, so the suite runs on head only (requires: hjoin_bloom_attach). Written for v1 5a8c0b7d8 (now branch
+ * CBRD-27659-v1), moved to the v2 layout (e55956083 + fdc3fcd32, now branch CBRD-27659, first named CBRD-27659-v2):
+ * the trace counters live in HASHJOIN_PROC_NODE.bloom_stats (HASHJOIN_BLOOM_STATS used / keys / tested / skipped), not
+ * in the stats_group.
  *
  *   B1  no false negative: 100,000 random INT first-input keys; each of them as a second-input row is kept
  *       (+ a two-column key INT x VARCHAR)
