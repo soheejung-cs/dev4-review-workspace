@@ -5,7 +5,7 @@
 """
 import hashlib, json, os, re, subprocess, sys, time
 import yaml
-from . import codegraph as CG, context_pack as CP, arch_infer as AI, adjudicate as AD, perf_claims as PC, episodic as EP, or_buf as OB, pr_refs as PR
+from . import codegraph as CG, context_pack as CP, arch_infer as AI, adjudicate as AD, perf_claims as PC, episodic as EP, or_buf as OB, pr_refs as PR, unit_regress as UR
 from .run_support import Worktree, sh
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -71,6 +71,14 @@ def n_or_buf(c, a):
     c['log'](f'or-buf: {len(auto)} auto findings · 판정 불가로 건너뛴 체인 {skipped}개')
     c['or_buf_skipped'] = skipped
     return auto
+def n_unit_regress(c, a):
+    """unit/ 에 쌓인 리뷰용 단위 suite 중 이 PR 이 건드린 파일에 걸린 것을 head/base 에 다시 돌린다(unit_regress.py).
+    base = merge-base(head, upstream/develop) 또는 --base. 실패해도 리뷰를 막지 않는다. HARNESS_NO_UNIT=1 이면 건너뛴다."""
+    if os.environ.get('HARNESS_NO_UNIT') == '1':
+        c['log']('unit_regress: skipped (HARNESS_NO_UNIT=1)'); return []
+    base = c.get('local_base') or 'upstream/develop'
+    mb = sh('git', '-C', c['repo'], 'merge-base', c['sha'], base).stdout.strip()
+    return UR.run(c['out'], c['sha'], mb, list(c.need('changed')), log=c['log'], repo=c['repo'])
 def n_validate(c, a):
     findings = json.load(open(c['findings_path'], encoding='utf-8'))
     if os.path.isfile(os.path.join(c['out'], 'findings.auto.json')) and a.get('merge_auto', True): findings += json.load(open(os.path.join(c['out'], 'findings.auto.json')))
@@ -175,6 +183,8 @@ def n_review_request(c, a):
     arch_p = os.path.join(c['out'], 'arch.json'); arch = json.load(open(arch_p, encoding='utf-8')) if os.path.isfile(arch_p) else None
     auto_p = os.path.join(c['out'], 'findings.auto.json'); auto = json.load(open(auto_p, encoding='utf-8')) if os.path.isfile(auto_p) else []
     schema = open(os.path.join(ROOT, 'harness', 'schemas', 'finding.json'), encoding='utf-8').read()
+    _ur = os.path.join(c['out'], 'unit_regress.md')
+    _unit_md = open(_ur, encoding='utf-8').read() if os.path.isfile(_ur) else ''
     head = f"""# review_request — PR #{c['pr']} {c['meta']['title']} ({c['meta']['headRefOid'][:9]}, {c['meta']['jira']})
 
 ## 지시 (리뷰용 + 설계용을 한 번에)
@@ -201,6 +211,7 @@ def n_review_request(c, a):
 ## 본문 참조 확인 (pr_refs)
 {chr(10).join('- ⚠ ' + w for w in (c.get('pr_refs') or {}).get('warnings', [])) or '- 참조 PR·커밋 해시 모두 정상 (또는 미실행)'}
 
+{_unit_md}
 ## 아키텍처 유추 (arch.json 요약)
 """ + (('- touched layers: ' + ', '.join(arch['architecture']['touched_layers']) + '\n- edges: ' + '; '.join(f"{e['source']}->{e['target']}({e['calls']})" for e in arch['architecture']['connections'][:30]) + '\n- risks: ' + ('\n  - '.join(f"[{r['severity']}] {r['kind']} {r['component']}: {r['issue']}" for r in arch['risks']) or 'none')) if arch else '- (design infer 미실행)') + f"""
 
@@ -292,11 +303,14 @@ def n_report(c, a):
     if os.path.isfile(pr_p):
         rr = json.load(open(pr_p, encoding='utf-8'))
         md += ['', '## 본문 참조 확인 (pr_refs)', ''] + ([f'- ⚠ {w}' for w in rr['warnings']] or ['- 참조 PR·커밋 해시 모두 정상']) + [f"- 참조 PR: " + ', '.join(f'{a} {b}' for a, b, _ in rr['prs'])] if rr['prs'] else []
+    ur_p = os.path.join(c['out'], 'unit_regress.md')
+    if os.path.isfile(ur_p):
+        md += [''] + open(ur_p, encoding='utf-8').read().rstrip().split('\n')
     md += ['', '## 돌릴 것 (제안 — 요청자 확인 후)', '', f"- 변경 계층 {json.load(open(arch_p))['architecture']['touched_layers'] if os.path.isfile(arch_p) else '?'} → review-testing 매트릭스로 CTP/동시성/JOB/TPC-H 제안", '', f"_manifest: harness {sh('git','-C',ROOT,'rev-parse','--short','HEAD').stdout.strip()}, model {os.environ.get('HARNESS_MODEL','unset')}_"]
     open(os.path.join(c['out'], 'report.md'), 'w', encoding='utf-8').write('\n'.join(md)); c['log']('report: report.md'); return md
 
 REGISTRY = {'review_request': n_review_request, 'report': n_report, 'worktree': n_worktree, 'diff_map': n_diff_map, 'codegraph': n_codegraph, 'pack': n_pack, 'arch': n_arch, 'perf_claims': n_perf_claims, 'or_buf': n_or_buf,
-            'validate': n_validate, 'gate': n_gate, 'self_check': n_self_check, 'episodic': n_episodic, 'pr_refs': n_pr_refs}
+            'validate': n_validate, 'gate': n_gate, 'self_check': n_self_check, 'episodic': n_episodic, 'pr_refs': n_pr_refs, 'unit_regress': n_unit_regress}
 
 def load(path):
     y = yaml.safe_load(open(path, encoding='utf-8'))

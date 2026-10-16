@@ -241,13 +241,25 @@ def build_and_run(a, rev, db, srcroot):
             fails = [(e.get('filename', '').split('/')[-1] + ':' + e.get('line', ''),
                       (e.findtext('Original') or '').strip(), (e.findtext('Expanded') or '').strip())
                      for e in tc.iter('Expression') if e.get('success') == 'false']
-            cases.append({'name': tc.get('name'), 'ok': ok is not None and ok.get('success') == 'true', 'failures': fails})
+            cases.append({'name': tc.get('name'), 'tags': tc.get('tags', ''), 'ok': ok is not None and ok.get('success') == 'true', 'failures': fails})
     except Exception as e:
         cases.append({'name': '(xml unreadable — crashed?)', 'ok': False, 'failures': [[str(e), r.stderr[-500:], '']]})
     res = {'rev': sha, 'status': 'ran', 'rc': r.returncode, 'cases': cases,
            'stub_calls': sorted(set(re.findall(r'unitseam: stub called: (\S+)', r.stderr))), 'out': out}
     json.dump(res, open(os.path.join(out, 'result.json'), 'w'), ensure_ascii=False, indent=1)
     return res
+
+
+def run_suite(suite_dir, revs, out, repo=DEF_REPO, build=DEF_BUILD, timeout=300):
+    """unit/<module>/<suite>/suite.json 하나를 revs 에 돌린다(unit_regress 가 부른다)."""
+    s = json.load(open(os.path.join(suite_dir, 'suite.json'), encoding='utf-8'))
+    a = argparse.Namespace(repo=repo, build_tree=build, file=s['file'], mode=s['mode'],
+                           seam=','.join(s.get('seams', [])),
+                           appendix=os.path.join(suite_dir, s['appendix']) if s.get('appendix') else '',
+                           test=os.path.join(suite_dir, s.get('test', 'test.cpp')), out=out, timeout=timeout, catch_args=[])
+    os.makedirs(out, exist_ok=True)
+    db = compdb(build)
+    return [build_and_run(a, rev, db, source_root(build)) for rev in revs]
 
 
 def main():

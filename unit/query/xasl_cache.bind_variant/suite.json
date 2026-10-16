@@ -1,0 +1,11 @@
+{
+ "name": "xcache_bind_variant — 바인드 값 플랜 변형 디렉터리(CHECK/REGISTER) 상태기계",
+ "file": "src/query/xasl_cache.c",
+ "mode": "server",
+ "seams": ["xcache_find_sha1", "xcache_unfix"],
+ "appendix": "hooks.cpp",
+ "test": "test.cpp",
+ "watch": ["src/query/bind_variant.h", "src/query/xasl_cache.h"],
+ "fakes": "xcache_find_sha1 은 테스트가 만든 엔트리 하나를 돌려준다(SHA1 무시, 실제는 lock-free 해시맵 조회+fix). xcache_unfix 는 no-op. 디렉터리·pending·state 판정은 진짜 코드가 cache_clones_mutex 안에서 돈다.",
+ "origin": {"pr": 8013, "finding": "F1", "comment": "https://github.com/CUBRID/cubrid/pull/8013#discussion_r4290921329", "date": "2026-10-16"}
+}

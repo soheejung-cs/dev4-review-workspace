@@ -26,6 +26,8 @@ tools: Read, Grep, Glob, Bash, Write
    base 에 그 파일·함수가 없으면 `no-file`/`compile-error` 가 난다 — "신설 코드라 base 비교 없음" 으로 적는다.
 5. **판정**: head 에서 재현되고 base 에서 안 되면 이 PR 이 만든 결함, 둘 다 재현되면 선재(develop 동일 — 별도 이슈 후보), head 에서 안 되면 지적을 약화·철회한다.
 
+6. **라이브러리로 옮긴다**(사용자 결정 2026-10-16 (b)) — `unit/<module>/<suite>/` 에 `suite.json`·`test.cpp`·`hooks.cpp` 를 둔다(`unit/README.md` 규칙). 케이스 태그: 대조군 `[contract]`, 결함 재현 `[defect]`(이름에 `PR<n> F<id>:`). `suite.json` 의 `fakes` 에 가짜가 흉내 낸 실제 분기, `origin` 에 PR·finding·코멘트 링크, `watch` 에 같이 볼 헤더. 옮긴 뒤 `python3.11 -m tools.harness.unit_regress --head <head> --base <base> --files <file> --out <tmp>` 로 라이브러리 경로에서도 같은 결과가 나오는지 확인한다. `unit/README.md` 목록 표에 한 행 추가.
+
 ## 출력 — `OUT/unit/<finding>/result.md`
 표: 케이스 / head / base / 판정 + 테스트·hooks 경로 + 이음매 목록(가짜로 바꾼 것 — 이것이 재현의 전제다) + stub 호출 목록. finding 의 `verification` 에 넣을 한 문단(`method: dynamic`, `artifact: OUT/unit/<finding>/`)도 쓴다.
 

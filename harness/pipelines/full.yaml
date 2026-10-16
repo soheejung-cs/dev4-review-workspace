@@ -15,6 +15,7 @@ stages:
     perf_claims: { impl: perf_claims }                       # PR 본문 → MEAS 자동 finding
     pr_refs:     { impl: pr_refs }                           # 본문 참조 PR 상태·커밋 해시 존재 (결정론, gh)
     or_buf:      { impl: or_buf }                           # OR_ALIGNED_BUF 크기 vs 패킹 체인 (결정론)
+    unit_regress: { impl: unit_regress }                    # unit/ 의 리뷰용 단위 suite 중 이 PR 이 건드린 파일 것을 head/base 에 (unit_regress.py)
   infer:
     arch:        { impl: arch }                              # 계층 유추·리스크·다이어그램 (설계 층 입력)
   request:
