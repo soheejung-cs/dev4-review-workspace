@@ -1,0 +1,21 @@
+{
+ "name": "update_histogram_for_all_classes — top-level 클래스 히스토그램 패스의 제외 목록(OID 비교)·경고·요약 줄·LIST_MOPS 해제",
+ "file": "src/communication/network_interface_cl.c",
+ "mode": "sa",
+ "seams": [],
+ "test": "test.cpp",
+ "watch": [
+  "src/communication/network_interface_cl.h",
+  "src/transaction/locator_cl.h",
+  "src/query/execute_schema.h",
+  "src/object/class_object.h"
+ ],
+ "fakes": "update_histogram_for_all_classes() 와 static is_top_level_class 는 진짜 코드. locator_get_all_class_mops(locator_cl.c→locator_fun_get_all_mops): 표의 각 클래스 객체(SM_CLASS: class_type·partition 만 채운 0 저장소)를 필터 fun 에 넘겨 참인 것만 malloc 한 LIST_MOPS 에 담는다(실패 주입 시 NULL). locator_free_list_mops: 해제한 목록 포인터를 기록하고 free. sm_get_ch_name: 표의 이름. db_find_class: 이름→표의 같은 MOP(캐시된 클래스), 주입한 이름이면 NULL + ER_LC_UNKNOWN_CLASSNAME. update_or_drop_histogram_helper: 인자(bucket·fullscan·seed·target_columns·CREATE·quiet)와 그때의 Au_disable 을 기록, 주입한 클래스에서 주입 코드. db_get_attributes_force/db_attribute_next: 클래스마다 n 개짜리 불투명 사슬(열 수 세기에만 쓰인다). au_ctx: 0 으로 채운 authenticate_context 저장소. stdout/stderr 는 임시 파일로 받아 요약·경고 문장을 그대로 비교한다. 호출 형태(1·3 인자)는 리비전 헤더 선언의 인자 수로 고르고, skip 케이스([new])는 base 에서 FAIL('new code').",
+ "note": "LIST_MOPS 해제 3 케이스는 PR base 에서 FAIL 한다 — base 는 정상·오류 출구 모두 lmops 를 해제하지 않았다(선재 누수, 이 PR 이 고침). [defect] F1 은 잠재: 같은 클래스 MOP 가 skip_mops 에 두 번 오면 n_skip-n_excluded 가 경고를 과다 보고한다. 유일한 목록 호출자 optimizedb 가 util_sa.c:1674-1685 에서 OID 중복을 거르고 do_update_stats 는 NULL,0 을 넘기므로(execute_statement.c:4818) 지금은 도달하지 않는다. 함수 안에서 서로 다른 항목 수로 비교하는 수정(~/dev/utils/harness-out/unit-lib/communication__network_interface_cl.histogram_all_classes/fix_F1.diff)을 넣으면 [defect] 만 FAIL 하고 [contract] 는 유지된다.",
+ "origin": {
+  "pr": 8166,
+  "finding": "coverage + F1(latent, 이번 단위 검증에서 발견)",
+  "comment": "https://github.com/CUBRID/cubrid/pull/8166",
+  "date": "2026-10-16"
+ }
+}

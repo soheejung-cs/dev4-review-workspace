@@ -1,0 +1,25 @@
+{
+ "name": "optimizedb — -n / --no-histogram / --no-histogram-classes 옵션 처리(목록 파싱·조합 검사·통계 호출 인자·db_shutdown·names_buf/class_mops 해제)",
+ "file": "src/executables/util_sa.c",
+ "mode": "sa",
+ "seams": [],
+ "test": "test.cpp",
+ "watch": [
+  "src/executables/utility.h",
+  "src/executables/util_admin.c",
+  "src/executables/util_common.c",
+  "src/object/schema_manager.h",
+  "src/object/schema_manager.c",
+  "src/object/schema_system_catalog.cpp",
+  "src/query/execute_schema.h",
+  "src/compat/db_info.c"
+ ],
+ "fakes": "optimizedb() 는 진짜 코드(-n 경로의 static optimizedb_update_class_statistics 포함). 나머지는 다른 TU 라 전부 가짜. utility_get_option_string_value/bool_value/string_table_size·check_database_name(EXISTING)·utility_check_class_name(util_common.c): 본문 그대로 옮김(메시지 출력만 한 줄로). sm_qualifier_name·sm_remove_qualifier_name(schema_manager.c): 본문 그대로(NDEBUG 라 assert 제외). sm_check_system_class_by_name(schema_system_catalog.cpp): '_db' 로 시작하지 않으면 식별자 문자 검사 + 대소문자 무시 집합 조회 — 집합은 _db_class·db_class·_db_attribute·db_attribute·db_serial 로 축소. db_find_class(db_info.c→sm_find_class_with_purpose): sm_user_specified_name 규칙(점 있음→그대로, 223B 이상·시스템 클래스→bare, 그 밖→'dba.'+이름) 뒤 소문자로 카탈로그 표 조회, 없으면 ER_LC_UNKNOWN_CLASSNAME 후 동의어(dba.syn_t1→dba.t1) 조회. 공백은 다듬지 않는다(실제도 그렇다). db_is_class: 표의 class/view 구분(파티션 하위 클래스도 1). db_restart/db_login/db_shutdown/db_commit_transaction/er_init/db_set_client_type: 호출만 센다(DB 없음). au_ctx: 0 으로 채운 authenticate_context 저장소(Au_disable=disable_auth_check 를 읽고 쓴다), disable_passwords: no-op. sm_update_all_statistics(3·5 인자 둘 다 정의 — 리비전 헤더가 고른다)·sm_update_statistics·update_or_drop_histogram_helper: 인자를 기록하고 주입한 코드를 돌려준다(서버 왕복 없음). malloc/free 는 테스트 바이너리에서 가로채(__libc_malloc/__libc_free 로 전달) optimizedb() 호출 동안 만든 할당 중 남은 것을 누수로 센다. strdup 의 malloc 도 같은 심볼로 들어온다(glibc 2.28 확인). n 번째 할당 실패 주입 가능.",
+ "note": "PR 신설 옵션 케이스는 utility.h 에 OPTIMIZE_NO_HISTOGRAM_S 가 있을 때만 컴파일된다(PR base 에는 없음 → base 열 '-'). -n 'dba.a,b' 케이스는 리뷰 T0/T1(쉼표가 든 식별자) 수정이 되돌아가지 않게, 중복 항목 케이스는 T2 수정, 누수 케이스는 T3/자기 리뷰 누수 수정을 지킨다. 변이 확인(제출 시): dedup 제거·error_exit 의 class_mops free 제거·빈 항목 경로의 db_shutdown 제거·-n 쉼표 분할 — 각각 해당 케이스가 FAIL.",
+ "origin": {
+  "pr": 8166,
+  "finding": "coverage (리뷰대응-20261015 T0~T3 영역: 옵션 검사·중복 항목·누수)",
+  "comment": "https://github.com/CUBRID/cubrid/pull/8166",
+  "date": "2026-10-16"
+ }
+}
