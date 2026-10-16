@@ -4,7 +4,8 @@
  * hjoin_bloom_*, so the suite runs on head only (requires: hjoin_bloom_attach). Written for v1 5a8c0b7d8 (now branch
  * CBRD-27659-v1), moved to the v2 layout (e55956083 + fdc3fcd32, now branch CBRD-27659, first named CBRD-27659-v2):
  * the trace counters live in HASHJOIN_PROC_NODE.bloom_stats (HASHJOIN_BLOOM_STATS used / keys / tested / skipped), not
- * in the stats_group.
+ * in the stats_group. v3 (1a7bccdcc) adds B6-B8 for the parallel paths; they are registered only where that API links
+ * (weak references), so one suite runs on fdc3fcd32 (B1-B5, F1-F4) and on 1a7bccdcc and later (all).
  *
  *   B1  no false negative: 100,000 random INT first-input keys; each of them as a second-input row is kept
  *       (+ a two-column key INT x VARCHAR)
@@ -35,6 +36,18 @@
  *       shares hash bits with the first position h & mask
  *   F1, F3, F4 are fixed in fdc3fcd32 (suite.json defects_fixed_in): they reproduce on 5a8c0b7d8 and e55956083 and FAIL
  *   on a fixed head; a PASS there is a recurrence.
+ *   B6  (1a7bccdcc) hjoin_bloom_wants_serial: false with the parameter off; on the input the aptr list runs second it
+ *       decides as attach does (preserved side, second's shape) and does not read the first input; the aptr order
+ *       picks the second (reversing it changes the answer, other aptr nodes are passed over); an input missing from
+ *       the aptr list or XASL_LINK_TO_REGU_VARIABLE, not a hash join, NULL -> false
+ *   B7  (1a7bccdcc) hjoin_bloom_prepare: the owner thread builds once and gets the filter (the owner's later rows do not
+ *       build again - the first input is scanned once); another thread, a clone, no filter, NULL, a failed build -> NULL
+ *   B8  (1a7bccdcc) hjoin_bloom_worker_*: two workers share the filter's bits with a key and a row buffer each; a
+ *       worker decides as the owner does (INT + NULL rows, both entry paths, B2's coercion pairs with the second
+ *       coerced); worker_end adds the counts (owner's included) and frees the worker's own; a fetch failure (or a row
+ *       buffer that cannot grow) turns off that worker alone; a begin without memory returns NULL and leaks nothing;
+ *       NULL bloom / worker / tuple; two workers on two std::threads read the bits and end at the same time - the
+ *       counts are exact sums (200 rounds)
  *
  * Real code at the revision under test, linked as --extra TUs: query_hash_scan.c (keys, hash, key_eq), memory_hash.c
  * (mht_get_hash_number, the collations' hash), qfile_tuple_layout.c (layout, slot walker), and the type system
@@ -42,12 +55,14 @@
  * object_domain.c, object_domain_convert.cpp, numeric_opfunc.c, db_date.c, db_macro.c, string_opfunc.c). Tuples are
  * written by the real assembler (qfile_tuple_size_from_values / qfile_tuple_fill_from_values, the T_NORMAL path of
  * qfile_generate_tuple_into_list). Faked: the list file page iteration (qfile_open_list_scan / qfile_scan_list_next /
- * qfile_close_scan - list_file.c reads pages through the query manager's temp files), the error manager, the private
- * and area allocators, boot-time globals.
+ * qfile_close_scan - list_file.c reads pages through the query manager's temp files), the error manager (per thread),
+ * the private allocator (locked; a fault knob fails the n-th allocation as the real malloc branch does - B8) and the
+ * area allocator, boot-time globals.
  *
  * The suite names these TU-internal symbols (hooks.cpp): struct hjoin_bloom fields built, disabled, first_is_outer,
  * hj_xasl, owner_xasl, owner_thread, bits, row_buf, key, mask, keys, tested, skipped; static hjoin_bloom_build,
- * hjoin_bloom_ready, hjoin_bloom_skip_record, hjoin_bloom_may_contain, hjoin_init_domain_info, hjoin_init_manager.
+ * hjoin_bloom_ready, hjoin_bloom_skip_record, hjoin_bloom_may_contain, hjoin_init_domain_info, hjoin_init_manager;
+ * (1a7bccdcc) struct hjoin_bloom_worker fields bloom, key, row_buf, row_buf_size, disabled, tested, skipped.
  * A rewrite that renames them needs only hooks.cpp adjusted; test.cpp uses the public hjoin_bloom_* API.
  */
 #include "catch.hpp"
@@ -70,6 +85,8 @@
 #include "environment_variable.h"
 #include "string_regex.hpp"
 
+#include <algorithm>
+#include <atomic>
 #include <csignal>
 #include <sys/mman.h>
 #include <sys/wait.h>
@@ -81,9 +98,11 @@
 #include <cstring>
 #include <functional>
 #include <map>
+#include <mutex>
 #include <random>
 #include <set>
 #include <string>
+#include <thread>
 #include <unordered_set>
 #include <vector>
 
@@ -121,6 +140,20 @@ int unitseam_hj_join_pair (THREAD_ENTRY * thread_p, XASL_NODE * hj_xasl, bool fi
 			   bool *second_null, unsigned int *first_hash, unsigned int *second_hash, bool *key_eq,
 			   bool *compare_eq);
 int unitseam_hj_init_manager (THREAD_ENTRY * thread_p, XASL_NODE * hj_xasl);
+
+/* v3 (1a7bccdcc): struct hjoin_bloom_worker read through hooks.cpp; present = false on a revision without it */
+struct unitseam_worker_view
+{
+  bool present;
+  const void *bloom;
+  const void *key;
+  const void *row_buf;
+  int row_buf_size;
+  bool disabled;
+  long long tested;
+  long long skipped;
+};
+void unitseam_worker_view_of (const void *worker, unitseam_worker_view * v);
 
 /* ---------------------------------------------------------------- fakes: what a booted server process has */
 
@@ -166,9 +199,10 @@ envvar_trim_char (char *env_val, const int c)
     }
 }
 
-/* error_manager.c: the last error id er_set raised, as er_errid () reads it; er_clear () resets it */
-static int fake_er_id = NO_ERROR;
-static int fake_er_sets = 0;
+/* error_manager.c: the last error id er_set raised, as er_errid () reads it; er_clear () resets it. Per thread, as the
+ * real error context is (B8 runs parallel scan workers on threads of their own). */
+static thread_local int fake_er_id = NO_ERROR;
+static thread_local int fake_er_sets = 0;
 void
 er_set (int, const char *, const int, int err_id, int, ...)
 {
@@ -188,8 +222,15 @@ er_clear (void)
   fake_er_id = NO_ERROR;
 }
 
-/* memory_alloc.c: a thread's private heap is malloc here; live blocks are tracked to see what a release frees */
+/*
+ * memory_alloc.c: a thread's private heap is malloc here; live blocks are tracked to see what a release frees (under a
+ * lock: B8 frees from two worker threads at once). Fault knob (B8): fail_nth_alloc (n) makes the n-th allocation or
+ * reallocation from now fail as the real malloc branch of db_private_alloc_release does - NULL and
+ * ER_OUT_OF_VIRTUAL_MEMORY; a failed realloc leaves the old block as it was.
+ */
 static std::set<void *> *g_live = nullptr;
+static std::mutex g_live_mutex;
+static std::atomic<int> g_alloc_countdown (0);
 static std::set<void *> &
 live ()
 {
@@ -200,12 +241,45 @@ live ()
   return *g_live;
 }
 
+static size_t
+live_count ()
+{
+  std::lock_guard<std::mutex> g (g_live_mutex);
+  return live ().size ();
+}
+
+static void
+fail_nth_alloc (int n)
+{
+  g_alloc_countdown = n;
+}
+
+static bool
+alloc_fails_now (size_t size)
+{
+  int c = g_alloc_countdown.load ();
+  while (c > 0 && !g_alloc_countdown.compare_exchange_weak (c, c - 1))
+    {
+    }
+  if (c == 1)
+    {
+      er_set (ER_ERROR_SEVERITY, __FILE__, __LINE__, ER_OUT_OF_VIRTUAL_MEMORY, 1, size);
+      return true;
+    }
+  return false;
+}
+
 void *
 db_private_alloc_release (THREAD_ENTRY *, size_t size, bool)
 {
+  if (alloc_fails_now (size))
+    {
+      return NULL;
+    }
   void *p = malloc (size);
   if (p != NULL)
     {
+      std::lock_guard<std::mutex> g (g_live_mutex);
       live ().insert (p);
     }
   return p;
@@ -216,6 +290,7 @@ db_private_free_release (THREAD_ENTRY *, void *ptr, bool)
 {
   if (ptr != NULL)
     {
+      std::lock_guard<std::mutex> g (g_live_mutex);
       live ().erase (ptr);
     }
   free (ptr);
@@ -224,6 +299,11 @@ db_private_free_release (THREAD_ENTRY *, void *ptr, bool)
 void *
 db_private_realloc_release (THREAD_ENTRY *, void *ptr, size_t size, bool)
 {
+  if (alloc_fails_now (size))
+    {
+      return NULL;
+    }
+  std::lock_guard<std::mutex> g (g_live_mutex);
   if (ptr != NULL)
     {
       live ().erase (ptr);
@@ -232,6 +312,10 @@ db_private_realloc_release (THREAD_ENTRY *, void *ptr, size_t size, bool)
   if (p != NULL)
     {
       live ().insert (p);
+    }
+  else if (ptr != NULL)
+    {
+      live ().insert (ptr);
     }
   return p;
 }
@@ -1805,4 +1889,1022 @@ TEST_CASE ("PR27659 F1: hjoin_bloom_skip_tuple (big-record / set path) - the sam
   REQUIRE (d != 3);		/* decoy not mapped: the scene is void */
   CHECK (z >= 100);
   CHECK (d == 1);
+}
+
+/* ================================================================ v3 (1a7bccdcc): serial inputs, prepare, workers */
+
+/*
+ * The parallel-path API 1a7bccdcc added. Declared weak so the suite still links on a revision without it
+ * (fdc3fcd32): there the addresses are null and the B6-B8 cases are not registered at all ("not applicable" - the case
+ * is absent, so unit_regress shows no base result for it), while on 1a7bccdcc and later they resolve to the TU's
+ * definitions. The typedefs repeat query_hash_join.h of 1a7bccdcc (a repeated typedef of the same type is allowed).
+ */
+typedef struct hjoin_bloom HJOIN_BLOOM;
+typedef struct hjoin_bloom_worker HJOIN_BLOOM_WORKER;
+bool hjoin_bloom_wants_serial (XASL_NODE * hj_xasl) __attribute__ ((weak));
+HJOIN_BLOOM *hjoin_bloom_prepare (THREAD_ENTRY * thread_p, XASL_NODE * xasl) __attribute__ ((weak));
+HJOIN_BLOOM_WORKER *hjoin_bloom_worker_begin (THREAD_ENTRY * thread_p, HJOIN_BLOOM * bloom) __attribute__ ((weak));
+bool hjoin_bloom_worker_skip_descr (THREAD_ENTRY * thread_p, HJOIN_BLOOM_WORKER * worker, QFILE_LIST_ID * list_id)
+  __attribute__ ((weak));
+bool hjoin_bloom_worker_skip_tuple (THREAD_ENTRY * thread_p, HJOIN_BLOOM_WORKER * worker, QFILE_LIST_ID * list_id,
+				    char *tuple) __attribute__ ((weak));
+void hjoin_bloom_worker_end (THREAD_ENTRY * thread_p, HJOIN_BLOOM_WORKER * worker) __attribute__ ((weak));
+
+static int
+v3_api_linked_count ()
+{
+  return (hjoin_bloom_wants_serial != nullptr) + (hjoin_bloom_prepare != nullptr) + (hjoin_bloom_worker_begin != nullptr)
+    + (hjoin_bloom_worker_skip_descr != nullptr) + (hjoin_bloom_worker_skip_tuple != nullptr)
+    + (hjoin_bloom_worker_end != nullptr);
+}
+
+static const int V3_API_COUNT = 6;
+
+/* a Catch2 case registered only when the whole v3 API links (what TEST_CASE expands to, behind a condition) */
+#define V3_TEST_CASE(fn, name, tags) \
+  static void fn (); \
+  static const bool fn##_registered __attribute__ ((unused)) = v3_api_linked_count () == V3_API_COUNT \
+    && (Catch::AutoReg (Catch::makeTestInvoker (&fn), CATCH_INTERNAL_LINEINFO, Catch::StringRef (), \
+			Catch::NameAndTags { name, tags }), true); \
+  static void fn ()
+
+/* registered on every revision: a partial v3 API (a rename) would silently drop B6-B8, so it fails then */
+TEST_CASE ("B6-B8 guard: the parallel-path API (hjoin_bloom_wants_serial / _prepare / _worker_begin / _skip_descr / "
+	   "_skip_tuple / _end) links all or none - B6-B8 are registered only when all of it does", "[contract]")
+{
+  int n = v3_api_linked_count ();
+  WARN ("v3 parallel-path API: " << n << " of " << V3_API_COUNT << " linked"
+	<< (n == V3_API_COUNT ? " - B6-B8 registered" : n == 0 ? " - B6-B8 not applicable on this revision" : ""));
+  CHECK ((n == 0 || n == V3_API_COUNT));
+}
+
+static unitseam_worker_view
+wview (HJOIN_BLOOM_WORKER * w)
+{
+  unitseam_worker_view v;
+  unitseam_worker_view_of (w, &v);
+  return v;
+}
+
+static bool
+is_live (const void *p)
+{
+  std::lock_guard<std::mutex> g (g_live_mutex);
+  return live ().count ((void *) p) == 1;
+}
+
+/* the aptr list in the order the inputs run (pt_to_hashjoin_proc: outer -> inner; inner first: inner -> outer) */
+static void
+aptr_in_run_order (join & j)
+{
+  XASL_NODE *a = j.first (), *b = j.second ();
+  j.hj->aptr_list = a;
+  a->next = b;
+  b->next = NULL;
+}
+
+static void
+aptr_list_of (join & j, std::vector<XASL_NODE *> nodes)
+{
+  j.hj->aptr_list = nodes.empty ()? NULL : nodes[0];
+  for (size_t i = 0; i < nodes.size (); i++)
+    {
+      nodes[i]->next = i + 1 < nodes.size ()? nodes[i + 1] : NULL;
+    }
+}
+
+/* ================================================================ B6: hjoin_bloom_wants_serial */
+
+V3_TEST_CASE (b6_join_types, "B6: wants_serial = attach's decision on the input the aptr list runs second - INNER "
+	      "either order, LEFT inner second, RIGHT outer second; RIGHT inner second (preserved), LEFT outer second, "
+	      "FULL -> false; parameter off -> false", "[contract]")
+{
+  boot_types ();
+  set_bloom_param (true);
+  struct
+  {
+    JOIN_TYPE jt;
+    bool first_is_outer;
+    bool expect;
+    const char *what;
+  } cases[] = {
+    {JOIN_INNER, true, true, "INNER, aptr outer -> inner"},
+    {JOIN_INNER, false, true, "INNER, aptr inner -> outer"},
+    {JOIN_LEFT, true, true, "LEFT, inner second (not preserved)"},
+    {JOIN_LEFT, false, false, "LEFT, outer second (preserved)"},
+    {JOIN_RIGHT, true, false, "RIGHT, inner second (preserved)"},
+    {JOIN_RIGHT, false, true, "RIGHT, outer second (not preserved)"},
+    {JOIN_OUTER, true, false, "FULL, inner second"},
+    {JOIN_OUTER, false, false, "FULL, outer second"},
+  };
+  for (auto &c : cases)
+    {
+      join j = attach_join (c.jt, c.first_is_outer);
+      aptr_in_run_order (j);
+      INFO (c.what);
+      bool ws = hjoin_bloom_wants_serial (j.hj);
+      CHECK (ws == c.expect);
+      CHECK (attached_after (j) == ws);	/* the two agree once the first input is done */
+    }
+
+  join j = attach_join (JOIN_INNER, true);
+  aptr_in_run_order (j);
+  set_bloom_param (false);
+  CHECK_FALSE (hjoin_bloom_wants_serial (j.hj));
+  set_bloom_param (true);
+  CHECK (hjoin_bloom_wants_serial (j.hj));
+}
+
+V3_TEST_CASE (b6_second_shape, "B6: wants_serial is false when the second input does not write each row straight to "
+	      "its list (GROUP BY, analytic, hash GROUP BY, LIMIT, OFFSET, DISTINCT, CONNECT BY, click counter, "
+	      "ORDERBY_NUM, top-N, UPDATE/DELETE select, subquery cache, top-most, not a BUILDLIST) - the same list as "
+	      "attach; it does not read the first input's state or shape", "[contract]")
+{
+  boot_types ();
+  set_bloom_param (true);
+  alignas (64) static char dummy[4096];
+  REGU_VARIABLE *regu = (REGU_VARIABLE *) dummy;
+  SORT_LIST *sl = (SORT_LIST *) dummy;
+  ANALYTIC_EVAL_TYPE *ae = (ANALYTIC_EVAL_TYPE *) dummy;
+  XASL_NODE *cb = (XASL_NODE *) dummy;
+  SELUPD_LIST *su = (SELUPD_LIST *) dummy;
+  PRED_EXPR *pe = (PRED_EXPR *) dummy;
+  DB_VALUE *dv = (DB_VALUE *) dummy;
+  XASL_ID *xid = (XASL_ID *) dummy;
+
+  std::vector<attach_case> second_shape = {
+    {"control: INNER, plain BUILDLIST second", true, [] (join &) {}},
+    {"second GROUP BY", false, [&] (join & j) { j.second ()->proc.buildlist.groupby_list = sl; }},
+    {"second analytic", false, [&] (join & j) { j.second ()->proc.buildlist.a_eval_list = ae; }},
+    {"second hash GROUP BY", false, [] (join & j) { j.second ()->proc.buildlist.g_hash_eligible = 1; }},
+    {"second LIMIT", false, [&] (join & j) { j.second ()->limit_row_count = regu; }},
+    {"second OFFSET", false, [&] (join & j) { j.second ()->limit_offset = regu; }},
+    {"second DISTINCT", false, [] (join & j) { j.second ()->option = Q_DISTINCT; }},
+    {"second CONNECT BY", false, [&] (join & j) { j.second ()->connect_by_ptr = cb; }},
+    {"second click counter (selected_upd_list)", false, [&] (join & j) { j.second ()->selected_upd_list = su; }},
+    {"second ORDERBY_NUM () predicate", false, [&] (join & j) { j.second ()->ordbynum_pred = pe; }},
+    {"second ORDERBY_NUM () value", false, [&] (join & j) { j.second ()->ordbynum_val = dv; }},
+    {"second top-N sort limit (orderby_limit)", false, [&] (join & j) { j.second ()->orderby_limit = regu; }},
+    {"second is the SELECT of an UPDATE/DELETE", false, [] (join & j) { j.second ()->upd_del_class_cnt = 1; }},
+    {"second list from the subquery result cache", false, [&] (join & j) { j.second ()->sub_xasl_id = xid; }},
+    {"second top-most", false, [] (join & j) { XASL_SET_FLAG (j.second (), XASL_TOP_MOST_XASL); }},
+    {"second not a BUILDLIST (BUILDVALUE)", false, [] (join & j) { j.second ()->type = BUILDVALUE_PROC; }},
+  };
+  for (auto &c : second_shape)
+    {
+      join j = attach_join (JOIN_INNER, true);
+      aptr_in_run_order (j);
+      c.setup (j);
+      INFO (c.what);
+      bool ws = hjoin_bloom_wants_serial (j.hj);
+      CHECK (ws == c.expect);
+      CHECK (attached_after (j) == ws);
+    }
+
+  /* asked before the aptr loop runs anything: the first input's status, rows and shape are not its business */
+  std::vector<attach_case> first_side = {
+    {"first not run yet (XASL_INITIALIZED, 0 rows)", true,
+     [] (join & j) { j.first ()->status = XASL_INITIALIZED; j.first ()->list_id->tuple_cnt = 0; }},
+    {"first more than 10,000,000 rows", true, [] (join & j) { j.first ()->list_id->tuple_cnt = 10000001; }},
+    {"first GROUP BY", true, [&] (join & j) { j.first ()->proc.buildlist.groupby_list = sl; }},
+    {"first LIMIT", true, [&] (join & j) { j.first ()->limit_row_count = regu; }},
+    {"first not a BUILDLIST", true, [] (join & j) { j.first ()->type = BUILDVALUE_PROC; }},
+  };
+  for (auto &c : first_side)
+    {
+      join j = attach_join (JOIN_INNER, true);
+      aptr_in_run_order (j);
+      c.setup (j);
+      INFO (c.what);
+      CHECK (hjoin_bloom_wants_serial (j.hj) == c.expect);
+    }
+}
+
+V3_TEST_CASE (b6_aptr_order, "B6: the aptr list order picks the second input - reversing it changes the answer, other "
+	      "aptr nodes are passed over; an input missing from the aptr list, an input linked to a regu variable "
+	      "(XASL_LINK_TO_REGU_VARIABLE), a node that is not a hash join, NULL -> false", "[contract]")
+{
+  boot_types ();
+  set_bloom_param (true);
+  alignas (64) static char dummy[4096];
+  SORT_LIST *sl = (SORT_LIST *) dummy;
+
+  /* the same join, the same inputs: only the aptr order differs */
+  {
+    join j = attach_join (JOIN_LEFT, true);
+    aptr_list_of (j, { j.outer, j.inner });
+    CHECK (hjoin_bloom_wants_serial (j.hj));	/* LEFT, inner second: not preserved */
+    aptr_list_of (j, { j.inner, j.outer });
+    CHECK_FALSE (hjoin_bloom_wants_serial (j.hj));	/* LEFT, outer second: preserved */
+  }
+  {
+    join j = attach_join (JOIN_RIGHT, true);
+    aptr_list_of (j, { j.outer, j.inner });
+    CHECK_FALSE (hjoin_bloom_wants_serial (j.hj));
+    aptr_list_of (j, { j.inner, j.outer });
+    CHECK (hjoin_bloom_wants_serial (j.hj));
+  }
+  {
+    /* the shape that matters is the one of the input run second */
+    join j = attach_join (JOIN_INNER, true);
+    j.inner->proc.buildlist.groupby_list = sl;
+    aptr_list_of (j, { j.outer, j.inner });
+    CHECK_FALSE (hjoin_bloom_wants_serial (j.hj));
+    aptr_list_of (j, { j.inner, j.outer });
+    CHECK (hjoin_bloom_wants_serial (j.hj));
+  }
+  {
+    /* other subqueries in the aptr list (uncorrelated subqueries of the join's predicates) are passed over */
+    join j = attach_join (JOIN_LEFT, true);
+    XASL_NODE *x1 = new_input (new_list ({ dom_int () }));
+    XASL_NODE *x2 = new_input (new_list ({ dom_int () }));
+    XASL_NODE *x3 = new_input (new_list ({ dom_int () }));
+    aptr_list_of (j, { x1, j.outer, x2, j.inner, x3 });
+    CHECK (hjoin_bloom_wants_serial (j.hj));
+    aptr_list_of (j, { x1, j.inner, x2, j.outer, x3 });
+    CHECK_FALSE (hjoin_bloom_wants_serial (j.hj));
+    /* an input missing from the aptr list: nothing to serialize */
+    aptr_list_of (j, { x1, j.outer, x2 });
+    CHECK_FALSE (hjoin_bloom_wants_serial (j.hj));
+    aptr_list_of (j, { x1, x2 });
+    CHECK_FALSE (hjoin_bloom_wants_serial (j.hj));
+    aptr_list_of (j, {});
+    CHECK_FALSE (hjoin_bloom_wants_serial (j.hj));
+  }
+  {
+    join j = attach_join (JOIN_INNER, true);
+    aptr_in_run_order (j);
+    REQUIRE (hjoin_bloom_wants_serial (j.hj));
+    XASL_SET_FLAG (j.second (), XASL_LINK_TO_REGU_VARIABLE);
+    CHECK_FALSE (hjoin_bloom_wants_serial (j.hj));
+    XASL_CLEAR_FLAG (j.second (), XASL_LINK_TO_REGU_VARIABLE);
+    XASL_SET_FLAG (j.first (), XASL_LINK_TO_REGU_VARIABLE);
+    CHECK_FALSE (hjoin_bloom_wants_serial (j.hj));
+    XASL_CLEAR_FLAG (j.first (), XASL_LINK_TO_REGU_VARIABLE);
+    CHECK (hjoin_bloom_wants_serial (j.hj));
+    j.hj->type = MERGELIST_PROC;
+    CHECK_FALSE (hjoin_bloom_wants_serial (j.hj));
+  }
+  CHECK_FALSE (hjoin_bloom_wants_serial (NULL));
+}
+
+/* ================================================================ B7: hjoin_bloom_prepare */
+
+V3_TEST_CASE (b7_prepare, "B7: prepare on the owner thread builds the filter and returns it, once - the owner's later "
+	      "rows use it without a second build; another thread, a cloned node, a node without a filter, NULL and a "
+	      "build that fails -> NULL", "[contract]")
+{
+  boot_types ();
+  set_bloom_param (true);
+  std::vector<int> keys;
+  for (int i = 1; i <= 100; i++)
+    {
+      keys.push_back (i * 7);
+    }
+  join j = int_join_with (keys);
+  fake_list *first_scan = fake_list_of (j.first ()->list_id);
+  hjoin_bloom_attach (owner_thread (), j.hj, j.second ());
+  REQUIRE (j.second ()->hj_bloom != NULL);
+  REQUIRE (first_scan->opens == 0);
+
+  /* not the owner: no build, no filter */
+  CHECK (hjoin_bloom_prepare (other_thread (), j.second ()) == NULL);
+  XASL_NODE *clone = (XASL_NODE *) malloc (sizeof (XASL_NODE));
+  memcpy (clone, j.second (), sizeof (XASL_NODE));
+  CHECK (hjoin_bloom_prepare (owner_thread (), clone) == NULL);
+  CHECK_FALSE (view (j.second ()).built);
+  CHECK (first_scan->opens == 0);
+
+  /* the owner: built now, before any row */
+  HJOIN_BLOOM *b = hjoin_bloom_prepare (owner_thread (), j.second ());
+  REQUIRE (b != NULL);
+  CHECK (b == j.second ()->hj_bloom);
+  unitseam_bloom_view v = view (j.second ());
+  CHECK (v.built);
+  CHECK_FALSE (v.disabled);
+  CHECK (v.keys == 100);
+  CHECK (v.tested == 0);
+  CHECK (first_scan->opens == 1);
+
+  /* again: the same filter, no second scan of the first input */
+  CHECK (hjoin_bloom_prepare (owner_thread (), j.second ()) == b);
+  CHECK (first_scan->opens == 1);
+
+  /* the owner's own rows (rows a serial part of the scan writes on the owner thread) use the prepared bits */
+  std::vector<DB_VALUE> present = ints ({ 7 * 50 }), absent = ints ({ 3 });
+  QFILE_LIST_ID *sl = j.second ()->list_id;
+  stage_descr (sl, present);
+  CHECK_FALSE (hjoin_bloom_skip_descr (owner_thread (), j.second ()));
+  stage_descr (sl, absent);
+  CHECK (hjoin_bloom_skip_descr (owner_thread (), j.second ()));
+  char *t = make_tuple (sl, absent);
+  CHECK (hjoin_bloom_skip_tuple (owner_thread (), j.second (), t));
+  free (t);
+  unitseam_bloom_view after = view (j.second ());
+  CHECK (first_scan->opens == 1);
+  CHECK (after.bits == v.bits);
+  CHECK (after.keys == 100);
+  CHECK (after.tested == 3);
+  CHECK (after.skipped == 2);
+
+  /* no filter on the node, or no node */
+  CHECK (hjoin_bloom_prepare (owner_thread (), j.first ()) == NULL);
+  CHECK (hjoin_bloom_prepare (owner_thread (), NULL) == NULL);
+  free (clone);
+  hjoin_bloom_release (owner_thread (), j.second ());
+
+  /* a build that cannot complete: NULL, and the owner lets every row through */
+  join f = int_join_with ({ 1, 2, 3 });
+  fake_list_of (f.first ()->list_id)->fail_open = true;
+  hjoin_bloom_attach (owner_thread (), f.hj, f.second ());
+  REQUIRE (f.second ()->hj_bloom != NULL);
+  CHECK (hjoin_bloom_prepare (owner_thread (), f.second ()) == NULL);
+  CHECK (view (f.second ()).built);
+  CHECK (view (f.second ()).disabled);
+  CHECK (er_errid () == NO_ERROR);
+  CHECK (decide (f, ints ({ 99 })) == -1);
+  hjoin_bloom_release (owner_thread (), f.second ());
+}
+
+/* ================================================================ B8: parallel scan workers */
+
+static THREAD_ENTRY *
+worker_thread (int i)
+{
+  static THREAD_ENTRY *t[4] = { new_thread (), new_thread (), new_thread (), new_thread () };
+  return t[i];
+}
+
+/* a parallel scan worker's list: its own QFILE_LIST_ID with the second input's type list (the clone's valptr types) */
+static QFILE_LIST_ID *
+worker_list (const join & j)
+{
+  QFILE_TUPLE_VALUE_TYPE_LIST *tl = &j.second ()->list_id->type_list;
+  std::vector<TP_DOMAIN *> doms (tl->domp, tl->domp + tl->type_cnt);
+  return new_list (doms);
+}
+
+/* one row through a worker: the descriptor path (write_initialize's qfile_generate_tuple_into_list) or the tuple path
+ * (the big-record / set path: qfile_add_tuple_to_list) */
+static bool
+worker_skip (HJOIN_BLOOM_WORKER * w, THREAD_ENTRY * t, QFILE_LIST_ID * l, std::vector<DB_VALUE> &row, bool by_descr)
+{
+  if (by_descr)
+    {
+      stage_descr (l, row);
+      return hjoin_bloom_worker_skip_descr (t, w, l);
+    }
+  char *tpl = make_tuple (l, row);
+  bool s = hjoin_bloom_worker_skip_tuple (t, w, l, tpl);
+  free (tpl);
+  return s;
+}
+
+static bool
+owner_skip (const join & j, std::vector<DB_VALUE> &row)
+{
+  stage_descr (j.second ()->list_id, row);
+  return hjoin_bloom_skip_descr (owner_thread (), j.second ());
+}
+
+/* 3,000 random INT first-input keys (+ two NULL keys); rows: those keys, 3,000 absent keys and 20 NULLs, shuffled */
+struct int_scene
+{
+  join j;
+  HJOIN_BLOOM *b;
+  std::vector<int> present;
+  std::vector<std::vector<DB_VALUE>> rows;
+  std::vector<bool> row_present;
+};
+
+static int_scene
+int_scene_setup (int nkeys, unsigned seed)
+{
+  int_scene s;
+  std::mt19937 rng (seed);
+  std::unordered_set<int> member;
+  while ((int) s.present.size () < nkeys)
+    {
+      int k = (int) rng ();
+      if (member.insert (k).second)
+	{
+	  s.present.push_back (k);
+	}
+    }
+  s.j = int_join_with (s.present);
+  add_row (s.j.first ()->list_id, { v_null () });
+  add_row (s.j.first ()->list_id, { v_null () });
+  hjoin_bloom_attach (owner_thread (), s.j.hj, s.j.second ());
+  REQUIRE (s.j.second ()->hj_bloom != NULL);
+  s.b = hjoin_bloom_prepare (owner_thread (), s.j.second ());
+  REQUIRE (s.b != NULL);
+  REQUIRE (view (s.j.second ()).keys == nkeys);
+
+  std::vector<std::pair<std::vector<DB_VALUE>, bool>> rows;
+  for (int k : s.present)
+    {
+      rows.push_back ({ ints ({ k }), true });
+    }
+  int absent = 0;
+  while (absent < nkeys)
+    {
+      int k = (int) rng ();
+      if (!member.count (k))
+	{
+	  rows.push_back ({ ints ({ k }), false });
+	  absent++;
+	}
+    }
+  for (int i = 0; i < 20; i++)
+    {
+      rows.push_back ({ { v_null () }, false });
+    }
+  std::shuffle (rows.begin (), rows.end (), rng);
+  for (auto &r : rows)
+    {
+      s.rows.push_back (r.first);
+      s.row_present.push_back (r.second);
+    }
+  return s;
+}
+
+V3_TEST_CASE (b8_share, "B8: two workers on one prepared filter share its bits (the same hjoin_bloom, nothing copied) "
+	      "and each has a key and a row buffer of its own, apart from each other's and the owner's", "[contract]")
+{
+  boot_types ();
+  set_bloom_param (true);
+  int_scene s = int_scene_setup (500, 11);
+  HJOIN_BLOOM_WORKER *w1 = hjoin_bloom_worker_begin (worker_thread (0), s.b);
+  HJOIN_BLOOM_WORKER *w2 = hjoin_bloom_worker_begin (worker_thread (1), s.b);
+  REQUIRE (w1 != NULL);
+  REQUIRE (w2 != NULL);
+  CHECK (w1 != w2);
+  unitseam_bloom_view bv = view (s.j.second ());
+  unitseam_worker_view v1 = wview (w1), v2 = wview (w2);
+  REQUIRE (v1.present);
+  CHECK (v1.bloom == (void *) s.b);
+  CHECK (v2.bloom == (void *) s.b);
+  CHECK (v1.key != NULL);
+  CHECK (v2.key != NULL);
+  CHECK (v1.key != v2.key);
+  CHECK (v1.key != bv.key);
+  CHECK (v2.key != bv.key);
+  CHECK (v1.row_buf == NULL);
+  CHECK (v1.tested == 0);
+  CHECK_FALSE (v1.disabled);
+  CHECK (bv.bits != NULL);
+
+  /* one row each through the descriptor path, and one through the owner: three row buffers */
+  QFILE_LIST_ID *l1 = worker_list (s.j), *l2 = worker_list (s.j);
+  std::vector<DB_VALUE> r = ints ({ s.present[0] });
+  CHECK_FALSE (worker_skip (w1, worker_thread (0), l1, r, true));
+  CHECK_FALSE (worker_skip (w2, worker_thread (1), l2, r, true));
+  CHECK_FALSE (owner_skip (s.j, r));
+  v1 = wview (w1);
+  v2 = wview (w2);
+  bv = view (s.j.second ());
+  CHECK (v1.row_buf != NULL);
+  CHECK (v2.row_buf != NULL);
+  CHECK (v1.row_buf != v2.row_buf);
+  CHECK (v1.row_buf != bv.row_buf);
+  CHECK (v2.row_buf != bv.row_buf);
+  /* the shared part did not move */
+  CHECK (wview (w1).bloom == (void *) s.b);
+  CHECK (view (s.j.second ()).bits == bv.bits);
+
+  hjoin_bloom_worker_end (worker_thread (0), w1);
+  hjoin_bloom_worker_end (worker_thread (1), w2);
+  CHECK (is_live (bv.bits));	/* ending a worker leaves the shared filter alone */
+  CHECK (is_live (s.b));
+  hjoin_bloom_release (owner_thread (), s.j.second ());
+  CHECK_FALSE (is_live (bv.bits));
+}
+
+V3_TEST_CASE (b8_same_decision, "B8: a worker decides as the owner does - on the same rows (3,000 first-input keys, "
+	      "3,000 absent, NULLs) two workers, through the descriptor and the tuple path, skip exactly the rows the "
+	      "owner skips; no first-input key is skipped", "[contract]")
+{
+  boot_types ();
+  set_bloom_param (true);
+  int_scene s = int_scene_setup (3000, 27659);
+  HJOIN_BLOOM_WORKER *w1 = hjoin_bloom_worker_begin (worker_thread (0), s.b);
+  HJOIN_BLOOM_WORKER *w2 = hjoin_bloom_worker_begin (worker_thread (1), s.b);
+  REQUIRE (w1 != NULL);
+  REQUIRE (w2 != NULL);
+  QFILE_LIST_ID *l1 = worker_list (s.j), *l2 = worker_list (s.j);
+  int differ = 0, false_neg = 0, owner_skipped = 0, absent_skipped = 0, absent = 0, null_kept = 0;
+  for (size_t i = 0; i < s.rows.size (); i++)
+    {
+      bool o = owner_skip (s.j, s.rows[i]);
+      bool a = worker_skip (w1, worker_thread (0), l1, s.rows[i], i % 2 == 0);
+      bool c = worker_skip (w2, worker_thread (1), l2, s.rows[i], i % 2 == 1);
+      differ += (a != o) + (c != o);
+      false_neg += s.row_present[i] && (o || a || c);
+      owner_skipped += o;
+      if (!s.row_present[i] && !DB_IS_NULL (&s.rows[i][0]))
+	{
+	  absent++;
+	  absent_skipped += o;
+	}
+      null_kept += DB_IS_NULL (&s.rows[i][0]) && !(o && a && c);
+    }
+  WARN ("rows " << s.rows.size () << ", owner skipped " << owner_skipped << ", absent keys skipped " << absent_skipped
+	<< "/" << absent << ", worker/owner disagreements " << differ);
+  CHECK (differ == 0);
+  CHECK (false_neg == 0);
+  CHECK (null_kept == 0);
+  CHECK (absent_skipped > absent * 9 / 10);
+  unitseam_worker_view v1 = wview (w1), v2 = wview (w2);
+  CHECK (v1.tested == (long long) s.rows.size ());
+  CHECK (v2.tested == (long long) s.rows.size ());
+  CHECK (v1.skipped == owner_skipped);
+  CHECK (v2.skipped == owner_skipped);
+  CHECK_FALSE (v1.disabled);
+  CHECK_FALSE (v2.disabled);
+  hjoin_bloom_worker_end (worker_thread (0), w1);
+  hjoin_bloom_worker_end (worker_thread (1), w2);
+  hjoin_bloom_release (owner_thread (), s.j.second ());
+}
+
+/* B2's pairs, the second input's rows checked by a worker: the decision equals the owner's and keeps every join match */
+struct worker_pair_result
+{
+  int join_matches = 0;
+  int dropped_matches = 0;
+  int differ = 0;
+  int non_matches = 0;
+  int non_matches_skipped = 0;
+  bool need_coerce = false;
+};
+
+static worker_pair_result
+run_pair_workers (pair_spec & ps)
+{
+  join j = new_join (JOIN_INNER, { ps.first_dom }, { ps.second_dom }, { {0, 0} });
+  for (auto &v : ps.first_vals)
+    {
+      add_row (j.first ()->list_id, { v });
+    }
+  first_done (j);
+  hjoin_bloom_attach (owner_thread (), j.hj, j.second ());
+  REQUIRE (j.second ()->hj_bloom != NULL);
+  HJOIN_BLOOM *b = hjoin_bloom_prepare (owner_thread (), j.second ());
+  REQUIRE (b != NULL);
+  HJOIN_BLOOM_WORKER *w = hjoin_bloom_worker_begin (worker_thread (0), b);
+  REQUIRE (w != NULL);
+  QFILE_LIST_ID *wl = worker_list (j);
+
+  worker_pair_result r;
+  r.need_coerce = j.hj->proc.hashjoin.domain_info.need_coerce_domains;
+  QFILE_LIST_ID *fl = j.first ()->list_id, *sl = j.second ()->list_id;
+  std::vector<char *> ft;
+  for (auto &v : ps.first_vals)
+    {
+      std::vector<DB_VALUE> one { v };
+      ft.push_back (make_tuple (fl, one));
+    }
+  for (size_t si = 0; si < ps.second_vals.size (); si++)
+    {
+      std::vector<DB_VALUE> one { ps.second_vals[si] };
+      char *st = make_tuple (sl, one);
+      QFILE_TUPLE_RECORD srec = bound (sl, st);
+      int d = unitseam_bloom_skip_bound (owner_thread (), j.second (), &srec);
+      REQUIRE (d != -1);
+      bool by_tuple = worker_skip (w, worker_thread (0), wl, one, false);
+      bool by_descr = worker_skip (w, worker_thread (0), wl, one, true);
+      r.differ += (by_tuple != (d == 1)) + (by_descr != (d == 1));
+      bool matched = false;
+      for (char *f : ft)
+	{
+	  QFILE_TUPLE_RECORD frec = bound (fl, f);
+	  QFILE_TUPLE_RECORD srec2 = bound (sl, st);
+	  bool fnull, snull, keq, ceq;
+	  unsigned int fh, sh;
+	  REQUIRE (unitseam_hj_join_pair (owner_thread (), j.hj, true, &frec, &srec2, &fnull, &snull, &fh, &sh, &keq, &ceq)
+		   == NO_ERROR);
+	  if (fh == sh && ceq)
+	    {
+	      matched = true;
+	    }
+	}
+      if (matched)
+	{
+	  r.join_matches++;
+	  r.dropped_matches += by_tuple || by_descr;
+	}
+      else
+	{
+	  r.non_matches++;
+	  r.non_matches_skipped += by_tuple;
+	}
+      free (st);
+    }
+  for (char *f : ft)
+    {
+      free (f);
+    }
+  CHECK_FALSE (wview (w).disabled);
+  hjoin_bloom_worker_end (worker_thread (0), w);
+  hjoin_bloom_release (owner_thread (), j.second ());
+  return r;
+}
+
+static void
+check_pair_workers (pair_spec & ps, int min_matches)
+{
+  worker_pair_result r = run_pair_workers (ps);
+  INFO (ps.name << ": coerce " << (r.need_coerce ? "yes" : "no") << ", join matches " << r.join_matches
+	<< ", dropped by the worker " << r.dropped_matches << ", worker/owner disagreements " << r.differ
+	<< ", non-matches skipped " << r.non_matches_skipped << "/" << r.non_matches);
+  CHECK (r.need_coerce);
+  CHECK (r.join_matches >= min_matches);
+  CHECK (r.dropped_matches == 0);
+  CHECK (r.differ == 0);
+}
+
+V3_TEST_CASE (b8_coercion, "B8: a worker coerces the second input's key as the owner does - BIGINT x INT, NUMERIC(20,4) "
+	      "x NUMERIC(10,2), NUMERIC(38,10) x NUMERIC(38,0), DOUBLE x INT, VARCHAR(20) x CHAR(10), utf8_en_ci "
+	      "VARCHAR(30) x VARCHAR(10) (first x second): same decision, every join match kept", "[contract]")
+{
+  boot_types ();
+  set_bloom_param (true);
+  std::vector<long long> bv { 0, 1, -1, 5, -5, 123456, -123456, 2147483647, -2147483647LL - 1, 7, -7,
+    2147483648LL, -2147483649LL, 4294967301LL, -4294967301LL };
+  std::vector<long long> iv2 { 0, 1, -1, 5, -5, 7, -7, 123456, -123456, 2147483647, -2147483647 - 1, 42 };
+  pair_spec a = spec_ints ("BIGINT first x INT second", dom_bigint (), dom_int (), bv, iv2);
+  check_pair_workers (a, 11);
+
+  TP_DOMAIN *n102 = dom_numeric (10, 2), *n204 = dom_numeric (20, 4);
+  pair_spec b = spec_text ("NUMERIC(20,4) first x NUMERIC(10,2) second", n204, n102,
+			   { "1.5000", "-1.5", "0", "12345678.99", "-0.01", "100.1", "-99999999.99", "1.5001",
+			   "123456789012.3456" },
+			   { "1.50", "-1.50", "0.00", "12345678.99", "-0.01", "100.10", "-99999999.99", "1.51",
+			   "-0.02" });
+  check_pair_workers (b, 7);
+
+  TP_DOMAIN *n380 = dom_numeric (38, 0), *n3810 = dom_numeric (38, 10);
+  pair_spec c = spec_text ("NUMERIC(38,10) first x NUMERIC(38,0) second", n3810, n380,
+			   { "12345.0000000000", "-1", "0", "9999999999999999999999999999.0", "100.0000000001",
+			   "12345.5" },
+			   { "12345", "-1", "0", "9999999999999999999999999999", "100", "7" });
+  check_pair_workers (c, 4);
+
+  std::vector<long long> v { 0, 1, -1, 5, -5, 123456, -123456, 2147483647 };
+  std::vector<long long> w { 0, 1, -1, 5, -5, 123456, -123456, 2147483647, 3, -3 };
+  pair_spec d = spec_ints ("DOUBLE first x INT second", dom_double (), dom_int (), v, w);
+  check_pair_workers (d, 8);
+
+  TP_DOMAIN *c10 = dom_string (DB_TYPE_CHAR, 10, LANG_COLL_UTF8_BINARY);
+  TP_DOMAIN *v20 = dom_string (DB_TYPE_VARCHAR, 20, LANG_COLL_UTF8_BINARY);
+  pair_spec e = spec_text ("VARCHAR(20) first x CHAR(10) second", v20, c10,
+			   { "ab", "ab ", "ab        ", "a", "abc   ", "", "x y", "x y       ", " lead", " lead     " },
+			   { "ab", "a", "abc", "", "x y", " lead", "AB", "b" });
+  check_pair_workers (e, 3);
+
+  TP_DOMAIN *ci10 = dom_string (DB_TYPE_VARCHAR, 10, LANG_COLL_UTF8_EN_CI);
+  TP_DOMAIN *ci30 = dom_string (DB_TYPE_VARCHAR, 30, LANG_COLL_UTF8_EN_CI);
+  pair_spec f = spec_text ("VARCHAR(30) utf8_en_ci first x VARCHAR(10) utf8_en_ci second", ci30, ci10,
+			   { "A", "abc", "Hello", "MiXeD cAsE", "z" },
+			   { "a", "A", "ABC", "aBc", "hello", "HELLO", "Hello ", "mixed case", "Z", "b", "abcd" });
+  check_pair_workers (f, 8);
+}
+
+V3_TEST_CASE (b8_end_sums, "B8: worker_end adds each worker's tested / skipped to the shared filter (the owner's own "
+	      "rows included) and frees the worker's key, row buffer and state; detach then reports the total",
+	      "[contract]")
+{
+  boot_types ();
+  set_bloom_param (true);
+  int_scene s = int_scene_setup (1000, 5);
+  HJOIN_BLOOM_WORKER *w1 = hjoin_bloom_worker_begin (worker_thread (0), s.b);
+  HJOIN_BLOOM_WORKER *w2 = hjoin_bloom_worker_begin (worker_thread (1), s.b);
+  REQUIRE (w1 != NULL);
+  REQUIRE (w2 != NULL);
+  QFILE_LIST_ID *l1 = worker_list (s.j), *l2 = worker_list (s.j);
+
+  /* the rows split three ways: worker 1 the first third, worker 2 the second, the owner the rest */
+  size_t n = s.rows.size (), third = n / 3;
+  long long t1 = 0, s1 = 0, t2 = 0, s2 = 0, t0 = 0, s0 = 0;
+  for (size_t i = 0; i < n; i++)
+    {
+      if (i < third)
+	{
+	  t1++;
+	  s1 += worker_skip (w1, worker_thread (0), l1, s.rows[i], i % 2 == 0);
+	}
+      else if (i < 2 * third)
+	{
+	  t2++;
+	  s2 += worker_skip (w2, worker_thread (1), l2, s.rows[i], i % 2 == 0);
+	}
+      else
+	{
+	  t0++;
+	  s0 += owner_skip (s.j, s.rows[i]);
+	}
+    }
+  REQUIRE (s1 > 0);
+  REQUIRE (s2 > 0);
+  /* until a worker ends, its counts are its own */
+  unitseam_bloom_view v = view (s.j.second ());
+  CHECK (v.tested == t0);
+  CHECK (v.skipped == s0);
+  unitseam_worker_view v1 = wview (w1), v2 = wview (w2);
+  CHECK (v1.tested == t1);
+  CHECK (v1.skipped == s1);
+  CHECK (v2.tested == t2);
+  CHECK (v2.skipped == s2);
+
+  hjoin_bloom_worker_end (worker_thread (0), w1);
+  v = view (s.j.second ());
+  CHECK (v.tested == t0 + t1);
+  CHECK (v.skipped == s0 + s1);
+  CHECK_FALSE (is_live (w1));
+  CHECK_FALSE (is_live (v1.key));
+  CHECK_FALSE (is_live (v1.row_buf));
+  CHECK (is_live (v2.key));
+
+  hjoin_bloom_worker_end (worker_thread (1), w2);
+  v = view (s.j.second ());
+  CHECK (v.tested == t0 + t1 + t2);
+  CHECK (v.skipped == s0 + s1 + s2);
+  CHECK_FALSE (is_live (w2));
+  CHECK_FALSE (is_live (v2.key));
+  CHECK_FALSE (is_live (v2.row_buf));
+
+  hjoin_bloom_detach (owner_thread (), s.j.second ());
+  HASHJOIN_BLOOM_STATS *g = &s.j.hj->proc.hashjoin.bloom_stats;
+  CHECK (g->used);
+  CHECK (g->keys == 1000);
+  CHECK (g->tested == (long long) n);
+  CHECK (g->tested == t0 + t1 + t2);
+  CHECK (g->skipped == s0 + s1 + s2);
+  CHECK (s.j.second ()->hj_bloom == NULL);
+}
+
+V3_TEST_CASE (b8_failure, "B8: a worker whose key fetch fails lets its rows through from then on, alone - the other "
+	      "worker and the owner keep skipping; the error is cleared; a worker that cannot grow its row buffer does "
+	      "the same; a begin that cannot allocate returns NULL and leaks nothing", "[contract]")
+{
+  boot_types ();
+  set_bloom_param (true);
+  /* first VARCHAR(20), second VARCHAR(5): the second's key is coerced to the common VARCHAR(20), which makes one
+   * allocation per row (measured: the only one of a tuple-path check) - the fault knob fails it inside hjoin_fetch_key.
+   * (INT x VARCHAR would not do: tp_value_coerce refuses INT -> VARCHAR, so every row fails, the owner's too.) */
+  TP_DOMAIN *v20 = dom_string (DB_TYPE_VARCHAR, 20, LANG_COLL_UTF8_BINARY);
+  TP_DOMAIN *v5 = dom_string (DB_TYPE_VARCHAR, 5, LANG_COLL_UTF8_BINARY);
+  join j = new_join (JOIN_INNER, { v20 }, { v5 }, { {0, 0} });
+  for (int i = 0; i < 200; i++)
+    {
+      add_row (j.first ()->list_id, { cast_text (std::to_string (i).c_str (), v20) });
+    }
+  first_done (j);
+  hjoin_bloom_attach (owner_thread (), j.hj, j.second ());
+  HJOIN_BLOOM *b = hjoin_bloom_prepare (owner_thread (), j.second ());
+  REQUIRE (b != NULL);
+  REQUIRE (j.hj->proc.hashjoin.domain_info.need_coerce_domains);
+  HJOIN_BLOOM_WORKER *w1 = hjoin_bloom_worker_begin (worker_thread (0), b);
+  HJOIN_BLOOM_WORKER *w2 = hjoin_bloom_worker_begin (worker_thread (1), b);
+  REQUIRE (w1 != NULL);
+  REQUIRE (w2 != NULL);
+  QFILE_LIST_ID *l1 = worker_list (j), *l2 = worker_list (j);
+
+  /* first-input keys '0'..'199'; absent keys 'x0', 'x1', ... */
+  std::vector<DB_VALUE> present { cast_text ("42", v5) };
+  auto absent = [&] (int i) { return std::vector<DB_VALUE> { cast_text (("x" + std::to_string (i)).c_str (), v5) }; };
+  {
+    std::vector<DB_VALUE> a0 = absent (0);
+    REQUIRE_FALSE (worker_skip (w1, worker_thread (0), l1, present, false));
+    REQUIRE (worker_skip (w1, worker_thread (0), l1, a0, false));
+    REQUIRE (worker_skip (w2, worker_thread (1), l2, a0, false));
+    REQUIRE (owner_skip (j, a0));
+  }
+  long long w1_tested = wview (w1).tested;
+
+  /* worker 1's next fetch fails (the row is built first: the knob counts every allocation) */
+  std::vector<DB_VALUE> a1 = absent (1);
+  fail_nth_alloc (1);
+  bool s = worker_skip (w1, worker_thread (0), l1, a1, false);
+  int left = g_alloc_countdown.load ();
+  fail_nth_alloc (0);
+  CHECK (left == 0);		/* the failure was spent inside the check */
+  CHECK_FALSE (s);		/* an absent key let through: the worker no longer filters */
+  CHECK (wview (w1).disabled);
+  CHECK (wview (w1).tested == w1_tested);	/* the failed row is not counted */
+  CHECK (er_errid () == NO_ERROR);
+  CHECK_FALSE (view (j.second ()).disabled);	/* the shared filter is untouched */
+
+  int w1_skipped = 0, w2_skipped = 0, owner_skipped = 0, skipped_key = -1;
+  for (int i = 2; i < 52; i++)
+    {
+      std::vector<DB_VALUE> a = absent (i);
+      w1_skipped += worker_skip (w1, worker_thread (0), l1, a, i % 2 == 0);
+      bool s2 = worker_skip (w2, worker_thread (1), l2, a, i % 2 == 0);
+      w2_skipped += s2;
+      owner_skipped += owner_skip (j, a);
+      if (s2 && skipped_key < 0)
+	{
+	  skipped_key = i;
+	}
+    }
+  CHECK (w1_skipped == 0);
+  CHECK (w2_skipped > 40);
+  CHECK (owner_skipped == w2_skipped);
+  CHECK (wview (w1).tested == w1_tested);
+  CHECK_FALSE (wview (w2).disabled);
+
+  /* worker 2's row buffer cannot grow (its first row on the descriptor path): the same, for worker 2 only */
+  HJOIN_BLOOM_WORKER *w3 = hjoin_bloom_worker_begin (worker_thread (2), b);
+  REQUIRE (w3 != NULL);
+  QFILE_LIST_ID *l3 = worker_list (j);
+  REQUIRE (skipped_key >= 0);
+  std::vector<DB_VALUE> a9 = absent (skipped_key);	/* a key the filter skips (not a false positive) */
+  fail_nth_alloc (1);
+  bool s3 = worker_skip (w3, worker_thread (2), l3, a9, true);
+  left = g_alloc_countdown.load ();
+  fail_nth_alloc (0);
+  CHECK (left == 0);
+  CHECK_FALSE (s3);
+  CHECK (wview (w3).disabled);
+  CHECK (wview (w3).row_buf == NULL);
+  CHECK (er_errid () == NO_ERROR);
+  CHECK (worker_skip (w2, worker_thread (1), l2, a9, true));
+
+  long long before = view (j.second ()).tested;
+  long long add = wview (w1).tested + wview (w2).tested + wview (w3).tested;
+  hjoin_bloom_worker_end (worker_thread (0), w1);
+  hjoin_bloom_worker_end (worker_thread (1), w2);
+  hjoin_bloom_worker_end (worker_thread (2), w3);
+  CHECK (view (j.second ()).tested == before + add);
+
+  /* begin without memory: NULL at every allocation it makes, nothing left behind, the error cleared */
+  int failing = 0;
+  for (int n = 1; n <= 16; n++)
+    {
+      size_t before_live = live_count ();
+      fail_nth_alloc (n);
+      HJOIN_BLOOM_WORKER *w = hjoin_bloom_worker_begin (worker_thread (3), b);
+      bool spent = g_alloc_countdown.load () == 0;
+      fail_nth_alloc (0);
+      if (w != NULL)
+	{
+	  CHECK_FALSE (spent);	/* it made fewer than n allocations */
+	  hjoin_bloom_worker_end (worker_thread (3), w);
+	  break;
+	}
+      INFO ("allocation " << n << " of begin fails");
+      CHECK (spent);
+      CHECK (live_count () == before_live);
+      CHECK (er_errid () == NO_ERROR);
+      failing++;
+    }
+  WARN ("worker_begin makes " << failing << " allocations (1 key column)");
+  CHECK (failing >= 2);
+  hjoin_bloom_release (owner_thread (), j.second ());
+}
+
+V3_TEST_CASE (b8_null, "B8: no filter or a worker that could not begin - begin (NULL) returns NULL, a NULL worker's "
+	      "skip_descr / skip_tuple return false (the row goes through), end (NULL) does nothing; skip_tuple of a NULL "
+	      "tuple returns false", "[contract]")
+{
+  boot_types ();
+  set_bloom_param (true);
+  CHECK (hjoin_bloom_worker_begin (worker_thread (0), NULL) == NULL);
+  int_scene s = int_scene_setup (100, 3);
+  QFILE_LIST_ID *l = worker_list (s.j);
+  std::vector<DB_VALUE> a = ints ({ 0x7fff0000 });
+  stage_descr (l, a);
+  CHECK_FALSE (hjoin_bloom_worker_skip_descr (worker_thread (0), NULL, l));
+  char *t = make_tuple (l, a);
+  CHECK_FALSE (hjoin_bloom_worker_skip_tuple (worker_thread (0), NULL, l, t));
+  hjoin_bloom_worker_end (worker_thread (0), NULL);
+  HJOIN_BLOOM_WORKER *w = hjoin_bloom_worker_begin (worker_thread (0), s.b);
+  REQUIRE (w != NULL);
+  CHECK_FALSE (hjoin_bloom_worker_skip_tuple (worker_thread (0), w, l, NULL));
+  CHECK (wview (w).tested == 0);
+  hjoin_bloom_worker_end (worker_thread (0), w);
+  CHECK (view (s.j.second ()).tested == 0);
+  free (t);
+  hjoin_bloom_release (owner_thread (), s.j.second ());
+}
+
+/* a spin barrier for the two worker threads and the test thread */
+struct spin_barrier
+{
+  std::atomic<int> arrived { 0 };
+  std::atomic<int> generation { 0 };
+  int parties;
+  explicit spin_barrier (int n):parties (n)
+  {
+  }
+  void wait ()
+  {
+    int gen = generation.load ();
+    if (arrived.fetch_add (1) + 1 == parties)
+      {
+	arrived = 0;
+	generation++;
+      }
+    else
+      {
+	while (generation.load () == gen)
+	  {
+	    std::this_thread::yield ();
+	  }
+      }
+  }
+};
+
+V3_TEST_CASE (b8_threads, "B8: two workers on two threads read the same bits at once and end at once - each skips "
+	      "what the owner would, no first-input key is skipped, and the shared tested / skipped are the exact sums "
+	      "(200 rounds)", "[contract]")
+{
+  boot_types ();
+  set_bloom_param (true);
+  int_scene s = int_scene_setup (5000, 99);
+  size_t n = s.rows.size ();
+
+  /* the owner's decision on every row, first (counted in the filter: subtracted below) */
+  std::vector<char> ref (n);
+  for (size_t i = 0; i < n; i++)
+    {
+      ref[i] = owner_skip (s.j, s.rows[i]);
+    }
+  long long ref_skipped = 0;
+  for (char c : ref)
+    {
+      ref_skipped += c;
+    }
+  QFILE_LIST_ID *lists[2] = { worker_list (s.j), worker_list (s.j) };
+  /* each worker's rows serialized in advance (make_tuple REQUIREs - Catch2 assertions stay on the test thread) */
+  std::vector<std::vector<char *>> tuples (2);
+  for (int k = 0; k < 2; k++)
+    {
+      for (size_t i = 0; i < n; i++)
+	{
+	  tuples[k].push_back (make_tuple (lists[k], s.rows[i]));
+	}
+    }
+
+  const int rounds = 200;
+  int bad_sum = 0, differ = 0, false_neg = 0, begin_failed = 0;
+  for (int round = 0; round < rounds; round++)
+    {
+      unitseam_bloom_view before = view (s.j.second ());
+      spin_barrier start (3), end (3);
+      long long tested[2] = { 0, 0 }, skipped[2] = { 0, 0 };
+      int d[2] = { 0, 0 }, fn[2] = { 0, 0 };
+      bool began[2] = { false, false };
+      auto body = [&] (int k)
+      {
+	THREAD_ENTRY *t = worker_thread (k);
+	HJOIN_BLOOM_WORKER *w = hjoin_bloom_worker_begin (t, s.b);
+	began[k] = w != NULL;
+	start.wait ();
+	/* worker k takes rows k, k + 2, ... and, from round to round, the other half too: both read every bit */
+	for (size_t i = (round % 2 == 0 ? k : 0); i < n; i += (round % 2 == 0 ? 2 : 1))
+	  {
+	    bool sk = hjoin_bloom_worker_skip_tuple (t, w, lists[k], tuples[k][i]);
+	    tested[k]++;
+	    skipped[k] += sk;
+	    d[k] += sk != (bool) ref[i];
+	    fn[k] += sk && s.row_present[i];
+	  }
+	end.wait ();
+	hjoin_bloom_worker_end (t, w);
+      };
+      std::thread th0 (body, 0), th1 (body, 1);
+      start.wait ();
+      end.wait ();
+      th0.join ();
+      th1.join ();
+      begin_failed += !began[0] + !began[1];
+      differ += d[0] + d[1];
+      false_neg += fn[0] + fn[1];
+      unitseam_bloom_view after = view (s.j.second ());
+      bad_sum += after.tested != before.tested + tested[0] + tested[1];
+      bad_sum += after.skipped != before.skipped + skipped[0] + skipped[1];
+    }
+  unitseam_bloom_view last = view (s.j.second ());
+  WARN ("rows " << n << " x " << rounds << " rounds x 2 threads: filter tested " << last.tested << ", skipped "
+	<< last.skipped << " (owner reference " << ref_skipped << " per pass)");
+  CHECK (begin_failed == 0);
+  CHECK (differ == 0);
+  CHECK (false_neg == 0);
+  CHECK (bad_sum == 0);
+  /* rounds alternate halves (n) and full passes (2n) for the two workers together */
+  long long expect_tested = (long long) n + (long long) (rounds / 2) * (long long) n
+    + (long long) (rounds - rounds / 2) * 2 * (long long) n;
+  long long expect_skipped = ref_skipped + (long long) (rounds / 2) * ref_skipped
+    + (long long) (rounds - rounds / 2) * 2 * ref_skipped;
+  CHECK (last.tested == expect_tested);
+  CHECK (last.skipped == expect_skipped);
+  for (auto &v : tuples)
+    {
+      for (char *t : v)
+	{
+	  free (t);
+	}
+    }
+  hjoin_bloom_release (owner_thread (), s.j.second ());
 }

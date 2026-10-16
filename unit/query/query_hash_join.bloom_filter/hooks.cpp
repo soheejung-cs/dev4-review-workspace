@@ -192,3 +192,59 @@ unitseam_hj_init_manager (THREAD_ENTRY * thread_p, XASL_NODE * hj_xasl)
     }
   return error;
 }
+
+/*
+ * v3 (1a7bccdcc): a parallel scan worker's view of the shared filter - struct hjoin_bloom_worker, which exists from
+ * 1a7bccdcc on. On an earlier revision the declaration below only introduces an incomplete type, the partial
+ * specialization drops out (sizeof of an incomplete type) and the view is empty: the suite still compiles there, and
+ * test.cpp registers its worker cases only when the worker API links (weak references).
+ */
+struct hjoin_bloom_worker;
+
+struct unitseam_worker_view
+{
+  bool present;
+  const void *bloom;
+  const void *key;
+  const void *row_buf;
+  int row_buf_size;
+  bool disabled;
+  long long tested;
+  long long skipped;
+};
+
+template < typename W, typename = void >struct unitseam_worker_access
+{
+  static void view (const void *, unitseam_worker_view * v)
+  {
+    memset (v, 0, sizeof (*v));
+  }
+};
+
+template < typename W > struct unitseam_worker_access <W, decltype ((void) sizeof (W)) >
+{
+  static void view (const void *p, unitseam_worker_view * v)
+  {
+    const W *w = (const W *) p;
+
+    memset (v, 0, sizeof (*v));
+    if (w == NULL)
+      {
+	return;
+      }
+    v->present = true;
+    v->bloom = w->bloom;
+    v->key = w->key;
+    v->row_buf = w->row_buf;
+    v->row_buf_size = w->row_buf_size;
+    v->disabled = w->disabled;
+    v->tested = w->tested;
+    v->skipped = w->skipped;
+  }
+};
+
+void
+unitseam_worker_view_of (const void *worker, unitseam_worker_view * v)
+{
+  unitseam_worker_access < struct hjoin_bloom_worker >::view (worker, v);
+}
