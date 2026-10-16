@@ -34,3 +34,4 @@ python3.11 -m tools.harness.unitseam run --rev <rev> --file … --mode … --tes
 | suite | 대상 | 출처 |
 |---|---|---|
 | `query/xasl_cache.bind_variant` | `xcache_bind_variant` 상태기계 | PR#8013 F1 고아 예약 |
+| `compat/db_vdb.bind_variant_key` | `db_bind_variant_switch` 변형 키 할당(parser 아레나) | PR#8013 F2 전환마다 키 누적 |
