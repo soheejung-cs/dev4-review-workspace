@@ -86,6 +86,8 @@ DB 서버·CTP 는 이 CLI 가 띄우지 않는다(`review-testing` 스킬의 �
 
 `run full --pr N` 은 리뷰용·설계용을 **한 번**에 돈다: initialize → context(성능 규칙 행 + 설계 불변조건 + episodic) → infer(arch) → **review_request**(LLM 입력: 공통 지시·두 규칙의 의무 항목·자동 MEAS finding·arch 요약·finding 스키마는 `preamble.md` 에 **한 번**, 컨텍스트 팩은 `review_request.batch<N>.md` 에 배치별 — 배치가 하나면 둘을 합친 `review_request.md`. 배치 지도·그룹 제안은 `batch_index.{md,json}`. **배치 번호 N 은 `context_pack.batch<N>.md` 의 N 과 같다** — 2026-10-02 이전 산출물은 파일명 문자열 정렬 때문에 10번부터 어긋나 있다) → [LLM 이 findings.json 작성] → `--findings` 로 verify(validate→gate→self_check→report.md) → memory(episodic). 층 구분은 finding 의 `layer` 필드와 게시 코멘트 첫 줄 태그로만 남는다. review/design/adjudicate yaml 은 이 그래프의 부분집합이다(디버그용).
 
+> **단위 테스트는 리뷰의 표준 단계다**(사용자 지시 2026-10-16): `run full` 의 context 단계 `unit_regress` 가 `unit/` suite 를 head/base 에 자동으로 돌리고(결과는 preamble·report), LLM 구간에서는 `harness-unit` 이 🟡 이상 지적을 동적으로 확인하고 핵심 함수의 `[contract]` suite 를 쌓는다. 리뷰할수록 `unit/` 이 커지고 다음 PR 의 회귀 신호가 된다.
+
 ### 두 층의 경계(finding 단위)
 | | 리뷰용(review) | 설계용(design) |
 |---|---|---|

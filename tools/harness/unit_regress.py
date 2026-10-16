@@ -42,7 +42,16 @@ def verdict(kind, head_ok, base_ok):
     return 'stale', 'head·base 모두 FAIL — suite 갱신 필요'
 
 
+def _sha(repo, rev):
+    """브랜치·태그 이름을 SHA 로 — 보고서 머리줄이 `rev[:9]` 로 이름을 자르지 않게(pr8013-new → pr8013-ne)."""
+    if not rev:
+        return rev
+    r = US.sh(['git', '-C', repo, 'rev-parse', '--verify', f'{rev}^{{commit}}'], check=False)
+    return r.stdout.strip() if r.returncode == 0 and r.stdout.strip() else rev
+
+
 def run(out, head, base, changed, log=print, repo=US.DEF_REPO, build=US.DEF_BUILD):
+    head, base = _sha(repo, head), _sha(repo, base)
     sel = select(changed)
     rows, res = [], []
     for s in sel:

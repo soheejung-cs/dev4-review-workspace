@@ -97,3 +97,6 @@ base `review/pr<N>-base`(merge-base) ← head `review/pr<N>-ko`(PR head + 주석
 
 ## 하네스로 시작하기 (2026-09-16)
 리뷰 전에 `python3 -m tools.harness.run full --pr <n>` 을 돌려 `out/<pr>/<sha>/` 의 **`preamble.md`**(지시·의무 항목·자동 MEAS·arch 요약·스키마)를 한 번 읽고 **`review_request.batch<N>.md`**(팩)를 번호 순으로 읽는다(배치가 하나면 `review_request.md` 하나로 자립). 배치가 많으면 `batch_index.md` 의 배치별 파일·그룹 제안을 먼저 본다. 지적은 `findings.json`(스키마 `harness/schemas/finding.json`, `layer` 로 코드/설계 구분) 으로 쓰고 `run full --pr <n> --findings <파일>` 로 판정·report.md·episodic 까지 이어간 뒤 보고서를 다듬는다. 설계: `arch.json`/`arch.mmd` 의 계층 간선과 리스크를 인용한다. 상세 `harness/ARCHITECTURE.md`.
+
+## 단위 테스트 (모든 리뷰, 사용자 지시 2026-10-16)
+하네스 없이 리뷰할 때도 같다 — 버그 가능성 🟡 이상은 `tools/harness/unitseam.py` 로 head/base 를 돌려 확인하고, 핵심 신설·변경 함수의 `[contract]` suite 를 `unit/<module>/<suite>/` 에 쌓는다. 절차는 `agents/harness-unit.md`, 규칙은 `unit/README.md`.

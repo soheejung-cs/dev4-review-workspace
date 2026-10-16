@@ -16,8 +16,11 @@
 
 ## 흐름
 
+**모든 PR 리뷰에 단위 테스트가 들어간다**(사용자 지시 2026-10-16): `unit_regress` 가 쌓인 suite 를 자동으로 돌리고, `harness-unit` 이 🟡 이상 지적을 동적으로 확인하며, 지적이 없어도 핵심 신설·변경 함수 1~3개의 `[contract]` suite 를 `unit/` 에 쌓는다. 상세 `skills/harness-review/SKILL.md` 2-1.
+
 ```
-harness-review   : run full → pack-reader(그룹별, 4개씩) → reviewer(그룹별) → refuter → synthesizer → run full --findings
+harness-review   : run full(+unit_regress) → pack-reader(그룹별, 4개씩) → reviewer(그룹별) → refuter → unit(🟡 이상 지적 확인 + 핵심 함수 계약 suite)
+                   → synthesizer → run full --findings
                    → gatekeeper(comments.draft) → [메인: 사용자 승인] → 게시 → auditor
 review-response  : threads → (결함 주장이면) repro → [메인: 답글 초안] → gatekeeper(답글) → [승인] → 게시 → auditor
 sql-difftest     : repro(세트별) → [메인: 분류 확인] → gatekeeper(지적 초안) → 게시 → auditor

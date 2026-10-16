@@ -30,7 +30,11 @@ description: 통합 리뷰 하네스 실행 — `/harness-review <PR번호>`. �
 절차 2~3 을 아래로 바꾼다 (메인 루프 = 나는 **승인·게시·사용자 대화만**):
 1. `batch_index.md` 의 그룹 제안대로 **4그룹씩** `Agent(subagent_type="harness-pack-reader")` → `observations.<g>.json`; 이어 `harness-reviewer` → `findings.<g>.json`. 프롬프트에는 `OUT`·`preamble.md` 경로·배치 파일 목록·그룹 이름만(지시문을 복사하지 않는다).
 2. `harness-refuter` 에 findings 전부 → `refute.<g>.json`.
-2-1. **에러 우려 지적(버그 가능성 🟡 이상)은 동적으로 확인한다** — SQL 로 닿으면 `harness-repro`(SA), 함수 단위면 **`harness-unit`**(`tools/harness/unitseam.py`: 그 TU 를 PR 빌드 플래그로 단독 컴파일 + seam 가짜·자동 stub, Catch2 로 head/base 비교. 목 허용, gha-ci 용 아님 — 사용자 지시 2026-10-16). 결과는 finding `verification.method=dynamic`, `artifact=OUT/unit/<id>/`.
+2-1. **모든 PR 리뷰에 단위 테스트를 붙인다**(사용자 지시 2026-10-16 — "PR 을 리뷰할 때마다 단위 테스트를 진행") — `harness-unit` / `tools/harness/unitseam.py`, 목 허용, gha-ci 용 아님.
+   - **(a) 회귀**: `run full` 의 `unit_regress` 가 `unit/` 에 쌓인 suite 중 이 PR 이 건드린 파일 것을 head/base 에 자동으로 돌린다. `[contract]` 회귀 후보·`[defect]` 재현 안 됨은 지적 후보로 본다.
+   - **(b) 지적 확인**: 버그 가능성 🟡 이상은 게시 전에 동적으로 확인한다 — SQL 로 닿으면 `harness-repro`(SA), 함수 단위면 `harness-unit`. 결과는 finding `verification.method=dynamic`, `artifact=OUT/unit/<id>/`.
+   - **(c) 계약 suite**: 지적이 없어도 이 PR 의 **핵심 신설·변경 함수 1~3개**에 `[contract]` 케이스(정상 경로 + 경계 1개 이상)를 만들어 `unit/<module>/<suite>/` 에 쌓는다 — 다음 PR 이 같은 파일을 건드리면 (a) 가 돌린다. 고르는 기준: 상태기계·판정 함수·경계 계산처럼 입력→출력이 정해지는 것, 서버 자원은 seam 으로 끊을 수 있는 것.
+   - 보고서 §0 의 '리뷰 신뢰도' 에 단위 결과(suite 수·케이스 head/base·재현 여부)를 한 줄로 적는다. 단위로 못 닿는 지적은 그 이유(필요한 seam 이 너무 많음 등)를 적는다.
 3. `harness-synthesizer` → `OUT/findings.json`·`comments.draft.md`·`report.head.md`.
 4. 절차 4~5(`--findings` 판정·requery) 는 그대로.
 5. **`harness-gatekeeper`** 에 `comments.draft.md` 와 재현 스크립트 경로 → `gate.*.md`. 차단급이 있으면 고쳐서 다시 돌린다 — 게시하지 않는다.
