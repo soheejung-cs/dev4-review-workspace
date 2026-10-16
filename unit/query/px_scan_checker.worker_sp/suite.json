@@ -1,0 +1,35 @@
+{
+ "name": "px_scan_checker sibling_check — a regu-linked subquery that calls an SP not declared PARALLEL_ENABLE must keep the outer heap scan from running that subquery in a px worker (CANNOT_RUN_IN_WORKER -> row-by-row in an output list, serial elsewhere)",
+ "file": "src/query/parallel/px_scan/px_scan_checker.cpp",
+ "mode": "cs",
+ "seams": [],
+ "appendix": "hooks.cpp",
+ "test": "test.cpp",
+ "watch": [
+  "src/query/parallel/px_scan/px_scan_checker.hpp",
+  "src/query/parallel/px_sp_eligibility.hpp",
+  "src/query/parallel/px_scan/px_scan_instnum.cpp",
+  "src/query/parallel/px_scan/px_scan_instnum.hpp",
+  "src/query/xasl.h",
+  "src/query/regu_var.hpp",
+  "src/xasl/xasl_predicate.hpp",
+  "src/xasl/xasl_aggregate.hpp",
+  "src/xasl/xasl_sp.hpp",
+  "src/sp/pl_signature.hpp",
+  "src/sp/pl_signature.cpp",
+  "src/parser/xasl_regu_alloc.cpp"
+ ],
+ "fakes": "No seam: every function under test is real, including the PARALLEL_ENABLE judge px_sp_is_parallel_eligible () (px_sp_eligibility.hpp, inline: sig != nullptr && sig->is_parallel_enabled). Fakes: cubpl::pl_arg::pl_arg () and cubpl::pl_signature::pl_signature () (pl_signature.cpp:45-53, 163-177, the !SERVER_MODE branch: pl_arg (0) allocates nothing; type NONE, name/auth NULL, result_type 0, is_parallel_enabled false, ext zeroed, is_disposable true) — the test then sets is_parallel_enabled; their vtables are auto-stubbed as zero data and never used (no virtual call). parallel_scan::is_renumberable_instnum () (px_scan_instnum.cpp:197-206 + is_plain_instnum_buildlist 151-195): same checks, with regu_subtree_refs_instnum reduced to its TYPE_CONSTANT case (dbvalptr == instnum_val) because only TYPE_CONSTANT outputs reach it here (any other output aborts the fake); it also counts calls, which sibling_check makes once per XASL it evaluates that has an inst_num — the visit counter of the 2^depth case. Auto-stubbed, never called: parallel_scan::is_atomic_instnum_eligible. XASL built as xasl_generation.c builds it: nodes zeroed then option Q_ALL / scan_op_type S_SELECT / parallelism -1 (regu_init (xasl_node &), xasl_regu_alloc.cpp:54-63); specs zeroed then ACCESS_METHOD_SEQUENTIAL / num_parallel_threads -1 (regu_spec_target_init); scalar subquery = TYPE_CONSTANT regu with xasl and XASL_LINK_TO_REGU_VARIABLE (pt_make_regu_subquery 7245-7280), correlated -> on the outer scan's dptr_list; stored function = TYPE_SP {sig, args, value} (7040-7076); hierarchical subquery = connect_by_ptr CONNECTBY_PROC with START WITH on proc.connect_by.start_with_pred (join path only, 786-790; the single-table rewrite moves START WITH into the subquery's own WHERE, query_rewrite.c:87-92), CONNECT BY on if_pred (765-771 / 796-801, plan_generation.c:4062-4065) or on the single-table iteration scan's spec (742-750, plan_generation.c:4058-4060), hierarchical WHERE on after_connect_by_pred (805-826). The plan mode is read from the outer spec flags after scan_check_parallel_scan_possible (): NO_PARALLEL_SCAN = serial, MERGEABLE_LIST = list-merge, neither = row-by-row.",
+ "note": "Mode is cs, not server: cubrid/CMakeLists.txt does not build px_scan_checker.cpp into cub_server; cs/ and sa/ do, and the client calls scan_check_parallel_scan_possible () while generating the XASL (xasl_generation.c 17675, 17909, 19491, 23872, 27679). hooks.cpp compiles at base b394c89f3 too, where CANNOT_RUN_IN_WORKER and the sibling cache do not exist: a fallback namespace nominated by a using-directive supplies them (flag value 0), so base runs and fails the new-bit assertions instead of failing to compile. F1 was fixed before the merge (author commit 63327870a, squashed into 4b7108f25 — the same three lines as our suggestion), so on develop and every later revision the four [defect] cases FAIL; unit_regress then reports them 'defect-gone?' when base is also post-fix. That is expected — the regression guard for F1 is the [contract] case 'PR8136 F1 fix contract'. xasl_generation.c and plan_generation.c are not in watch (too frequently changed); if a PR moves START WITH / CONNECT BY / hierarchical WHERE to other XASL fields, rerun this suite by hand.",
+ "origin": {
+  "pr": 8136,
+  "jira": "CBRD-27596",
+  "finding": "F1",
+  "comment": "https://github.com/CUBRID/cubrid/pull/8136#discussion_r4254913225",
+  "author_reply": "https://github.com/CUBRID/cubrid/pull/8136#discussion_r4255187830",
+  "reviewed_head": "4a5256c99",
+  "merged": "4b7108f25",
+  "date": "2026-10-16"
+ },
+ "defects_fixed_in": "4b7108f25"
+}
