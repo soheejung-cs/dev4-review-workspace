@@ -1,0 +1,27 @@
+{
+ "name": "CBRD-27251 CHAR 히스토그램 키 — hist::string_key_size_for_column(컬럼 타입으로 후행 공백 정규화) · histogram_repad_char_value/histogram_repad_ctx(LIKE/REGEXP 전 CHAR 되채우기) · HistogramReader 헤더 폭(슬롯 28, 범위 밖 0) · histogram_extract_key 프로브 키",
+ "file": "src/optimizer/histogram/histogram_cl.cpp",
+ "mode": "cs",
+ "seams": [],
+ "appendix": "hooks.cpp",
+ "test": "test.cpp",
+ "watch": [
+  "src/optimizer/histogram/histogram_reader.hpp",
+  "src/optimizer/histogram/histogram_reader.cpp",
+  "src/optimizer/histogram/histogram_cl.hpp",
+  "src/base/intl_support.c",
+  "src/base/intl_support.h",
+  "src/base/language_support.h",
+  "src/storage/byte_order.c"
+ ],
+ "fakes": "가짜는 언어 계층뿐이다. lang_get_collation: language_support.c:1731 본문 그대로(assert 범위 후 lang_Collations[id]). lang_Collations: 부팅된 프로세스처럼 모든 슬롯을 iso88591_bin 으로 채우고(lang_init_builtin, language_support.c:873-877) 내장 0..9 를 제 id 에 둔다 — 실제 coll_* 초기화자의 codeset 만 싣는다(0 ISO, 1 UTF8, 2·3 ISO, 4..7 UTF8, 8 EUC-KR, 9 BINARY=RAW_BYTES). lang_Loc_charset: language_support.c:68 초기값 ISO88591(LANG_SYS_CODESET 는 NDEBUG 빌드에서 이 변수). lang_charset: 초기화된 분기(return lang_Loc_charset) — debug 빌드 트리용. 실제 코드를 테스트 바이너리에 함께 컴파일한다(테스트의 -I 가 그 리비전 worktree 를 가리킨다): histogram_reader.cpp(HistogramReader::reset — 폭 슬롯 읽기·폴딩), intl_support.c(intl_char_count — 되채우기의 문자 수), byte_order.c(OR_GET/PUT_DOUBLE 의 ntohd/htond). blob 은 빌더와 같은 OR_* 매크로로 쓴다(histogram_builder.cpp:59-73, 269-280); 오프셋은 리터럴(28 은 CBRD-27251 전 HV2_RESERVED). 힙 CHAR 이미지는 pr_pad_char_to_precision(object_primitive.c:12629-12660)과 같게 ' ' 를 (precision - 문자 수)만큼 붙여 만든다. 상수 DB_VALUE 는 db_value_domain_init + db_make_db_char(dbtype_function.i:1095)가 채우는 필드를 직접 채운다.",
+ "note": "전부 [contract]. CBRD-27251 이전 리비전에서도 컴파일된다 — PR 이 만든 이름은 hooks.cpp 의 unitseam_absent / test.cpp 의 unitseam_probe 폴백으로 풀려 'absent at this revision' 로 FAIL 한다(한정 이름 탐색은 그 이름이 전역·hist 에 없을 때만 using-directive 를 본다). probe 두 케이스는 base 에서 부재가 아니라 동작으로 FAIL 한다(상수 타입 기준 정규화). 서버 쪽(histogram_sampler_sr.cpp 가 같은 규칙으로 키를 만들고 attr_precision 을 싣는 것)은 server 모드라 이 suite 범위 밖이다. 변이 확인(2026-10-16): 되채우기를 바이트 수로 세는 변이 → UTF-8·EUC-KR·roundtrip·ctx UTF-8 MCV FAIL, 프로브를 상수 타입으로 정규화하는 변이 → probe 핵심 두 케이스 FAIL.",
+ "origin": {
+  "pr": 7977,
+  "jira": "CBRD-27251",
+  "finding": "계약 suite(결함 재현 없음) — 머지 fd030f826 의 오류가 나기 쉬운 곳 1·2·3. 3차 리뷰 지적 3(폭 0 = 재수집 전 무동작)·4(코드셋 기준)의 동작을 계약으로 고정",
+  "comment": "https://github.com/CUBRID/cubrid/pull/7977",
+  "review": "claude-workspace/projects/CBRD-27251/리뷰보고서-PR7977-3차.md",
+  "date": "2026-10-16"
+ }
+}
