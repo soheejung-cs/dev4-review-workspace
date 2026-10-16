@@ -39,3 +39,5 @@ python3.11 -m tools.harness.unitseam run --rev <rev> --file … --mode … --tes
 | `optimizer/histogram_cl.unique_pinned` | `bind_target_spec_is_unique_pinned` UNIQUE 계열 고정 판정 | PR#8013 F4 함수·필터 UNIQUE 도 고정(잠재 — 문법이 UNIQUE 함수·필터 인덱스를 거부) |
 | `optimizer/histogram_cl.char_keys` | `string_key_size_for_column`·`histogram_repad_char_value`/`histogram_repad_ctx`·HV2 폭 슬롯·`histogram_extract_key` 프로브 키 | PR#7977 계약 29건(결함 없음, base 2건 동작 차이 = CBRD-27251 수정분) |
 | `query/px_scan_checker.worker_sp` | 병렬 스캔 체커 `CANNOT_RUN_IN_WORKER` 전파(select list·집계·퍼센타일·뒤 조인·CONNECT BY 세 술어) | PR#8136 계약 13건 + F1 CONNECT BY 미검사 이력 4건(머지 전 4b7108f25 에서 고쳐짐) |
+| `query/bind_variant.distance` | `bind_variant.h` 지문 거리·known·nearest 경계 | PR#8013 F9 비교 가능 슬롯 0개 → 1.0(도달성 미확정 — ENUM 바인드만 후보) · F25 계약 |
+| `optimizer/histogram_cl.bind_watch_check` | `histogram_bind_watch_check` band·첫 기록·항 수 변화·NULL/UNKNOWN 슬롯 | PR#8013 F15 band≤1.0 이면 worst_i=-1 인덱스(잠재 — 호출자는 1.1/1.5 만) · F22 NULL 은 슬롯 유지(주석과 반대) |

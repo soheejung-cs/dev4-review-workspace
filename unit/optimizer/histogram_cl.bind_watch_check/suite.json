@@ -1,0 +1,25 @@
+{
+ "name": "histogram_bind_watch_check — 힌트 경로(및 첫 peek)의 band 판정·첫 기록·항 수 변화·NULL/UNKNOWN 슬롯·worst_i",
+ "file": "src/optimizer/histogram/histogram_cl.cpp",
+ "mode": "cs",
+ "seams": [
+  "histogram_get_total_rows",
+  "histogram_get_equal_selectivity",
+  "histogram_get_comp_selectivity"
+ ],
+ "appendix": "hooks.cpp",
+ "test": "test.cpp",
+ "watch": [
+  "src/optimizer/histogram/histogram_cl.hpp",
+  "src/query/bind_variant.h",
+  "src/compat/db_vdb.c"
+ ],
+ "fakes": "히스토그램 읽기 셋만 가짜, 걷기·가격 조립(bind_term_vector→bind_term_walk→bind_term_add, histogram_split_hv_predicate, bind_card_arg_value)은 진짜. histogram_get_total_rows(seam): 실제는 histogram_init_reader_from_lhs 실패면 false, 아니면 reader.total_rows()>0 (histogram_cl.cpp:1526) — 테스트 열 표에 있으면 2^20, 없으면 false. histogram_get_equal/comp_selectivity(seam): 실제는 rhs NULL·히스토그램 없음·키 kind 불일치(1228-1232)면 success=false 이고 selectivity 를 건드리지 않음, 아니면 [0,1] 과 success=true(1357) — 호스트 변수 인덱스별 표(ok, rows)로 sel=rows/2^20 (곱이 정확). parser_walk_tree: parse_tree_cl.c:1111 pt_walk_private 순서 그대로(pre → PT_EXPR arg1·arg2·arg3 → or_next → next → post). pt_get_end_path_node: parser_support.c:2441 본문. qo_classify: query_planner.c:12837 중 이 트리가 닿는 분기. prm_Def: prm_get_bool_value(PRM_ID_ER_LOG_DEBUG) 가 cs 에서 inline 으로 읽는 배열 — 테스트가 정의, 기본 off(F15 케이스만 on). _er_log_debug: 줄을 보관하고 bind watch 두 형식은 원 인자(라벨 문자열 사본·주소, then, now, fold)도 — 라벨은 검사 함수 스택(cur.name)을 가리키므로 호출 안에서 복사한다. 호스트 값은 db_make_int/null 과 같은 필드 설정. BIND_WATCH_STATE 는 테스트가 calloc 해 채우거나 첫 검사로 기록.",
+ "note": "F15 [defect](band<=1.0 이면 fold 가 전부 1.0 일 때 worst_i=-1 로 cur.name[-1]·ws->rows[-1] 를 읽고 '재계획')는 잠재: 유일한 호출자 db_vdb.c:290 이 BIND_WATCH_HINT_BAND 1.1 / BIND_WATCH_BAND 1.5(histogram_cl.hpp:161/165) 만 넘긴다 — db_vdb.c 를 watch 에 둔 이유. 수정 `if (worst_i >= 0 && worst_fold >= band)` 를 --patch 로 넣으면 [defect] 만 FAIL. F22 는 주석 제안이라 [contract] 로 둔다: NULL 바인드는 슬롯을 1행으로 지키고(3155-3166) 항 수가 그대로라 'terms' 분기(3351 주석이 NULL 탓으로 적은 곳)가 아니라 band 분기로 재계획한다; 역변이(NULL 이면 bind_term_add 를 빼는 것)를 넣으면 이 케이스가 FAIL — 실제로 항 수를 바꾸는 것은 히스토그램이 사라진 열(bind_term_add 의 total_rows 실패)이다.",
+ "origin": {
+  "pr": 8013,
+  "finding": "F15 [defect] (15번, 🟢 2차 미게시) · F22 [contract] (22번, 🟢 2차 미게시)",
+  "comment": null,
+  "date": "2026-10-16"
+ }
+}

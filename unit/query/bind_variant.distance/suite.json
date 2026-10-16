@@ -1,0 +1,19 @@
+{
+ "name": "bind_variant.h — 지문 거리·known·nearest (inline 헤더 함수)의 경계: 항 수 다름·floor 양쪽 미만·0·unknown·대칭·동률·DBL_MAX 첫 레코드",
+ "file": "src/query/xasl_cache.c",
+ "mode": "server",
+ "seams": [],
+ "appendix": "hooks.cpp",
+ "test": "test.cpp",
+ "watch": [
+  "src/query/bind_variant.h"
+ ],
+ "fakes": "없음. 헤더의 static inline 세 함수를 테스트가 직접 부른다. 대상 TU xasl_cache.c 는 hooks.cpp 가 그 TU 안에서 컴파일된 사본(xcache_bind_variant 가 실제로 부르는 것)을 꺼내려고만 링크한다 — 모든 케이스가 두 사본(test TU·xasl_cache.c TU)에 같은 단정을 돈다. 자동 stub 함수 60·데이터 9 는 한 번도 불리지 않는다. 입력 값은 bind_term_add(histogram_cl.cpp:3004) 가 만드는 모양: MAX(1.0, sel*total) 또는 BIND_TERM_UNKNOWN(-1); 0 은 wire 로만 들어온다. floor 1000·band 1.5 는 호출자 상수(histogram_cl.hpp:161/169, db_vdb.c:573·xasl_cache.c:2927 의 dist < band).",
+ "note": "F9 [defect] 입력(같은 슬롯이 한쪽만 known, 양쪽 known 슬롯 0개)의 도달성: 호스트 값은 기대 도메인으로 캐스트되므로(parse_dbi.c:3109-3121, 기대 도메인은 pt_preset_hostvar type_checking.c:8620 이 열 도메인으로) 보통 `col op ?` 슬롯의 가격 가능 여부는 실행마다 바뀌지 않는다. 예외로 ENUM 기대 도메인은 캐스트 없이 복제(parse_dbi.c:3111)되어, ENUM 열 히스토그램(i64 키, histogram_cl.cpp:1150)에 문자열로 바인드하면 kind 불일치로 success=false(1228-1232)=UNKNOWN, 정수(멤버 인덱스)로 바인드하면 가격된다 — ENUM 열 술어 둘에 실행마다 문자열/정수를 엇갈려 바인드하면 입력이 생긴다(정적 추적, SQL 재현 안 함). 작성자 주석 db_vdb.c:552-554 도 실행마다 가격 가능성이 바뀐다고 본다. 변이: unitseam --patch 는 대상 TU 파일만 고치므로 헤더 수정(compared==0 이면 DBL_MAX)은 패치한 헤더를 test.cpp 앞에 include 하는 래퍼로 돌렸다(include guard 가 원본을 막음) — [defect] 만 FAIL, [contract] 12개 PASS.",
+ "origin": {
+  "pr": 8013,
+  "finding": "F9 [defect] (9번, 게시됨) · F25 [contract] (25번, 🟢 2차 미게시)",
+  "comment": "https://github.com/CUBRID/cubrid/pull/8013#discussion_r4290921370",
+  "date": "2026-10-16"
+ }
+}
