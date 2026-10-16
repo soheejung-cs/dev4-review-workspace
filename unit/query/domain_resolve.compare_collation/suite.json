@@ -1,0 +1,27 @@
+{
+ "name": "PR#8022 실행 전 비교·콜레이션 결정 — 키로 해소한 비교 = tp_value_compare_with_error(41값 전 쌍), 키 쌍 표 칸 = 직접 계산, 인자 순서 반대칭, domain_value_domain = tp_domain_resolve_value, 문자 결과 콜레이션 병합(LANG_RT_COMMON_COLL 순서)·가지 병합/선택·공통값·집합연산 열(-456)",
+ "file": "src/query/domain_rules.c",
+ "mode": "server",
+ "seams": [],
+ "appendix": "hooks.cpp",
+ "test": "test.cpp",
+ "watch": [
+  "src/query/domain_rules.h",
+  "src/object/object_domain.c",
+  "src/object/object_domain_convert.cpp",
+  "src/object/object_domain_convert.h",
+  "src/base/language_support.h",
+  "src/base/language_support.c",
+  "src/object/object_primitive.c",
+  "src/query/list_file.c"
+ ],
+ "fakes": "convert_numeric 과 같은 부팅 가짜(에러 관리자·private/area 할당자·환경변수·system_parameter 정적 초기화·boot_Server_status=DOWN·en_US.utf8 부팅)에 object_domain.c 까지 실코드로 테스트 TU 에 넣는다 — 기준 함수 tp_value_compare_with_error·tp_domain_resolve_value·tp_infer_common_domain 이 그 리비전의 실물이다. hooks.cpp 는 domain_compute_comparison·domain_compare_equal(TU static)을 꺼낸다. 값 41종 중 9종은 '쓰레기'(코드셋≠콜레이션 코드셋, 미등록 콜레이션 200, 부동 정밀도 -1/0, 정밀도보다 긴 CHAR) — 어떤 열도 만들지 않지만 DB_VALUE 가 막지 않는다. 자동 stub 함수 186·데이터 8 은 실행 중 불리지 않는다. domain_compare_set_operator_functions(query_evaluator.c)는 stub 이라 부르지 않는다(표 칸은 operator_functions 가 없다).",
+ "note": "신설 파일이라 a9940d67a 는 no-file. 계약의 기준은 각 규칙이 '그대로 지킨다'고 적은 행 시점 함수다(K1·K3 tp_value_compare_with_error, K5 tp_domain_resolve_value — release 에서 도는 optdebug 교차검사, K9 qfile_unify_types(list_file.c a9940d67a 와 같은 규칙)). K1 의 알려진 차이 하나: INT -3 ↔ TIME 에서 tp_value_compare_with_error 는 '성공'한 변환이 써 둔 -787(ER_TIME_CONVERSION)을 캐스트가 발행해 잔여로 남기고(can_compare=true), 해소된 비교의 변환기는 발행하지 않는다 — 결과·비교가능은 같다(정확히 그 두 쌍만 허용). K4 는 코드셋이 콜레이션과 다른 값을 뺀다 — 거기서는 기준 함수 자체가 순서에 따라 답이 다르다(LANG_RT_COMMON_COLL: 이진 콜레이션 둘이면 두 번째가 ISO 이진일 때만 병합). F2 는 잠재 결함: domain_resolve_comparison 은 domain_key_pair_index_exact(domain_rules.c:2274)로 정확한 키만 표 칸을 쓰는데 domain_compare_by_type_pair(2319, 집합 원소·JSON 스칼라·파티션 경계·해시 그룹 키)는 domain_key_pair_index 로 코드셋을 무시해 다른 키의 칸을 복사한다 — '12'(utf8,utf8_bin) vs '12'(utf8, iso_bin) 가 EQ 대신 -1150, 반대 방향은 -1150 대신 오류 없는 UNK. 도달 경로 미발견: CAS 바인드는 콜레이션에서 코드셋을 뽑고(lang_get_client_charset/collation language_support.c:2767-2805), DBLINK 값은 로컬 열 도메인으로 캐스트된다(dblink_scan.c:1391-1412). domain_compare_row_entry(2307, ALL/SOME 원소)도 같은 비-exact 색인이지만 NULL 이면 -1383 으로 가므로 수정안에서 뺐다. 변이: domain_compare_by_type_pair 에 _exact 색인 + tp_value_compare_with_error 폴백 → F2 FAIL, K1~K9 PASS. 감도: domain_compare_collation 의 코드셋 검사를 지운 변이 → K1·K3·K4 FAIL.",
+ "origin": {
+  "pr": 8022,
+  "jira": "CBRD-27510",
+  "finding": "계약 suite(요청: 공통 도메인·콜레이션 결정, 셀 함수 비대칭) + PR8022 F2 [defect] 잠재·미게시",
+  "comment": "https://github.com/CUBRID/cubrid/pull/8022",
+  "date": "2026-10-16"
+ }
+}

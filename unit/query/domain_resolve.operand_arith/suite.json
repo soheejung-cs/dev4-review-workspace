@@ -1,0 +1,26 @@
+{
+ "name": "PR#8022 실행 전 피연산자 해소·산술 승격 — 바인드(UNKNOWN) 피연산자 해소(qexec_resolve_late_bind_node·qexec_resolve_operand, 최소 플랜), 수 승격 행렬(+ - * /), FLOAT+BIGINT 비대칭, NULL 피연산자, 문자열·날짜 짝, 파라미터 3종, 바인드 타입 회전, 실행 전 -454, 문자열 + 의 콜레이션 = db_string_concatenate, SUM/AVG 누산 도메인",
+ "file": "src/query/domain_resolve.c",
+ "mode": "server",
+ "seams": [],
+ "appendix": "hooks.cpp",
+ "test": "test.cpp",
+ "watch": [
+  "src/query/domain_rules.c",
+  "src/query/domain_rules.h",
+  "src/query/domain_plan.h",
+  "src/query/domain_state.h",
+  "src/query/query_opfunc.c",
+  "src/query/string_opfunc.c",
+  "src/object/object_domain_convert.cpp"
+ ],
+ "fakes": "규칙(domain_rules.c)과 형 체계는 실코드다 — 테스트 TU 가 domain_rules.c 와 compare_collation 과 같은 소스 묶음(object_domain.c 포함)을 #include 하고, 부팅 가짜도 같다. 플랜은 가짜가 아니라 domain_plan.h 구조체를 로드가 채우는 모양 그대로 손으로 만든다: 바인드 피연산자 항목 n 개(val_pos 0..n-1, DOMAIN_PLAN_LATE_BIND, resolved_index -1) + 늦은 바인딩 노드 1개(resolved_index 0, cold.ctx/opcode) + DOMAIN_LATE_BIND_LINK(operands·literal·n_operands) + RESOLVED_DOMAIN_TABLE(in=바인드 값, domains[1]). hooks.cpp 는 qexec_resolve_late_bind_node(DOMAIN_DEFERRED_ERRORS 를 지역으로, xasl 은 query_alias 만 읽히므로 0 으로 채운 버퍼)와 qexec_resolve_operand 를 꺼낸다. 파라미터는 prm_Def(system_parameter.c 실 기본값)의 값을 케이스 안에서만 바꿨다 되돌린다. 자동 stub 함수 201·데이터 8 은 실행 중 불리지 않는다.",
+ "note": "신설 파일이라 a9940d67a 는 no-file. 산술 계약의 기준은 규칙이 '그대로 지킨다'는 a9940d67a 의 행 시점 타입별 연산자다: A1 행렬은 query_opfunc.c qdata_add_*_to_dbval(1683-2120)·subtract(3732-)·multiply(5267-)·divide(5877-)의 첫 피연산자별 switch 와 대조했고, A2 의 유일한 수-수 비대칭(FLOAT+BIGINT=DOUBLE vs BIGINT+FLOAT=FLOAT)은 qdata_add_float_to_dbval(1961)·qdata_add_bigint_to_dbval(1866) 그대로다. A4 의 비대칭(INT*DATE 값 없음 vs DATE*INT -454 등)도 qdata_multiply_dbval(5492)의 switch (type1) default 에서 온다 — PR 이 만든 것이 아니다. A6 은 같은 플랜에 바인드 타입을 INT→VARCHAR→NULL→DATE→BIGINT→INT 로 돌려 매 실행이 그 실행 값의 타입으로 해소됨(이전 실행 잔존 없음)을 고정한다. A10 의 NUMERIC 누산 numeric(40,0) 은 부동 NUMERIC(DB_DEFAULT_NUMERIC_PRECISION==DB_MAX_NUMERIC_PRECISION 40)이라 1.25 가 스케일을 유지함을 값으로 확인한다. 결함 재현 없음. 감도: domain_arith_number 의 FLOAT+BIGINT 예외를 지운 변이 → A1·A2 FAIL.",
+ "origin": {
+  "pr": 8022,
+  "jira": "CBRD-27510",
+  "finding": "계약 suite(요청: 바인드 UNKNOWN 해소·숫자 승격·NULL 피연산자·셀 함수 비대칭) — 결함 없음",
+  "comment": "https://github.com/CUBRID/cubrid/pull/8022",
+  "date": "2026-10-16"
+ }
+}
