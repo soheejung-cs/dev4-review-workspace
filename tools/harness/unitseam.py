@@ -6,6 +6,7 @@
   seam      지정한 함수 정의를 weak 로 바꾼다(static 이면 푼다). 테스트가 같은 시그니처의 강한 정의(가짜)를 두면 그쪽이 불린다.
   appendix  TU 끝에 붙일 코드. 같은 TU 안이라 static 전역·static 함수에 닿는다(테스트용 훅을 여기 둔다).
   prelude   부팅된 프로세스라면 가졌을 값이 필요한 전역(예: mmon_disabled=true)은 unitseam_prelude.cpp 에 weak 로 둔다.
+  patch     (변이) 제안 수정 diff 를 TU 사본에만 넣는다 — [defect] 가 FAIL, [contract] 가 PASS 면 테스트가 그 조건을 정확히 가리킨다.
   stub      링크 때 해석되지 않는 외부 심볼은 자동으로 weak stub 을 만든다. 함수는 호출되면 이름을 찍고 abort
             (UNITSEAM_STUB=zero 이거나 UNITSEAM_ZERO 목록에 있으면 0 을 돌려준다), 데이터는 0 으로 채운 4 KiB.
 
@@ -184,7 +185,23 @@ def build_and_run(a, rev, db, srcroot):
         res = {'rev': sha, 'status': 'no-file', 'note': f'{a.file} 가 이 리비전에 없다'}
         json.dump(res, open(os.path.join(out, 'result.json'), 'w'), ensure_ascii=False, indent=1)
         return res
-    text, seams = apply_seams(open(src).read(), [s for s in a.seam.split(',') if s])
+    orig = open(src).read()
+    if getattr(a, 'patch', ''):
+        # 변이: 제안 수정(unified diff, repo 경로 기준 -p1)을 TU 사본에만 넣는다 — [defect] 가 FAIL 로, [contract] 는 PASS 로 남아야 테스트가 그 조건을 가리킨다
+        import tempfile
+        with tempfile.TemporaryDirectory() as td:
+            dst = os.path.join(td, a.file)
+            os.makedirs(os.path.dirname(dst), exist_ok=True)
+            open(dst, 'w').write(orig)
+            pr_ = subprocess.run(['patch', '-p1', '-d', td, '-i', os.path.abspath(a.patch)], capture_output=True, text=True)
+            log.append(f'$ patch rc={pr_.returncode}\n{pr_.stdout}{pr_.stderr}')
+            if pr_.returncode:
+                open(os.path.join(out, 'build.log'), 'w').write('\n'.join(log))
+                res = {'rev': sha, 'status': 'patch-error', 'log': os.path.join(out, 'build.log')}
+                json.dump(res, open(os.path.join(out, 'result.json'), 'w'), ensure_ascii=False, indent=1)
+                return res
+            orig = open(dst).read()
+    text, seams = apply_seams(orig, [s for s in a.seam.split(',') if s])
     if a.appendix:
         text += '\n/* ---- unitseam appendix ---- */\n' + open(a.appendix).read()
     stem, ext = os.path.splitext(src)
@@ -256,7 +273,7 @@ def run_suite(suite_dir, revs, out, repo=DEF_REPO, build=DEF_BUILD, timeout=300)
     a = argparse.Namespace(repo=repo, build_tree=build, file=s['file'], mode=s['mode'],
                            seam=','.join(s.get('seams', [])),
                            appendix=os.path.join(suite_dir, s['appendix']) if s.get('appendix') else '',
-                           test=os.path.join(suite_dir, s.get('test', 'test.cpp')), out=out, timeout=timeout, catch_args=[])
+                           test=os.path.join(suite_dir, s.get('test', 'test.cpp')), out=out, timeout=timeout, catch_args=[], patch='')
     os.makedirs(out, exist_ok=True)
     db = compdb(build)
     return [build_and_run(a, rev, db, source_root(build)) for rev in revs]
@@ -272,6 +289,7 @@ def main():
     r.add_argument('--test', required=True)
     r.add_argument('--seam', default='', help='weak 로 바꿀 함수, 쉼표 구분. static 변수는 var:이름')
     r.add_argument('--appendix', default='')
+    r.add_argument('--patch', default='', help='변이: TU 사본에만 넣을 unified diff(repo 기준 -p1). 제안 수정을 넣으면 [defect] 가 FAIL 하는지 본다')
     r.add_argument('--out', default='')
     r.add_argument('--repo', default=DEF_REPO)
     r.add_argument('--build-tree', default=DEF_BUILD)

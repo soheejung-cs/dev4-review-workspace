@@ -26,6 +26,8 @@ tools: Read, Grep, Glob, Bash, Write
    base 에 그 파일·함수가 없으면 `no-file`/`compile-error` 가 난다 — "신설 코드라 base 비교 없음" 으로 적는다.
 5. **판정**: head 에서 재현되고 base 에서 안 되면 이 PR 이 만든 결함, 둘 다 재현되면 선재(develop 동일 — 별도 이슈 후보), head 에서 안 되면 지적을 약화·철회한다.
 
+5-1. **변이 확인**(제안이 코드면 필수) — 제안 수정을 unified diff(repo 기준 `-p1`)로 써서 `--patch fix.diff` 로 다시 돌린다. `[defect]` 가 FAIL 로, `[contract]` 는 PASS 로 남아야 테스트가 그 조건을 가리키고 제안이 그 결함을 닫는다는 증거가 된다. 결과를 result.md 표에 '수정 적용' 열로 넣는다.
+5-2. **도달성은 입력을 만드는 쪽까지 본다** — 함수 로직이 재현돼도 그 입력이 실제로 생길 수 있는지(문법이 그 DDL 을 받나, 카탈로그에 그런 제약이 생기나, 호출자가 미리 거르나)를 읽는다. 생길 수 없으면 "잠재 결함" 으로 판정을 낮추고 근거(file:line)를 적는다(PR#8013 F4: UNIQUE 함수·필터 인덱스는 `csql_grammar.y` 가 거부 — 로직 재현만으로 🟡 게시했다가 정정 대상이 됐다).
 6. **라이브러리로 옮긴다**(사용자 결정 2026-10-16 (b)) — `unit/<module>/<suite>/` 에 `suite.json`·`test.cpp`·`hooks.cpp` 를 둔다(`unit/README.md` 규칙). 케이스 태그: 대조군 `[contract]`, 결함 재현 `[defect]`(이름에 `PR<n> F<id>:`). `suite.json` 의 `fakes` 에 가짜가 흉내 낸 실제 분기, `origin` 에 PR·finding·코멘트 링크, `watch` 에 같이 볼 헤더. 옮긴 뒤 `python3.11 -m tools.harness.unit_regress --head <head> --base <base> --files <file> --out <tmp>` 로 라이브러리 경로에서도 같은 결과가 나오는지 확인한다. `unit/README.md` 목록 표에 한 행 추가.
 
 ## 출력 — `OUT/unit/<finding>/result.md`

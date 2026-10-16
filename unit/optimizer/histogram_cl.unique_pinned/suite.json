@@ -1,0 +1,23 @@
+{
+ "name": "bind_target_spec_is_unique_pinned — UNIQUE 계열 제약의 attributes 가 전부 등호 term 과 맞으면 spec 을 '고정' 으로 보는 판정(바인드 감시 후보 제외)",
+ "file": "src/optimizer/histogram/histogram_cl.cpp",
+ "mode": "cs",
+ "seams": [
+  "histogram_spec_class_name",
+  "bind_target_column_has_mcv"
+ ],
+ "appendix": "hooks.cpp",
+ "test": "test.cpp",
+ "watch": [
+  "src/optimizer/histogram/histogram_cl.hpp",
+  "src/object/class_object.h"
+ ],
+ "fakes": "histogram_spec_class_name(TU static, seam): 실제는 statement 를 걸어 info.spec.id == name.spec_id 인 PT_SPEC 의 entity_name.original 을 돌려준다(statement NULL·spec_id 0 이면 NULL) — 테스트의 spec id→클래스명 표로 같은 조회. bind_target_column_has_mcv(TU static, seam): 실제는 컬럼 히스토그램을 읽어 mcv_count()>0 — 항상 true(MCV 있는 컬럼, histogram_bind_watch_candidate 가 pinned 를 묻는 유일한 경우). db_find_class: 실제 sm_find_class_with_purpose(name,false), 모르는 클래스면 NULL — 테스트 카탈로그 표 조회. sm_class_constraints: 실제 au_fetch_class(READ,SELECT) 후 class_->constraints — 테스트가 만든 목록. intl_identifier_casecmp: 실제는 lang 인식 대소문자 무시 비교 — ASCII 식별자만 쓰므로 strcasecmp. pt_get_end_path_node: parser_support.c 본문 그대로. 제약 구성: 함수 UNIQUE(LOWER(a)) = attributes [a] + func_index_info{col_id 0, attr_index_start 0} (semantic_check.c pt_check_function_index_expr 가 식의 인자 컬럼을 키 끝으로 옮기고 execute_schema.c:3329 가 attr_index_start=nnames-func_no_args), 필터 UNIQUE(a) WHERE b>0 = attributes [a] + filter_predicate{pred_string, att_ids[b]}. term 은 실제 bind_target_walk 를 노드마다 불러 채운다(등호 판정은 진짜 코드).",
+ "note": "두 [defect] 입력(UNIQUE 함수 인덱스·UNIQUE 필터 인덱스)은 현재 문법이 거부한다(csql_grammar.y CREATE INDEX 2701·2739, 테이블 제약 UNIQUE 9337; 2012 CUBRIDSUS-7706 이후. CTP 답안 function_based_index_Create_001 last_name7·bug_bts_6844 가 -493). 그러므로 결함은 잠재(latent)다 — 문법이 이 둘을 허용하게 바뀌면 살아난다. csql_grammar.y 는 변경이 잦아 watch 에 넣지 않았다 — UNIQUE 함수·필터 인덱스를 여는 PR 이면 이 suite 를 손으로 돌린다.",
+ "origin": {
+  "pr": 8013,
+  "finding": "F4",
+  "comment": "https://github.com/CUBRID/cubrid/pull/8013#discussion_r4290921346",
+  "date": "2026-10-16"
+ }
+}
