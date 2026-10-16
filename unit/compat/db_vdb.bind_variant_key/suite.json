@@ -2,10 +2,26 @@
  "name": "db_bind_variant_switch — 플랜 변형 전환마다 만드는 변형 키(parser 아레나) 할당",
  "file": "src/compat/db_vdb.c",
  "mode": "cs",
- "seams": ["do_replan_statement_internal"],
+ "seams": [
+  "do_replan_statement_internal"
+ ],
  "appendix": "hooks.cpp",
  "test": "test.cpp",
- "watch": ["src/parser/parse_tree.c", "src/parser/parse_tree.h", "src/parser/parser.h", "src/optimizer/histogram/histogram_cl.hpp", "src/query/bind_variant.h"],
+ "watch": [
+  "src/parser/parse_tree.c",
+  "src/parser/parse_tree.h",
+  "src/parser/parser.h",
+  "src/optimizer/histogram/histogram_cl.hpp",
+  "src/query/bind_variant.h"
+ ],
  "fakes": "pt_append_string(다른 TU, 테스트가 정의) — parse_tree.c 의 old_string==NULL 분기(parser_allocate_string_buffer(strlen,1)+strcpy)를 흉내: 문자열마다 새 버퍼를 주고 strlen+1 바이트를 세며 '파서 해제'(테스트 리셋) 전에는 돌려주지 않는다(실제는 parser_free_parser→pt_free_string_blocks 에서만 반환). pt_free_statement_xasl_id(다른 TU) — parser_support.c 의 비-DELETE 분기 free_and_init(statement->xasl_id). do_replan_statement_internal(seam, 같은 TU static) — 성공 분기: 기존 XASL_ID 해제 후 do_prepare_statement 가 새 XASL_ID 를 남기는 것을, 문장에 걸린 변형 키(#k)로 이름 붙인 엔트리(time_stored.usec=base+1+k)로 흉내. 실제 prepare 가 해시 텍스트를 parser 아레나에 찍는 할당은 세지 않는다(402 행 범위 밖). histogram_bind_value_hash / histogram_bind_fingerprint(다른 TU) — 테스트가 정한 값 해시와 '히스토그램 술어 1개' 지문(terms=1, rows[0])을 돌려준다(실제의 '가격 매길 술어가 있다' 분기). db_bind_variant_step·switch·remember·key·key_ptr 와 bind_variant_nearest/distance(헤더 inline)는 진짜 코드.",
- "origin": {"pr": 8013, "finding": "F2", "comment": "https://github.com/CUBRID/cubrid/pull/8013#discussion_r4290921337", "date": "2026-10-16"}
+ "origin": {
+  "pr": 8013,
+  "finding": "F2",
+  "comment": "https://github.com/CUBRID/cubrid/pull/8013#discussion_r4290921337",
+  "date": "2026-10-16"
+ },
+ "requires": [
+  "db_bind_variant_switch"
+ ]
 }

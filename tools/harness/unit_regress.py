@@ -6,7 +6,8 @@ PR head 와 base 에 다시 돌린다. 결과는 OUT/unit_regress.{json,md} — 
   [defect]    지난 리뷰의 결함 재현(PASS = 결함 있음). head PASS → 결함 여전함. head FAIL & base PASS → **고쳐졌거나 동작이 바뀌었다**.
               suite.json 의 defects_fixed_in(커밋)이 있으면 이력 케이스 — head FAIL = 정상(이력), head PASS = **재발**.
   태그 없음  contract 로 본다.
-head 컴파일·링크 실패 → 이 PR 이 시그니처·구조를 바꿨다 — suite 갱신 필요(지적 아님, 확인 대상).
+suite.json 의 requires(대상 심볼)로 적용 여부를 먼저 본다: head 에 없고 base 에 있으면 '이 PR 이 대상 코드를 지웠다 — 이관 필요',
+둘 다 없으면 '적용 안 됨'(출처 PR 이 아직 안 들어온 리비전), base 에만 없으면 신설. 대상이 있는데 head 컴파일 실패 → suite 갱신 필요.
 
   python3 -m tools.harness.unit_regress --head <rev> --base <rev> --files a.c,b.cpp --out DIR   (단독 실행)
 환경 HARNESS_NO_UNIT=1 이면 파이프라인에서 건너뛴다.
@@ -53,20 +54,41 @@ def _sha(repo, rev):
     return r.stdout.strip() if r.returncode == 0 and r.stdout.strip() else rev
 
 
+def has_symbols(repo, rev, syms):
+    """suite 의 requires(대상 심볼)가 그 리비전 src/ 에 다 있나. 없으면 그 리비전은 suite 의 대상 코드보다 앞서거나 뒤다."""
+    import subprocess
+    for s in syms:
+        if subprocess.run(['git', '-C', repo, 'grep', '-q', '-w', s, rev, '--', 'src/'], capture_output=True).returncode:
+            return False, s
+    return True, ''
+
+
 def run(out, head, base, changed, log=print, repo=US.DEF_REPO, build=US.DEF_BUILD):
     head, base = _sha(repo, head), _sha(repo, base)
     sel = select(changed)
     rows, res = [], []
     for s in sel:
         o = os.path.join(out, 'unit_regress', s['_id'].replace('/', '__'))
+        req = s.get('requires', [])
+        h_has, h_miss = has_symbols(repo, head, req) if req else (True, '')
+        b_has, _ = has_symbols(repo, base, req) if (req and base) else (bool(base), '')
+        if not h_has:
+            if b_has:
+                rows.append(f"| `{s['_id']}` | (실행 안 함) | - | - | **이 PR 이 대상 코드 `{h_miss}` 를 지웠거나 바꿨다 — suite 이관 필요** |")
+            else:
+                rows.append(f"| `{s['_id']}` | (적용 안 됨) | - | - | 대상 코드 `{h_miss}` 가 head·base 모두에 없다(이 suite 의 출처 PR 이 아직 안 들어온 리비전) |")
+            res.append({'suite': s['_id'], 'skipped': True, 'missing': h_miss, 'base_has': b_has}); continue
+        revs = [head] + ([base] if (base and b_has) else [])
         try:
-            r = US.run_suite(s['_dir'], [head, base] if base else [head], o, repo=repo, build=build)
+            r = US.run_suite(s['_dir'], revs, o, repo=repo, build=build)
         except Exception as e:  # suite 하나의 실패가 리뷰를 막지 않게
             res.append({'suite': s['_id'], 'error': str(e)[:500]}); rows.append(f"| `{s['_id']}` | (실행 오류) | | | {str(e)[:120]} |"); continue
         h = r[0]; b = r[1] if len(r) > 1 else {}
         bmap = {c['name']: c for c in b.get('cases', [])}
         if h.get('status') != 'ran':
-            rows.append(f"| `{s['_id']}` | (head {h.get('status')}) | {b.get('status', '-')} | stale | 이 PR 이 시그니처·구조를 바꿨다 — suite 갱신 필요 ({h.get('log', '')}) |")
+            rows.append(f"| `{s['_id']}` | (head {h.get('status')}) | {b.get('status', '-')} | stale | 대상 코드는 있는데 suite 가 컴파일되지 않는다 — 이 PR 이 시그니처·구조를 바꿨을 수 있다, suite 갱신 필요 ({h.get('log', '')}) |")
+        if base and not b_has:
+            rows.append(f"| `{s['_id']}` | (base) | - | - | base 에 대상 코드가 없다 — 신설 코드라 base 비교 없음 |")
         for c in h.get('cases', []):
             kind = 'defect' if '[defect]' in (c.get('tags') or '') else 'contract'
             bc = bmap.get(c['name'])

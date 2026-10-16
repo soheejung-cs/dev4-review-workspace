@@ -31,5 +31,8 @@
   "merged": "4b7108f25",
   "date": "2026-10-16"
  },
- "defects_fixed_in": "4b7108f25"
+ "defects_fixed_in": "4b7108f25",
+ "requires": [
+  "CANNOT_RUN_IN_WORKER"
+ ]
 }

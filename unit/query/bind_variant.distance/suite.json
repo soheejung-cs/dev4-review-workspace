@@ -15,5 +15,8 @@
   "finding": "F9 [defect] (9번, 게시됨) · F25 [contract] (25번, 🟢 2차 미게시)",
   "comment": "https://github.com/CUBRID/cubrid/pull/8013#discussion_r4290921370",
   "date": "2026-10-16"
- }
+ },
+ "requires": [
+  "bind_fingerprint_distance"
+ ]
 }

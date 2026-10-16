@@ -6,7 +6,7 @@ gha-ci 용이 아니다. 리뷰 중 지적을 서버·DB 없이 동적으로 확
 ## 배치
 ```
 unit/<module>/<suite>/
-  suite.json   file(대상 TU, repo 경로) · mode(server|cs|sa) · seams(weak 로 바꿀 함수, static 변수는 var:이름)
+  suite.json   requires(대상 심볼 — 이 리비전에 suite 가 적용되나) · file(대상 TU, repo 경로) · mode(server|cs|sa) · seams(weak 로 바꿀 함수, static 변수는 var:이름)
                · appendix(TU 끝에 붙는 훅) · test · watch(이 파일들이 바뀌어도 돌린다) · fakes(가짜가 무엇을 흉내 내나) · origin(PR·finding·코멘트)
   test.cpp     Catch2 v2. 케이스 태그로 의미를 정한다:
                  [contract]  계약 — head FAIL·base PASS 면 회귀 후보
@@ -44,3 +44,4 @@ python3.11 -m tools.harness.unitseam run --rev <rev> --file … --mode … --tes
 | `executables/util_sa.optimizedb_options` | `optimizedb` -n / --no-histogram / --no-histogram-classes 파싱·조합·누수 | PR#8166 계약 33건(리뷰 T0~T3 영역, 변이 4종으로 감도 확인) |
 | `object/schema_manager.update_all_statistics` | `sm_update_all_statistics` skip 전달·서버 실패 조기 반환 | PR#8166 계약(base 선재: 서버 실패를 성공으로 보고 → PR 이 고침) |
 | `communication/network_interface_cl.histogram_all_classes` | `update_histogram_for_all_classes` OID 제외·경고·LIST_MOPS 해제 | PR#8166 F1(잠재) 중복 MOP 경고 과다 · base 선재 LIST_MOPS 누수 → PR 이 고침 |
+| `optimizer/histogram_cl.like_fingerprint` | `histogram_split_hv_predicate` LIKE/NOT LIKE 후보·`bind_fp_walk` LIKE 성분(frexp 2배 밴드·NOT LIKE 보수·선택도 0 밴드)·`hv_pred_walk` 히스토그램 결합 | PR#8006 계약 25건(결함 없음; 3d0148e41 에서 G1·G2 3건 FAIL = 1d5858374 수정분, 변이 4종 감도). PR#8013 머지 뒤 갱신 필요(bind_term_walk·시그니처 교체) |

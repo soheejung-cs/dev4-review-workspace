@@ -17,5 +17,8 @@
   "finding": "coverage + F1(latent, 이번 단위 검증에서 발견)",
   "comment": "https://github.com/CUBRID/cubrid/pull/8166",
   "date": "2026-10-16"
- }
+ },
+ "requires": [
+  "update_histogram_for_all_classes"
+ ]
 }

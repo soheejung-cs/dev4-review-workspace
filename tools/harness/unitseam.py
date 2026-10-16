@@ -8,6 +8,8 @@
   prelude   부팅된 프로세스라면 가졌을 값이 필요한 전역(예: mmon_disabled=true)은 unitseam_prelude.cpp 에 weak 로 둔다.
   patch     (변이) 제안 수정 diff(헤더 포함 아무 파일, repo 기준 -p1)를 그 리비전의 전용 worktree 에 git apply 해 돌린다 — [defect] 가 FAIL,
             [contract] 가 PASS 면 테스트가 그 조건을 정확히 가리킨다. 전용 worktree 는 실행 뒤 지운다.
+  extra     (선택) 같은 모드 플래그로 따로 컴파일해 함께 링크할 엔진 TU(repo 경로, 쉼표). 실제 코드를 쓸 때 — 한 test.cpp 에 여러 .c 를
+            #include 하면 memory_wrapper.hpp 의 new 매크로·static 이름이 부딪힌다. 그 리비전에 없는 파일은 건너뛴다(심볼은 stub).
   stub      링크 때 해석되지 않는 외부 심볼은 자동으로 weak stub 을 만든다. 함수는 호출되면 이름을 찍고 abort
             (UNITSEAM_STUB=zero 이거나 UNITSEAM_ZERO 목록에 있으면 0 을 돌려준다), 데이터는 0 으로 채운 4 KiB.
 
@@ -243,19 +245,35 @@ def _build_and_run(a, sha, wt, db, srcroot):
             res = {'rev': sha, 'status': 'compile-error', 'log': os.path.join(out, 'build.log')}
             json.dump(res, open(os.path.join(out, 'result.json'), 'w'), ensure_ascii=False, indent=1)
             return res
+    extra_objs = []
+    for rel in [x for x in getattr(a, 'extra', '').split(',') if x]:
+        esrc = os.path.join(wt, rel)
+        if not os.path.exists(esrc):
+            log.append(f'extra {rel}: 이 리비전에 없다 — 건너뜀(그 심볼은 stub)')
+            continue
+        ecc, eflags = flags_for(db, srcroot, rel, a.mode)
+        eobj = os.path.join(out, 'extra_' + re.sub(r'[^A-Za-z0-9_.]', '_', rel) + '.o')
+        r = sh([ecc, *retarget(eflags, srcroot, wt), '-c', esrc, '-o', eobj], check=False)
+        log.append(f'$ compile extra {rel} rc={r.returncode}\n{r.stderr[-2000:]}')
+        if r.returncode:
+            open(os.path.join(out, 'build.log'), 'w').write('\n'.join(log))
+            res = {'rev': sha, 'status': 'compile-error', 'log': os.path.join(out, 'build.log')}
+            json.dump(res, open(os.path.join(out, 'result.json'), 'w'), ensure_ascii=False, indent=1)
+            return res
+        extra_objs.append(eobj)
     rt_c = os.path.join(out, 'stubs_rt.c')
     open(rt_c, 'w').write(RT_C)
     o_rt = os.path.join(out, 'stubs_rt.o')
     sh(['cc', '-c', '-O1', rt_c, '-o', o_rt])
     o_pre = os.path.join(out, 'prelude.o')
     sh([cc, '-std=c++17', '-c', PRELUDE, '-o', o_pre])
-    objs = [o_tu, o_test, catch_main(cc), o_rt, o_pre]
+    objs = [o_tu, o_test, *extra_objs, catch_main(cc), o_rt, o_pre]
     libs = ['-lpthread', '-ldl', '-lm', '-lrt']
     exe = os.path.join(out, 'unit.bin')
     r = sh([cc, *objs, *libs, '-Wl,--no-demangle', '-o', exe], check=False)
     und = sorted(set(re.findall(r"undefined reference to [`']([^'`]+)'", r.stderr)))
     stubs = os.path.join(out, 'stubs.s')
-    nf, nd = make_stubs([o_tu, o_test], und, stubs)
+    nf, nd = make_stubs([o_tu, o_test, *extra_objs], und, stubs)
     log.append(f'stubs: functions {nf}, data {nd}')
     o_st = os.path.join(out, 'stubs.o')
     sh(['cc', '-c', stubs, '-o', o_st])
@@ -297,7 +315,8 @@ def run_suite(suite_dir, revs, out, repo=DEF_REPO, build=DEF_BUILD, timeout=300)
     a = argparse.Namespace(repo=repo, build_tree=build, file=s['file'], mode=s['mode'],
                            seam=','.join(s.get('seams', [])),
                            appendix=os.path.join(suite_dir, s['appendix']) if s.get('appendix') else '',
-                           test=os.path.join(suite_dir, s.get('test', 'test.cpp')), out=out, timeout=timeout, catch_args=[], patch='')
+                           test=os.path.join(suite_dir, s.get('test', 'test.cpp')), out=out, timeout=timeout, catch_args=[], patch='',
+                           extra=','.join(s.get('extra', [])))
     os.makedirs(out, exist_ok=True)
     db = compdb(build)
     return [build_and_run(a, rev, db, source_root(build)) for rev in revs]
@@ -313,6 +332,7 @@ def main():
     r.add_argument('--test', required=True)
     r.add_argument('--seam', default='', help='weak 로 바꿀 함수, 쉼표 구분. static 변수는 var:이름')
     r.add_argument('--appendix', default='')
+    r.add_argument('--extra', default='', help='함께 링크할 엔진 TU(repo 경로, 쉼표) — 같은 모드 플래그로 따로 컴파일. 그 리비전에 없으면 건너뜀')
     r.add_argument('--patch', default='', help='변이: 제안 수정 unified diff(repo 기준, 헤더 포함). 전용 worktree 에 적용해 [defect] 가 FAIL 하는지 본다')
     r.add_argument('--out', default='')
     r.add_argument('--repo', default=DEF_REPO)

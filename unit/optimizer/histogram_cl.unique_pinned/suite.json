@@ -19,5 +19,8 @@
   "finding": "F4",
   "comment": "https://github.com/CUBRID/cubrid/pull/8013#discussion_r4290921346",
   "date": "2026-10-16"
- }
+ },
+ "requires": [
+  "bind_target_spec_is_unique_pinned"
+ ]
 }

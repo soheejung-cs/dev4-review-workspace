@@ -23,5 +23,8 @@
   "comment": "https://github.com/CUBRID/cubrid/pull/7977",
   "review": "claude-workspace/projects/CBRD-27251/리뷰보고서-PR7977-3차.md",
   "date": "2026-10-16"
- }
+ },
+ "requires": [
+  "histogram_repad_char_value"
+ ]
 }

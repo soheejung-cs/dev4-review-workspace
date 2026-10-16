@@ -21,5 +21,8 @@
   "finding": "F15 [defect] (15번, 🟢 2차 미게시) · F22 [contract] (22번, 🟢 2차 미게시)",
   "comment": null,
   "date": "2026-10-16"
- }
+ },
+ "requires": [
+  "histogram_bind_watch_check"
+ ]
 }
