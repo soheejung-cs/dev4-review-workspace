@@ -112,6 +112,7 @@ DB 서버·CTP 는 이 CLI 가 띄우지 않는다(`review-testing` 스킬의 �
 | `pipeline.py` | YAML 러너 — `harness/pipelines/{review,design,adjudicate}.yaml` 의 stage/node 를 레지스트리로 실행, `manifest.json` 결정론 기록 |
 | `perf_claims.py` | PR 본문 성능 주장 → MEAS-01/04/05/07 자동 finding |
 | `episodic.py` | 게시된 리뷰 코멘트 + 작성자 응답 → `examples/episodic/PR-<n>.json` (accepted/rebutted/open) |
+| `unitseam.py` + `unitseam_prelude.cpp` | 리뷰용 단위 테스트(gha-ci 아님): TU 를 그 모드(server/cs/sa)의 빌드 트리 플래그로 worktree 에서 단독 컴파일 → seam(지정 함수 weak 화)·appendix(TU 끝 훅)·prelude(부팅 기본값 전역)·자동 stub(미해석 함수=trap/0, 데이터=0 4KiB) → Catch2 v2 링크·실행, `--rev` 반복으로 head/base 비교. 에이전트 `harness-unit` (2026-10-16) |
 | `session.py` | `ServerSession` RAII(conf·databases.txt 복원, 종료 보장), `cleanup_leftovers()` |
 | `harness/templates/repro.sh` | trap 정리·격리 포트·산출물 판정 템플릿 |
 | `context_pack.batches()` / `_invariants()` / `_episodic()` | 배치 분할 · 불변조건 상시 주입 · 과거 지적 주입 |

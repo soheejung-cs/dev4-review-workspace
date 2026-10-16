@@ -9,6 +9,7 @@
 | `harness-refuter` | 반증(high) | 지적을 무너뜨린다 — anchor·심볼·규칙 ID·확인 결과·더 단순한 설명 | findings → `refute.<g>.json` | review-response(반증 비평) |
 | `harness-synthesizer` | 종합(high) | 합치기·중복 제거·중요도 정렬 → `findings.json`·코멘트 초안·보고서 §0 | findings+refute → `findings.json`, `comments.draft.md`, `report.head.md` | review-response · 리뷰보고서-요청자관점 |
 | `harness-repro` | 판정 | 재현 스크립트를 develop/PR 빌드에 SA 로 돌려 회귀·스펙 변경·develop 결함 수정을 가른다 | SQL/모양 → `result.md` + 세트·출력 | sql-difftest · review-testing |
+| `harness-unit` | 판정 | 지적 함수의 번역 단위를 PR 빌드 플래그로 단독 컴파일해 seam(가짜)·자동 stub 으로 Catch2 단위 테스트를 head/base 에 돌린다 — 서버·DB 없이 결함 재현·선재를 가른다 | finding → `OUT/unit/<id>/result.md` + 테스트·결과 | `tools/harness/unitseam.py` |
 | `harness-threads` | 수집(low) | 스레드 수집·분류, 작성자 주장 인용 | PR → `threads.md/json` | review-response §1 |
 | **`harness-gatekeeper`** | 감시(high) | **게시 전** 산출물 하나를 규칙 원문과 대조 — 차단급이면 게시 보류 | 초안/답글/findings → `gate.*.md` | review-response · code-review · sql-difftest · CLAUDE.md 규칙 |
 | **`harness-auditor`** | 감시 | **작업 끝** 절차 점검 — 기록·배운것·보드·git·환경 복원·미응답 스레드 | 프로젝트 디렉터리+PR → `audit.*.md` | record · pre-clear · review-response §6·§7 |
