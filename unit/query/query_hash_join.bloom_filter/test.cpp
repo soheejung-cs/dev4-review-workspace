@@ -1,7 +1,9 @@
 /*
  * CBRD-27659 (prototype) -- a Bloom filter of the first-materialized hash join input's keys, checked before the second
  * input writes a row to its list (src/query/query_hash_join.c hjoin_bloom_*, server mode). New code: the base has no
- * hjoin_bloom_*, so the suite runs on head only (requires: hjoin_bloom_attach).
+ * hjoin_bloom_*, so the suite runs on head only (requires: hjoin_bloom_attach). Written for 5a8c0b7d8 (branch
+ * CBRD-27659), moved to the v2 layout (branch CBRD-27659-v2, e55956083 + fdc3fcd32): the trace counters live in
+ * HASHJOIN_PROC_NODE.bloom_stats (HASHJOIN_BLOOM_STATS used / keys / tested / skipped), not in the stats_group.
  *
  *   B1  no false negative: 100,000 random INT first-input keys; each of them as a second-input row is kept
  *       (+ a two-column key INT x VARCHAR)
@@ -14,19 +16,24 @@
  *       mostly skipped (false-positive rate near (1 - e^(-kn/m))^k, wide bounds); the bit array size
  *   B4  where it must not attach or act: parameter off, a preserved second side (RIGHT: inner, LEFT: outer, FULL), first
  *       status other than XASL_SUCCESS, first 0 rows / more than 10,000,000, a second input with GROUP BY, analytic,
- *       hash GROUP BY, LIMIT, OFFSET, DISTINCT, CONNECT BY, click counter, top-most, not a BUILDLIST, not an input of
- *       this join; a thread other than the owner and a cloned node let every row through; release on a clone frees
- *       nothing; a failed build lets every row through
- *   B5  detach moves the counters to the hash join's stats_group and frees the filter
+ *       hash GROUP BY, LIMIT, OFFSET, DISTINCT, CONNECT BY, ORDERBY_NUM () (ordbynum_pred / ordbynum_val), a top-N sort
+ *       limit (orderby_limit), click counter, the SELECT of an UPDATE / DELETE (upd_del_class_cnt), a subquery result
+ *       cache (sub_xasl_id), top-most, not a BUILDLIST, not an input of this join; a thread other than the owner and a
+ *       cloned node let every row through; release on a clone frees nothing; a failed build lets every row through
+ *   B5  detach moves the counters to the hash join's bloom_stats and frees the filter; attach clears bloom_stats at
+ *       each execution, whether or not it attaches (the aptr loop calls it for the first input too)
+ *   F2  (a contract since v2) the BLOOM counters detach wrote survive qexec_hash_join's hjoin_init_manager under trace:
+ *       bloom_stats is outside the stats_group it clears. On 5a8c0b7d8 they were in the stats_group, so the trace line
+ *       never printed - the layout change closed it, so this is no longer a [defect] case.
  *   F1  [defect] hjoin_bloom_skip_descr / hjoin_bloom_skip_tuple hand hjoin_fetch_key a QFILE_TUPLE_RECORD whose layout
  *       binding (type_list) and position cache are never set: what the stack held decides - a crash, or a matching row
  *       read through another list's layout and dropped
- *   F2  [defect] qexec_hash_join's hjoin_init_manager clears the whole stats_group under trace - after the aptr loop's
- *       hjoin_bloom_detach wrote the BLOOM counters - so the trace line never prints
  *   F3  [defect] (latent) the build takes "no error id" as "the first input was read to the end": a scan that stops on
  *       S_ERROR without an error id leaves a partial filter on, and the rows past the stop are dropped
  *   F4  [defect] (quality) false-positive rate about 2.3x the theory: the second probe stride ((h >> 16) | (h << 16)) | 1
  *       shares hash bits with the first position h & mask
+ *   F1, F3, F4 are fixed in fdc3fcd32 (suite.json defects_fixed_in): they reproduce on 5a8c0b7d8 and e55956083 and FAIL
+ *   on a fixed head; a PASS there is a recurrence.
  *
  * Real code at the revision under test, linked as --extra TUs: query_hash_scan.c (keys, hash, key_eq), memory_hash.c
  * (mht_get_hash_number, the collations' hash), qfile_tuple_layout.c (layout, slot walker), and the type system
@@ -1171,7 +1178,7 @@ TEST_CASE ("PR27659 F4: the false-positive rate is about twice the theory - the 
 }
 
 TEST_CASE ("B3: bit array = the power of two >= 10 x first-input row count, at least 64 bits (10,000,000 rows: 2^27 bits "
-	   "= 16 MiB, not the 12 MB the comment says)", "[contract]")
+	   "= 16 MiB)", "[contract]")
 {
   boot_types ();
   set_bloom_param (true);
@@ -1261,7 +1268,8 @@ TEST_CASE ("B4: attach follows the preserved side - INNER either way, LEFT inner
 }
 
 TEST_CASE ("B4: attach needs the parameter, a finished first input (XASL_SUCCESS) with 1..10,000,000 rows, and a second "
-	   "input that writes each row straight to its list", "[contract]")
+	   "input that writes each row straight to its list (no ORDERBY_NUM / top-N limit, not an UPDATE/DELETE select, no "
+	   "subquery cache)", "[contract]")
 {
   boot_types ();
   /* attach only tests these pointers for NULL */
@@ -1271,6 +1279,9 @@ TEST_CASE ("B4: attach needs the parameter, a finished first input (XASL_SUCCESS
   ANALYTIC_EVAL_TYPE *ae = (ANALYTIC_EVAL_TYPE *) dummy;
   XASL_NODE *cb = (XASL_NODE *) dummy;
   SELUPD_LIST *su = (SELUPD_LIST *) dummy;
+  PRED_EXPR *pe = (PRED_EXPR *) dummy;
+  DB_VALUE *dv = (DB_VALUE *) dummy;
+  XASL_ID *xid = (XASL_ID *) dummy;
 
   std::vector<attach_case> cases = {
     {"control: INNER, first 2 rows done", true, [] (join &) {}},
@@ -1292,6 +1303,13 @@ TEST_CASE ("B4: attach needs the parameter, a finished first input (XASL_SUCCESS
     {"second DISTINCT", false, [] (join & j) { j.second ()->option = Q_DISTINCT; }},
     {"second CONNECT BY", false, [&] (join & j) { j.second ()->connect_by_ptr = cb; }},
     {"second click counter (selected_upd_list)", false, [&] (join & j) { j.second ()->selected_upd_list = su; }},
+    {"second ORDERBY_NUM () predicate (ordbynum_pred)", false, [&] (join & j) { j.second ()->ordbynum_pred = pe; }},
+    {"second ORDERBY_NUM () value (ordbynum_val)", false, [&] (join & j) { j.second ()->ordbynum_val = dv; }},
+    {"second top-N sort limit (orderby_limit)", false, [&] (join & j) { j.second ()->orderby_limit = regu; }},
+    {"second is the SELECT of an UPDATE/DELETE (upd_del_class_cnt 1)", false,
+     [] (join & j) { j.second ()->upd_del_class_cnt = 1; }},
+    {"second list from the subquery result cache (sub_xasl_id)", false,
+     [&] (join & j) { j.second ()->sub_xasl_id = xid; }},
     {"second top-most", false, [] (join & j) { XASL_SET_FLAG (j.second (), XASL_TOP_MOST_XASL); }},
     {"second not a BUILDLIST (BUILDVALUE)", false, [] (join & j) { j.second ()->type = BUILDVALUE_PROC; }},
     {"hash join node not a HASHJOIN_PROC (MERGELIST)", false, [] (join & j) { j.hj->type = MERGELIST_PROC; }},
@@ -1361,11 +1379,12 @@ TEST_CASE ("B4: a thread other than the owner and a cloned node let every row th
     CHECK (unitseam_bloom_skip_bound (owner_thread (), clone, &r) == -1);
   }
   /* detach on the clone moves nothing */
-  HASHJOIN_STATS_GROUP *g = &j.hj->proc.hashjoin.stats_group;
-  g->bloom_used = false;
-  g->bloom_keys = -7;
+  HASHJOIN_BLOOM_STATS *g = &j.hj->proc.hashjoin.bloom_stats;
+  g->used = false;
+  g->keys = -7;
   hjoin_bloom_detach (owner_thread (), clone);
-  CHECK (g->bloom_keys == -7);
+  CHECK (g->keys == -7);
+  CHECK_FALSE (g->used);
   /* release on the clone: the clone forgets it, nothing is freed */
   hjoin_bloom_release (owner_thread (), clone);
   CHECK (clone->hj_bloom == NULL);
@@ -1409,7 +1428,7 @@ TEST_CASE ("B4: a build that cannot complete lets every row through (open fails,
     CHECK (v.disabled);
     CHECK (er_errid () == NO_ERROR);	/* the filter is an optimization: its failure is cleared */
     hjoin_bloom_detach (owner_thread (), j.second ());
-    CHECK_FALSE (j.hj->proc.hashjoin.stats_group.bloom_used);
+    CHECK_FALSE (j.hj->proc.hashjoin.bloom_stats.used);
   }
   {
     join j = int_join_with ({ 1, 2, 3, 4, 5, 6 });
@@ -1425,7 +1444,7 @@ TEST_CASE ("B4: a build that cannot complete lets every row through (open fails,
 
 /* ================================================================ B5: detach */
 
-TEST_CASE ("B5: detach moves keys / tested / skipped to the hash join's stats_group, marks it used, frees the filter",
+TEST_CASE ("B5: detach moves keys / tested / skipped to the hash join's bloom_stats, marks it used, frees the filter",
 	   "[contract]")
 {
   boot_types ();
@@ -1443,12 +1462,13 @@ TEST_CASE ("B5: detach moves keys / tested / skipped to the hash join's stats_gr
   unitseam_bloom_view v = view (j.second ());
   struct hjoin_bloom *b = j.second ()->hj_bloom;
   hjoin_bloom_detach (owner_thread (), j.second ());
-  HASHJOIN_STATS_GROUP *g = &j.hj->proc.hashjoin.stats_group;
-  CHECK (g->bloom_used);
-  CHECK (g->bloom_keys == 4);
-  CHECK (g->bloom_tested == 43);
-  CHECK (g->bloom_skipped == 1 + extra);
-  CHECK (g->bloom_tested == v.tested);
+  HASHJOIN_BLOOM_STATS *g = &j.hj->proc.hashjoin.bloom_stats;
+  CHECK (g->used);
+  CHECK (g->keys == 4);
+  CHECK (g->tested == 43);
+  CHECK (g->skipped == 1 + extra);
+  CHECK (g->tested == v.tested);
+  CHECK (g->skipped == v.skipped);
   CHECK (j.second ()->hj_bloom == NULL);
   CHECK (live ().count (b) == 0);
 
@@ -1456,15 +1476,78 @@ TEST_CASE ("B5: detach moves keys / tested / skipped to the hash join's stats_gr
   join e = int_join_with ({ 1 });
   hjoin_bloom_attach (owner_thread (), e.hj, e.second ());
   hjoin_bloom_detach (owner_thread (), e.second ());
-  CHECK_FALSE (e.hj->proc.hashjoin.stats_group.bloom_used);
-  CHECK (e.hj->proc.hashjoin.stats_group.bloom_keys == 0);
+  CHECK_FALSE (e.hj->proc.hashjoin.bloom_stats.used);
+  CHECK (e.hj->proc.hashjoin.bloom_stats.keys == 0);
   CHECK (e.second ()->hj_bloom == NULL);
 }
 
-/* ================================================================ F2: the trace counters do not survive */
+/* a re-execution must not print the previous execution's BLOOM line: attach starts the trace empty */
+static void
+stale_bloom_stats (const join & j)
+{
+  HASHJOIN_BLOOM_STATS *g = &j.hj->proc.hashjoin.bloom_stats;
+  g->used = true;
+  g->keys = 5;
+  g->tested = 6;
+  g->skipped = 7;
+}
 
-TEST_CASE ("PR27659 F2: hjoin_init_manager clears the stats_group under trace after detach wrote the BLOOM counters - "
-	   "the trace line never prints", "[defect]")
+static bool
+bloom_stats_clear (const join & j)
+{
+  const HASHJOIN_BLOOM_STATS *g = &j.hj->proc.hashjoin.bloom_stats;
+  return !g->used && g->keys == 0 && g->tested == 0 && g->skipped == 0;
+}
+
+TEST_CASE ("B5: attach clears the hash join's bloom_stats at each execution, also when it attaches nothing (the aptr "
+	   "loop's call for the first input, parameter off, a preserved second side)", "[contract]")
+{
+  boot_types ();
+  set_bloom_param (true);
+  {
+    /* the aptr loop reaches attach for the outer first, while the inner has not run */
+    join j = new_join (JOIN_INNER, { dom_int () }, { dom_int () }, { {0, 0} });
+    add_row (j.inner->list_id, { v_int (1) });
+    stale_bloom_stats (j);
+    hjoin_bloom_attach (owner_thread (), j.hj, j.outer);
+    CHECK (j.outer->hj_bloom == NULL);
+    CHECK (bloom_stats_clear (j));
+  }
+  {
+    join j = int_join_with ({ 1, 2 });
+    stale_bloom_stats (j);
+    set_bloom_param (false);
+    hjoin_bloom_attach (owner_thread (), j.hj, j.second ());
+    set_bloom_param (true);
+    CHECK (j.second ()->hj_bloom == NULL);
+    CHECK (bloom_stats_clear (j));
+  }
+  {
+    join j = int_join_with ({ 1, 2 }, JOIN_RIGHT);	/* outer first: the inner is RIGHT's preserved side */
+    stale_bloom_stats (j);
+    hjoin_bloom_attach (owner_thread (), j.hj, j.second ());
+    CHECK (j.second ()->hj_bloom == NULL);
+    CHECK (bloom_stats_clear (j));
+  }
+  {
+    /* attached: cleared too, and the detach of this execution fills it */
+    join j = int_join_with ({ 1, 2 });
+    stale_bloom_stats (j);
+    hjoin_bloom_attach (owner_thread (), j.hj, j.second ());
+    REQUIRE (j.second ()->hj_bloom != NULL);
+    CHECK (bloom_stats_clear (j));
+    CHECK (decide (j, ints ({ 2 })) == 0);
+    hjoin_bloom_detach (owner_thread (), j.second ());
+    CHECK (j.hj->proc.hashjoin.bloom_stats.used);
+    CHECK (j.hj->proc.hashjoin.bloom_stats.keys == 2);
+    CHECK (j.hj->proc.hashjoin.bloom_stats.tested == 1);
+  }
+}
+
+/* ================================================================ F2: the trace counters survive the join's start */
+
+TEST_CASE ("F2 contract: the BLOOM counters detach wrote survive hjoin_init_manager under trace - bloom_stats is "
+	   "outside the stats_group it clears (PR27659 F2 on 5a8c0b7d8)", "[contract]")
 {
   boot_types ();
   set_bloom_param (true);
@@ -1475,20 +1558,26 @@ TEST_CASE ("PR27659 F2: hjoin_init_manager clears the stats_group under trace af
   CHECK (decide (j, ints ({ 2 })) == 0);
   CHECK (decide (j, ints ({ 77 })) == 1);
   hjoin_bloom_detach (owner_thread (), j.hj->proc.hashjoin.inner.xasl);
-  HASHJOIN_STATS_GROUP *g = &j.hj->proc.hashjoin.stats_group;
-  REQUIRE (g->bloom_used);	/* the aptr loop's detach did its part */
-  REQUIRE (g->bloom_keys == 3);
+  HASHJOIN_BLOOM_STATS *g = &j.hj->proc.hashjoin.bloom_stats;
+  REQUIRE (g->used);		/* the aptr loop's detach did its part */
+  REQUIRE (g->keys == 3);
+  REQUIRE (g->tested == 2);
+  REQUIRE (g->skipped == 1);
 
   /* qexec_execute_mainblock_internal: aptr loop (attach .. detach) -> HASHJOIN_PROC -> qexec_hash_join ->
-   * hjoin_init_manager, which memsets proc->stats_group when the thread is on trace */
+   * hjoin_init_manager, which memsets proc->stats_group when the thread is on trace. A sentinel in the stats_group
+   * shows the trace branch ran (otherwise the counters would survive for the wrong reason). */
+  j.hj->proc.hashjoin.stats_group.context_cnt = 99;
   owner_thread ()->on_trace = true;
   int rc = unitseam_hj_init_manager (owner_thread (), j.hj);
   owner_thread ()->on_trace = false;
   REQUIRE (rc == NO_ERROR);
-  /* qdump_print_hashjoin_stats_text prints BLOOM only when stats_group->bloom_used */
-  CHECK_FALSE (g->bloom_used);
-  CHECK (g->bloom_keys == 0);
-  CHECK (g->bloom_tested == 0);
+  REQUIRE (j.hj->proc.hashjoin.stats_group.context_cnt == 0);
+  /* qdump_print_hashjoin_stats_text prints BLOOM when proc->bloom_stats.used */
+  CHECK (g->used);
+  CHECK (g->keys == 3);
+  CHECK (g->tested == 2);
+  CHECK (g->skipped == 1);
 }
 
 /* ================================================================ F3 (latent): a partial filter */
