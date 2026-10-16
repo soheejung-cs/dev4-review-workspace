@@ -77,7 +77,15 @@ def flags_for(db, srcroot, rel, mode):
             toks = shlex.split(e['command'])
             break
     else:
-        raise SystemExit(f'compile command 없음: {rel} ({mode}) — 그 모드로 빌드되지 않는 파일일 수 있다')
+        # 빌드 트리가 모르는 파일(PR 이 새로 만든 .c/.cpp): 같은 디렉터리 → 같은 모드 아무 파일 순으로 플래그를 빌린다
+        d = os.path.dirname(os.path.join(srcroot, rel))
+        cand = [e for e in db if want in e['command'] and os.path.dirname(e['file']) == d] or \
+               [e for e in db if want in e['command'] and e['file'].endswith(('.c', '.cpp'))]
+        if not cand:
+            raise SystemExit(f'compile command 없음: {rel} ({mode}) — 그 모드로 빌드되지 않는 파일일 수 있다')
+        e = cand[0]
+        toks = shlex.split(e['command'].replace(e['file'], os.path.join(srcroot, rel)))
+        print(f'unitseam: {rel} 는 빌드 트리에 없다 — {os.path.relpath(e["file"], srcroot)} 의 {mode} 플래그를 빌린다', file=sys.stderr)
     cc, out, skip = toks[0], [], False
     for i, t in enumerate(toks[1:]):
         if skip:
