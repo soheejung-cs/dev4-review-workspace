@@ -49,3 +49,7 @@ python3.11 -m tools.harness.unitseam run --rev <rev> --file … --mode … --tes
 | `query/domain_resolve.convert_numeric` | `tp_value_cast`/`coerce`/`cast_force`/`coerce_strict` 경계·NUMERIC 사칙 p/s·변환기 정책 행렬 | PR#8022 계약 7건(변환 경계 불변) + **PR8087 F1 실결함: DOUBLE·MONETARY·문자열 [2^31-0.5, 2^31)→INT 가 INT_MIN 으로 랩(16eb8474d 가 만듦)** |
 | `query/domain_resolve.compare_collation` | 해소된 비교·`domain_compare_by_type_pair` = `tp_value_compare_with_error`(41값 전 쌍)·인자 순서 반대칭·문자 결과 콜레이션 | PR#8022 계약 9건 + F2(잠재 — 코드셋≠콜레이션 문자열에서 비-exact 키 색인, 도달 경로 미발견) |
 | `query/domain_resolve.operand_arith` | `qexec_resolve_late_bind_node`·`qexec_resolve_operand`(바인드 타입 회전)·수 승격·FLOAT+BIGINT 비대칭·SUM/AVG 누산 | PR#8022 계약 10건(결함 없음) |
+| `query/expr_compile.arith_kernels` | 산술 커널 표·결과 도메인·lazy·리스트·게이트 상수·open 스텝·무작위 리스트(CSE·CASE·NUMERIC 혼합)를 해석 경로와 같은 바이너리에서 차분 | PR#7658 계약 22건 + F2(잠재) 실패한 prologue 재실행 생략 |
+| `query/expr_compile.generic_step` | generic 스텝 피연산자 규약(전 opcode·'?'·!d/!t·WIDTH_BUCKET)·재귀 한도·중첩 프로그램을 해석기 fetch switch 와 차분 | PR#7658 계약 12건 + F1 오른쪽 깊은 체인 컴파일 지수 시간·거절 |
+| `query/expr_compile.sum_acc` | NUMERIC SUM 누산기 41자리 경계(add_dbv·워드 경로·merge) = + 체인 | PR#7658(CBRD-27408 포트) 계약 6건, 결함 없음(base 3건 FAIL = 의도된 변경) |
+| `query/query_hash_join.bloom_filter` | `hjoin_bloom_*` 해시 조인 둘째 입력 Bloom 필터(거짓 음성 0·강제변환 짝 7종·NULL/거짓 양성·비트 크기·붙는 조건·owner/clone·detach) — 첫 `--extra` suite | CBRD-27659 프로토타입 계약 17건 + F1 묶이지 않은 레코드(크래시·행 누락) · F2 trace 카운터 소거 · F3 잠재 부분 필터 · F4 FPR 2.2배 — 전부 v2 `e55956083`·`fdc3fcd32` 에서 수정 |

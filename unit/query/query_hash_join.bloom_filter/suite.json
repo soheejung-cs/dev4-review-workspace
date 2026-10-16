@@ -1,0 +1,56 @@
+{
+ "name": "CBRD-27659 Bloom join filter (프로토타입) — 해시 조인 둘째 입력 물질화에 첫 입력 키 Bloom: 거짓 음성 0(무작위 10만 키·두 열 키)·강제변환 짝(INT×BIGINT·NUMERIC 정밀도·NUMERIC 38 초과·INT×DOUBLE·CHAR×VARCHAR 뒤 공백·utf8_en_ci)·NULL 키·거짓 양성률·비트 배열 크기·붙는 조건(보존 쪽·상태·행 수·둘째 모양)·owner 스레드/복제 노드·release/detach·빌드 실패 + 결함 F1(묶이지 않은 레코드) F2(trace 카운터 소거) F3(잠재: 부분 필터) F4(거짓 양성률 2.3배)",
+ "requires": [
+  "hjoin_bloom_attach"
+ ],
+ "file": "src/query/query_hash_join.c",
+ "mode": "server",
+ "seams": [],
+ "appendix": "hooks.cpp",
+ "test": "test.cpp",
+ "extra": [
+  "src/query/query_hash_scan.c",
+  "src/base/memory_hash.c",
+  "src/query/qfile_tuple_layout.c",
+  "src/storage/byte_order.c",
+  "src/base/system_parameter.c",
+  "src/base/language_support.c",
+  "src/base/intl_support.c",
+  "src/base/chartype.c",
+  "src/base/mprec.c",
+  "src/base/dtoa.c",
+  "src/object/object_primitive.c",
+  "src/object/object_domain.c",
+  "src/object/object_domain_convert.cpp",
+  "src/query/numeric_opfunc.c",
+  "src/compat/db_date.c",
+  "src/compat/db_macro.c",
+  "src/query/string_opfunc.c"
+ ],
+ "watch": [
+  "src/query/query_hash_join.h",
+  "src/query/query_executor.c",
+  "src/query/xasl.h",
+  "src/query/query_list.h",
+  "src/query/qfile_tuple_layout.h",
+  "src/query/qfile_tuple_layout.c",
+  "src/query/query_hash_scan.c",
+  "src/query/query_hash_scan.h",
+  "src/base/memory_hash.c",
+  "src/query/list_file.c",
+  "src/query/query_dump.c",
+  "src/base/system_parameter.h"
+ ],
+ "fakes": "진짜(그 리비전 코드): query_hash_join.c 전체(대상 TU — hjoin_bloom_*·hjoin_init_domain_info·hjoin_fetch_key·hjoin_init_manager), --extra 로 링크한 query_hash_scan.c(qdata_alloc/free_hscan_key·qdata_hash_scan_key·qdata_hscan_key_eq)·memory_hash.c(mht_get_hash_number — 콜레이션별 MHT2STR_COLL 포함)·qfile_tuple_layout.c(qfile_type_list_alloc·qfile_set_layout·qfile_slot_get_column_data_walk)·byte_order.c·형 체계(system_parameter.c·language_support.c·intl_support.c·chartype.c·mprec.c·dtoa.c·object_primitive.c·object_domain.c·object_domain_convert.cpp·numeric_opfunc.c·db_date.c·db_macro.c·string_opfunc.c). 튜플은 실제 조립기 qfile_tuple_size_from_values/qfile_tuple_fill_from_values(qfile_generate_tuple_into_list 의 T_NORMAL 경로)로 쓰고, 둘째 입력의 tpl_descr 는 qdata_collect_tuple_values<true> 의 크기 패스와 같은 상태(f_valp·f_len·f_cnt·tpl_size·has_null)로 둔다. 기준값 '조인이 맞다고 보나'는 TU 의 해시 조인 자체 규칙: in-memory 해시표가 qdata_hash_scan_key 값으로 키를 잡고(mht_create_hls(..., NULL, NULL), hjoin_probe_key) 프로브가 hjoin_fetch_key(compare_key) 로 비교 — 둘 다 같을 때 '조인 일치'(hooks.cpp unitseam_hj_join_pair, fetch info 는 hjoin_init_manager 와 같은 방식). 가짜: list_file.c 페이지 순회 3개 — qfile_open_list_scan(list_id 사본 + scan_id->tplrec 를 사본 type_list 에 묶음), qfile_scan_list_next(PEEK: 저장 튜플을 가리키고 &scan_id->list_id.type_list 에 묶음, size 0 = qfile_retrieve_tuple PEEK 분기, 끝이면 S_END), qfile_close_scan(닫힘 표시); 실제는 qmgr 임시 파일 페이지로 읽는다. 가짜 손잡이: fail_open(ER_FAILED + 에러 id), stop_at(그 튜플에서 S_ERROR, 에러 id 유무 선택 — F3). 부팅: er_set/er_errid/er_clear(마지막 id), db_private_alloc/free/realloc_release(malloc + 살아 있는 블록 집합 — release 가 무엇을 해제했나 확인용), area_create/alloc/free(calloc), envvar_get=NULL·envvar_trim_char 본문, cubthread::system_core_count=8·cubregex::get_engine_name, boot_Server_status=DOWN(prm_get_value 가 전역값), lang_init_builtin→tp_init→lang_set_charset_lang(\"en_US.utf8\"). 파라미터는 실제 prm_set_bool_value(PRM_ID_HASH_JOIN_BLOOM_FILTER). THREAD_ENTRY 는 0 으로 채운 cubthread::entry 크기 블록(주소 비교와 on_trace 만 읽힌다). XASL 은 calloc 후 stream_to_xasl 처럼: domain_info 배열 ls_column_cnt 개, value_indexes = ls_outer/inner_column, aptr_list outer→inner(pt_to_hashjoin_proc). 자동 stub 함수 242·데이터 12 는 실행 중 한 번도 불리지 않는다(stub_calls 빈 목록).",
+ "note": "신설 코드라 base 4adcd4090 은 hooks 컴파일 실패(xasl_node 에 hj_bloom 없음) — base 비교 없음. 대조군은 hjoin_bloom_skip_record 를 '둘째 list 에 묶인 레코드'로 부르는 hooks 경로(unitseam_bloom_skip_bound)로 판정한다: 공개 진입점 hjoin_bloom_skip_descr/skip_tuple 은 F1 때문에 묶이지 않은 레코드를 넘겨 결과가 스택 쓰레기에 달려 있기 때문이다(그 둘은 F1 케이스가 fork 한 자식에서만 부른다). F1 재현은 unitseam 의 -O0 -fno-inline 에 기댄다: 같은 프레임에서 poison_stack() 다음에 부른 함수의 지역 변수가 그 바이트로 시작한다. DECOY 는 자식에서 0x40008000 에 다른 list 의 type list(8바이트 backward 헤더, INT 2열)를 매핑한다 — 매핑 실패면 REQUIRE 로 장면 무효. 변이 확인(5a8c0b7d8, --patch): (a) hjoin_bloom_build 의 second.need_coerce_domains=false → 둘째가 강제변환되는 짝 4개(BIGINT×INT 음수, NUMERIC(20,4)×NUMERIC(10,2), NUMERIC(38,0)×NUMERIC(38,10), DOUBLE×INT) FAIL, CHAR×VARCHAR·en_ci 는 PASS(해시가 뒤 공백·정밀도에 무관), (b) attach 의 LEFT/RIGHT 뒤집기 → B4 보존 쪽 케이스 FAIL, (c) first status 검사 제거 → B4 상태 케이스 FAIL. 수정안(F1~F4 diff) 적용 시 [defect] 5건 FAIL·[contract] 전부 PASS, 거짓 양성률 1.58%/1.51%(이론 1.54%). 새 구현(CBRD-27659-v2 등)에 다시 돌릴 때: test.cpp 는 공개 API(hjoin_bloom_attach/skip_descr/skip_tuple/detach/release, HASHJOIN_STATS_GROUP.bloom_*, xasl_node.hj_bloom, PRM_ID_HASH_JOIN_BLOOM_FILTER)만 쓰고, TU 내부 이름(struct hjoin_bloom 의 built·disabled·first_is_outer·hj_xasl·owner_xasl·owner_thread·bits·row_buf·key·mask·keys·tested·skipped, static hjoin_bloom_build·hjoin_bloom_ready·hjoin_bloom_skip_record·hjoin_bloom_may_contain·hjoin_init_domain_info·hjoin_init_manager)은 hooks.cpp 에만 있다 — 이름이 바뀌면 hooks.cpp 만 고친다. seam·줄 번호 의존 없음. B3 '비트 배열 크기' 케이스는 HJOIN_BLOOM_BITS_PER_KEY=10·최소 64비트·상한 10,000,000 을 고정하므로 상수를 바꾸면 의도적으로 갱신한다.",
+ "origin": {
+  "jira": "CBRD-27659",
+  "branch": "CBRD-27659",
+  "reviewed_head": "5a8c0b7d8",
+  "base": "4adcd409072b189f5d965bde5750c53176d90de0",
+  "plan": "/home/cubrid/dev/docs/claude-workspace/projects/CBRD-27659/plan-20261016.json",
+  "finding": "계약 suite(요청: 거짓 음성 0·강제변환 짝·NULL/거짓 양성·붙지 않는 조건·detach) + F1 [defect] 묶이지 않은 QFILE_TUPLE_RECORD · F2 [defect] trace 카운터 소거 · F3 [defect] 잠재 부분 필터 · F4 [defect] 거짓 양성률 2.3배 — 미게시(본인 프로토타입)",
+  "comment": null,
+  "date": "2026-10-16"
+ }
+}

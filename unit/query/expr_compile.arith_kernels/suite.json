@@ -1,0 +1,47 @@
+{
+ "name": "PR#7658 식 컴파일 — 산술 커널 표·결과 도메인·lazy·리스트·게이트 상수·open 스텝·무작위 리스트를 같은 바이너리의 해석 경로(fetch_peek_arith → fetch_arith_ops.c 몸통 → qdata_arith_dbval)와 차분 + F2(잠재) 실패한 prologue 재실행 생략",
+ "file": "src/query/expr_compile.c",
+ "mode": "server",
+ "seams": [],
+ "appendix": "hooks.cpp",
+ "test": "test.cpp",
+ "extra": [
+  "src/query/numeric_opfunc.c",
+  "src/query/query_opfunc.c",
+  "src/object/object_domain.c",
+  "src/object/object_domain_convert.cpp",
+  "src/query/fetch.c",
+  "src/query/fetch_arith_ops.c",
+  "src/object/object_primitive.c",
+  "src/compat/db_macro.c",
+  "src/query/query_evaluator.c"
+ ],
+ "requires": [
+  "expr_prog_compile_roots",
+  "expr_arith_kernel",
+  "fetch_arith_op"
+ ],
+ "watch": [
+  "src/query/expr_compile.h",
+  "src/query/fetch_arith_ops.c",
+  "src/query/fetch_arith_ops.h",
+  "src/query/fetch.c",
+  "src/query/fetch.h",
+  "src/query/query_opfunc.c",
+  "src/query/numeric_opfunc.c",
+  "src/query/numeric_opfunc.h",
+  "src/query/domain_plan.h",
+  "src/query/domain_resolve.h",
+  "src/query/regu_var.hpp",
+  "src/query/query_evaluator.c"
+ ],
+ "fakes": "er_set/er_errid/er_clear(error_manager.c — 마지막 er_set 의 id 를 er_errid 가 읽는다, 메시지 버림). prm_Def(system_parameter.c — 이 경로가 읽는 값의 부팅 기본값: max_recursion_sql_depth 400(system_parameter.c:3482), compat_mode CUBRID, oracle_style_empty_string·return_null_on_function_errors·oracle_compat_number_behavior·allow_truncated_string·ignore_trailing_space false; static_flag 0 이라 서버 세션 사본 대신 전역값을 읽는다 — 세션 사본은 그 값과 같다). 스레드 엔트리: 0 으로 채운 저장소를 cubthread::entry 로 본다 — 읽히는 것은 xasl_recursion_depth(thread_get_recursion_depth 인라인)와 private_heap_id(0 → db_private_alloc 이 malloc)뿐. heap_attrinfo_access(heap_file.c — 스캔이 이미 읽은 현재 레코드의 속성 값 슬롯; 실패하지 않는다; 로그하지 않는다: 열 fetch 는 관측되지 않는다 — 프로그램은 실패할 수 없는 오른쪽 열을 lazy 영역 밖에서 읽고(expr_steps_fallible) 해석기는 NULL 왼쪽이면 안 읽지만 값·오류에 차이가 없다). qexec_execute_mainblock(query_executor.c — 스칼라 부질의 리프: 실행을 로그하고, 성공이면 regu 의 dbvalptr 대상에 값을 두고 XASL_SUCCESS, 실패면 er_set 후 그 코드를 돌려준다(EXECUTE_REGU_VARIABLE_XASL 이 XASL_FAILURE 로 표시); 행마다 XASL_INITIALIZED 로 되돌린다 = 상관 부질의). area_alloc/area_free(area_alloc.c — tp_init 이 만들 도메인 area 의 TP_DOMAIN 한 칸을 calloc/free; tp_domain_new 만 닿는다). lang_Collations/lang_get_collation(language_support.c:1731 본문, 모든 칸 iso88591_bin = lang_init_builtin 이 내장 등록 전에 채우는 값; 수 → VARCHAR 강제변환이 codeset·id 만 읽는다). 게이트·open 스텝 케이스의 XASL_STATE/DOMAIN_PLAN/RESOLVED_DOMAIN 은 읽는 쪽이 만지는 필드만 손으로 채운다(qexec_owns_resolved_index: plan·items 범위·readable·n_resolved, qexec_late_bind_domain: domains[resolved_index], fetch_constant_evaluated: value_states[ref], expr_item_resolution: plan->resolved_non_cacheable); vd.dbval_ptr = resolved.vals 는 qexec_resolve_domains_internal(domain_resolve.c:2969)이 남기는 모습, 이전 실행의 값 블록은 0x5eed 로 오염(해제 흉내). 소비자 규약 흉내: 실행마다 expr_prog_signature_ok(서명+refill), false 면 free 후 재컴파일(qdata_valptr_prog_ensure, query_opfunc.c); 실행 끝 expr_prog_reset — 오류로 끝난 실행도(qexec_execute_query 오류 경로가 qexec_clear_xasl(is_final)을 부른다, query_executor.c:17790 부근). 실코드: extra 의 9개 TU 가 그 리비전 그대로 링크된다(값·오류 비교의 양쪽이 같은 numeric/object_domain 코드를 쓴다).",
+ "note": "head 5d2e1edb1 전부 PASS([defect] F2 2건 PASS = 결함 재현), base 4adcd4090 은 expr_compile.c 가 없어 no-file(신설). 기준(해석 경로)의 develop 동등성: query_opfunc.c 의 수 연산자(qdata_arith_dbval·qdata_number_*)는 base 대비 주석만 바뀌었다(git diff 확인); fetch.c→fetch_arith_ops.c 는 PR 의 기계적 이동이다. 변이 확인(2026-10-16): mutants_kernels(sub_int 오류코드·에필로그 생략·refill 생략·비수 도메인 거절 제거·jump_null 무시) → INTEGER 격자·앵커·NUMERIC 좁은 도메인·혼합·결과도메인·비수도메인·lazy 2건·리스트·open 스텝 FAIL; F2 수정안(prologue_retry.diff) → F2 2건 FAIL, 계약 전부 PASS. F2 도달성: 현재 소비자(투영 query_opfunc.c:468, 집계 query_aggregate.cpp:1321, 병렬 px_scan_result_handler.cpp:2033, 스캔 필터 query_evaluator.c:3538)는 첫 오류에서 행 루프를 끝내고 실행 끝 clear 가 reset 하므로 같은 실행 안 재평가가 없다 → 잠재. 무작위 리스트(2000+1500 리스트)는 F2 를 피하려고 오류 뒤 reset 한다(소비자 규약).",
+ "origin": {
+  "pr": 7658,
+  "jira": "CBRD-27215",
+  "finding": "계약 suite(사용자 요청 2026-10-16: 산술 커널·결과 도메인·NUMERIC 경계를 해석 경로와 차분) + PR7658 F2 [defect, 잠재] 미게시",
+  "comment": "https://github.com/CUBRID/cubrid/pull/7658",
+  "date": "2026-10-16"
+ }
+}
