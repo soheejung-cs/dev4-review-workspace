@@ -70,7 +70,12 @@ def run(out, head, base, changed, log=print, repo=US.DEF_REPO, build=US.DEF_BUIL
             v, txt = verdict(kind, c['ok'], bc['ok'] if bc else None)
             if not bc and b and b.get('status') != 'ran':
                 txt += f" · base {b.get('status')}(base 에 없는 코드면 신설)"
-            rows.append(f"| `{s['_id']}` | {c['name']} | {'PASS' if c['ok'] else 'FAIL'} | {('PASS' if bc['ok'] else 'FAIL') if bc else '-'} | {txt} |")
+            why = ''
+            if not c['ok'] and c.get('failures'):
+                f0 = c['failures'][0]; why = f" — head: {f0[2][:80]}"
+            elif bc and not bc['ok'] and bc.get('failures'):
+                f0 = bc['failures'][0]; why = f" — base: {f0[2][:80]}"
+            rows.append(f"| `{s['_id']}` | {c['name']} | {'PASS' if c['ok'] else 'FAIL'} | {('PASS' if bc['ok'] else 'FAIL') if bc else '-'} | {txt}{why} |".replace('\n', ' '))
             c['verdict'] = v; c['kind'] = kind
         res.append({'suite': s['_id'], 'origin': s.get('origin'), 'head': h, 'base': b})
     md = ['## 단위 회귀 (unit/ 에 쌓인 리뷰용 suite)', '']

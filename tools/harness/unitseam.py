@@ -213,7 +213,8 @@ def build_and_run(a, rev, db, srcroot):
     if a.appendix:
         text += '\n/* ---- unitseam appendix ---- */\n' + open(a.appendix).read()
     stem, ext = os.path.splitext(src)
-    tu = f'{stem}.unitseam{ext}'
+    # 실행마다 다른 이름 — 같은 worktree·같은 파일을 여러 suite 가 동시에 돌려도 사본이 겹치지 않게
+    tu = f'{stem}.unitseam.{os.getpid()}{ext}'
     open(tu, 'w').write(text)
     log.append(f'seams: {seams}')
     miss = [n for n, h in seams if not h]
@@ -225,6 +226,9 @@ def build_and_run(a, rev, db, srcroot):
     o_tu, o_test = os.path.join(out, 'tu.o'), os.path.join(out, 'test.o')
     for (inp, obj, extra) in ((tu, o_tu, []), (os.path.abspath(a.test), o_test, ['-I', CATCH_DIR, '-I', os.path.dirname(src)])):
         r = sh([cc, *flags, *extra, '-c', inp, '-o', obj], check=False)
+        if inp == tu:
+            open(os.path.join(out, 'tu' + ext), 'w').write(text)   # 디버깅용으로 사본 내용은 산출 디렉터리에 남긴다
+            os.remove(tu)
         log.append(f'$ compile {os.path.basename(inp)} rc={r.returncode}\n{r.stderr[-4000:]}')
         if r.returncode:
             open(os.path.join(out, 'build.log'), 'w').write('\n'.join(log))
@@ -266,6 +270,10 @@ def build_and_run(a, rev, db, srcroot):
             fails = [(e.get('filename', '').split('/')[-1] + ':' + e.get('line', ''),
                       (e.findtext('Original') or '').strip(), (e.findtext('Expanded') or '').strip())
                      for e in tc.iter('Expression') if e.get('success') == 'false']
+            fails += [(e.get('filename', '').split('/')[-1] + ':' + e.get('line', ''), 'FAIL()', (e.text or '').strip())
+                      for e in tc.iter('Failure')]
+            fails += [(e.get('filename', '').split('/')[-1] + ':' + e.get('line', ''), 'exception', (e.text or '').strip())
+                      for e in tc.iter('Exception')]
             cases.append({'name': tc.get('name'), 'tags': tc.get('tags', ''), 'ok': ok is not None and ok.get('success') == 'true', 'failures': fails})
     except Exception as e:
         cases.append({'name': '(xml unreadable — crashed?)', 'ok': False, 'failures': [[str(e), r.stderr[-500:], '']]})
