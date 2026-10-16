@@ -194,6 +194,11 @@ def self_check_ninja(repo: str, files: List[str], timeout: int = 1800) -> Dict:
                 cmd = cmd[-1] if cmd else ''
                 if not cmd or ' -c ' not in cmd: outs.append(f'{t}: 명령 없음'); continue
                 cmd = re.sub(r'\s-o\s+\S+', ' -o /dev/null', cmd).replace(os.path.join(main_src, f), os.path.join(repo, f)) + ' -fsyntax-only'
+                # 헤더도 워크트리 것으로: -I 가 메인 체크아웃의 src/·include/ 를 가리키면 다른 디렉터리 헤더의 변경
+                # (system_parameter.h 의 새 PRM_ID, xasl.h 의 새 필드)이 안 보여 거짓 실패·거짓 통과가 난다(2026-10-16).
+                # 서브모듈(cubrid-cci 등)은 워크트리에 체크아웃돼 있지 않을 수 있어 그대로 둔다.
+                wt = os.path.realpath(repo)
+                cmd = re.sub(r'(-I\s*|-isystem\s*)' + re.escape(main_src) + r'/(src|include)(?=[/\s])', lambda m: m.group(1) + wt + '/' + m.group(2), cmd)
                 r = subprocess.run(cmd, shell=True, cwd=build_dir, stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True, timeout=timeout)
                 if r.returncode: outs.append(f'{t}: ' + r.stderr[-600:])
             res[f] = 'ok' if not outs else 'FAILED ' + ' | '.join(outs)

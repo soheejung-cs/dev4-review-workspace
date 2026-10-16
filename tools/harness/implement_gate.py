@@ -52,7 +52,7 @@ def main():
     # (3) -fsyntax-only
     sc = AD.self_check_build(repo, [f for f in changed_files if f.endswith(('.c', '.cpp', '.cc'))])
     res['checks']['syntax'] = sc
-    if sc.get('ran') and any(v not in ('ok', 'no-compile-command', 'no-ninja-target') for v in sc['results'].values()): fail('syntax', '컴파일 실패 — checks.syntax.results 참조')
+    if sc.get('ran') and any(v not in ('ok', 'no-compile-command', 'no-ninja-target') for v in sc['results'].values()): fail('syntax-fail', '컴파일 실패 — checks.syntax.results 참조')   # 'syntax' 는 결과 dict 자리라 다른 키로 (2026-10-16 AttributeError)
     res['skipped'] = [] if sc.get('ran') else ['syntax: ' + sc.get('reason', '')]
     if a.commits:
         # 커밋 단위 컴파일: 헝크로 나눈 커밋이 홀로 컴파일되지 않던 사고(2026-09-30) — 게이트가 직접 돈다
