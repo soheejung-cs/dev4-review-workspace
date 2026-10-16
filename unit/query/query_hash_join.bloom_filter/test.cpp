@@ -3,12 +3,18 @@
  * input writes a row to its list (src/query/query_hash_join.c hjoin_bloom_*, server mode). New code: the base has no
  * hjoin_bloom_*, so the suite runs on head only (requires: hjoin_bloom_attach). Written for v1 5a8c0b7d8 (now branch
  * CBRD-27659-v1), moved to the v2 layout (e55956083 + fdc3fcd32, now branch CBRD-27659, first named CBRD-27659-v2):
- * the trace counters live in HASHJOIN_PROC_NODE.bloom_stats (HASHJOIN_BLOOM_STATS used / keys / tested / skipped), not
- * in the stats_group. v3 (1a7bccdcc) adds B6-B8 for the parallel paths; they are registered only where that API links
- * (weak references), so one suite runs on fdc3fcd32 (B1-B5, F1-F4) and on 1a7bccdcc and later (all).
+ * the trace counters live in HASHJOIN_PROC_NODE.bloom_stats, not in the stats_group. v3 (1a7bccdcc) adds B6-B8 for the
+ * parallel paths; they are registered only where that API links (weak references). v4 (e8f629fcc) makes the filter a
+ * state machine - set up at the second input's first row, filled (one pass over the first input) only once the second
+ * input has given threshold = max (1,024, first rows / 2) rows, turned off when its first 4,096 checked rows drop
+ * under 50%, filled by the owner while it polls for a parallel scan's workers (hjoin_bloom_poll) - and adds B9-B12,
+ * registered only where hjoin_bloom_poll links. hooks.cpp reads both struct layouts (HJOIN_BLOOM_SEEN_BATCH tells them
+ * apart) and maps the earlier one onto the staged one (built = set up; threshold 1: built at the first row), so one
+ * suite runs on e55956083 / fdc3fcd32 (B1-B5, F1-F4), 1a7bccdcc (+ B6-B8) and e8f629fcc on (all). Where the two
+ * protocols differ, a case asks C ().staged and expects each its own.
  *
- *   B1  no false negative: 100,000 random INT first-input keys; each of them as a second-input row is kept
- *       (+ a two-column key INT x VARCHAR)
+ *   B1  no false negative: 100,000 random INT first-input keys; each of them as a second-input row is kept by the
+ *       filled filter (+ a two-column key INT x VARCHAR)
  *   B2  coercion pairs hjoin_init_domain_info resolves to a common domain - INT x BIGINT, NUMERIC(10,2) x NUMERIC(20,4),
  *       CHAR x VARCHAR (trailing blanks), utf8_en_ci ('A' vs 'a'), each way round, + NUMERIC(38,0) x NUMERIC(38,10)
  *       (the default-precision path) and INT x DOUBLE: a second row the join matches is kept. "The join matches" is
@@ -21,7 +27,7 @@
  *       hash GROUP BY, LIMIT, OFFSET, DISTINCT, CONNECT BY, ORDERBY_NUM () (ordbynum_pred / ordbynum_val), a top-N sort
  *       limit (orderby_limit), click counter, the SELECT of an UPDATE / DELETE (upd_del_class_cnt), a subquery result
  *       cache (sub_xasl_id), top-most, not a BUILDLIST, not an input of this join; a thread other than the owner and a
- *       cloned node let every row through; release on a clone frees nothing; a failed build lets every row through
+ *       cloned node let every row through; release on a clone frees nothing; a failed fill lets every row through
  *   B5  detach moves the counters to the hash join's bloom_stats and frees the filter; attach clears bloom_stats at
  *       each execution, whether or not it attaches (the aptr loop calls it for the first input too)
  *   F2  (a contract since v2) the BLOOM counters detach wrote survive qexec_hash_join's hjoin_init_manager under trace:
@@ -40,14 +46,27 @@
  *       decides as attach does (preserved side, second's shape) and does not read the first input; the aptr order
  *       picks the second (reversing it changes the answer, other aptr nodes are passed over); an input missing from
  *       the aptr list or XASL_LINK_TO_REGU_VARIABLE, not a hash join, NULL -> false
- *   B7  (1a7bccdcc) hjoin_bloom_prepare: the owner thread builds once and gets the filter (the owner's later rows do not
- *       build again - the first input is scanned once); another thread, a clone, no filter, NULL, a failed build -> NULL
+ *   B7  (1a7bccdcc) hjoin_bloom_prepare: the owner thread sets up once and gets the filter (staged: no pass over the
+ *       first input until the threshold; earlier: built at once); another thread, a clone, no filter, NULL, a failed
+ *       set-up or a filter turned off -> NULL
  *   B8  (1a7bccdcc) hjoin_bloom_worker_*: two workers share the filter's bits with a key and a row buffer each; a
  *       worker decides as the owner does (INT + NULL rows, both entry paths, B2's coercion pairs with the second
  *       coerced); worker_end adds the counts (owner's included) and frees the worker's own; a fetch failure (or a row
  *       buffer that cannot grow) turns off that worker alone; a begin without memory returns NULL and leaks nothing;
  *       NULL bloom / worker / tuple; two workers on two std::threads read the bits and end at the same time - the
- *       counts are exact sums (200 rounds)
+ *       counts are exact sums (200 rounds). The filter is filled before the workers begin (what hjoin_bloom_poll does
+ *       once they have given threshold rows) and the rows drop about 2/3, far from the 50% sample bound.
+ *   B9  (e8f629fcc) the owner's rows: the threshold formula; rows before it pass unchecked and are counted, the first
+ *       sets up without reading the first input; the threshold-th row fills and is checked, no false negative after;
+ *       the 4,096-row sample: 2,047 dropped -> OFF_LOW_SKIP, 2,048 -> stays, judged once
+ *   B10 (e8f629fcc) hjoin_bloom_poll: fills only on the owner thread, set up, waiting, seen >= threshold; nothing
+ *       otherwise (another thread, before set-up, under the threshold, NULL, ready, off - a failed fill not retried)
+ *   B11 (e8f629fcc) workers: unchecked until a batch boundary after the fill (256 rows), seen handed over per batch and
+ *       at end, a low sample of one worker turns the filter off for all (the owner at once, workers at their next
+ *       batch); two worker threads + a poll thread: seen exact, one fill, no row dropped by unfilled bits (200 rounds)
+ *   B12 (e8f629fcc) detach's report per outcome (NOT_BUILT, CHECKED, OFF_LOW_SKIP, OFF_FAILED; seen incl. workers);
+ *       set-up and fill failures -> OFF_FAILED with every row through, error cleared, no re-read; the first off
+ *       reason is kept
  *
  * Real code at the revision under test, linked as --extra TUs: query_hash_scan.c (keys, hash, key_eq), memory_hash.c
  * (mht_get_hash_number, the collations' hash), qfile_tuple_layout.c (layout, slot walker), and the type system
@@ -56,14 +75,12 @@
  * written by the real assembler (qfile_tuple_size_from_values / qfile_tuple_fill_from_values, the T_NORMAL path of
  * qfile_generate_tuple_into_list). Faked: the list file page iteration (qfile_open_list_scan / qfile_scan_list_next /
  * qfile_close_scan - list_file.c reads pages through the query manager's temp files), the error manager (per thread),
- * the private allocator (locked; a fault knob fails the n-th allocation as the real malloc branch does - B8) and the
- * area allocator, boot-time globals.
+ * the private allocator (locked; a fault knob fails the n-th allocation as the real malloc branch does - B8, B12) and
+ * the area allocator, boot-time globals.
  *
- * The suite names these TU-internal symbols (hooks.cpp): struct hjoin_bloom fields built, disabled, first_is_outer,
- * hj_xasl, owner_xasl, owner_thread, bits, row_buf, key, mask, keys, tested, skipped; static hjoin_bloom_build,
- * hjoin_bloom_ready, hjoin_bloom_skip_record, hjoin_bloom_may_contain, hjoin_init_domain_info, hjoin_init_manager;
- * (1a7bccdcc) struct hjoin_bloom_worker fields bloom, key, row_buf, row_buf_size, disabled, tested, skipped.
- * A rewrite that renames them needs only hooks.cpp adjusted; test.cpp uses the public hjoin_bloom_* API.
+ * The suite names TU-internal symbols only in hooks.cpp (struct hjoin_bloom and hjoin_bloom_worker fields, the static
+ * hjoin_bloom_* functions, the TU's state enum and HJOIN_BLOOM_* constants); test.cpp uses the public hjoin_bloom_* API
+ * and the hooks' views. A rewrite that renames them needs only hooks.cpp adjusted.
  */
 #include "catch.hpp"
 #include "query_hash_join.h"
@@ -112,11 +129,33 @@
 
 /* ---------------------------------------------------------------- hooks.cpp (appended to query_hash_join.c) */
 
+struct unitseam_bloom_consts
+{
+  bool staged;			/* the filter waits for a threshold (e8f629fcc on); false: built at the first row */
+  int waiting;
+  int ready;
+  int off;
+  int out_not_built;		/* enum hashjoin_bloom_outcome (earlier: stand-ins, never equal to a staged value) */
+  int out_checked;
+  int out_off_low_skip;
+  int out_off_failed;
+  long long min_second_rows;	/* HJOIN_BLOOM_MIN_SECOND_ROWS (earlier 1) */
+  long long first_per_second;	/* HJOIN_BLOOM_FIRST_PER_SECOND (earlier 0) */
+  long long sample_rows;	/* HJOIN_BLOOM_SAMPLE_ROWS (earlier 0) */
+  long long min_skip_percent;	/* HJOIN_BLOOM_MIN_SKIP_PERCENT (earlier 0) */
+  long long seen_batch;		/* HJOIN_BLOOM_SEEN_BATCH (earlier 0) */
+};
+
 struct unitseam_bloom_view
 {
   bool present;
-  bool built;
-  bool disabled;
+  bool staged;
+  bool set_up;			/* staged: set_up; earlier: built */
+  int state;			/* waiting / ready / off (earlier: !built / built && !disabled / built && disabled) */
+  long long off_reason;		/* when off: HASHJOIN_BLOOM_OFF_* (earlier: out_off_failed); else -1 */
+  long long first_rows;		/* staged; -1 earlier */
+  long long threshold;		/* staged; 1 earlier */
+  long long seen;		/* staged; -1 earlier */
   bool first_is_outer;
   const void *hj_xasl;
   const void *owner_xasl;
@@ -130,18 +169,36 @@ struct unitseam_bloom_view
   long long skipped;
 };
 
+struct unitseam_stats_view
+{
+  bool staged;
+  bool shown;			/* the BLOOM trace line prints: staged attached, earlier used */
+  int outcome;			/* staged: state; earlier: out_checked when used, else out_not_built */
+  long long keys;
+  long long threshold;		/* -1 earlier */
+  long long seen;		/* -1 earlier */
+  long long tested;
+  long long skipped;
+};
+
 int unitseam_hj_init_domain_info (THREAD_ENTRY * thread_p, XASL_NODE * hj_xasl);
+void unitseam_bloom_consts_of (unitseam_bloom_consts * c);
 void unitseam_bloom_view_of (XASL_NODE * xasl, unitseam_bloom_view * v);
-void unitseam_bloom_build (THREAD_ENTRY * thread_p, XASL_NODE * xasl);
+void unitseam_bloom_fill_now (THREAD_ENTRY * thread_p, XASL_NODE * xasl);
+void unitseam_bloom_set_seen (XASL_NODE * xasl, long long seen);
 int unitseam_bloom_skip_bound (THREAD_ENTRY * thread_p, XASL_NODE * xasl, QFILE_TUPLE_RECORD * record);
+int unitseam_bloom_check_bound (THREAD_ENTRY * thread_p, XASL_NODE * xasl, QFILE_TUPLE_RECORD * record);
 bool unitseam_bloom_may_contain (XASL_NODE * xasl, unsigned int hash);
+void unitseam_bloom_stats_of (XASL_NODE * hj_xasl, unitseam_stats_view * s);
+void unitseam_bloom_stats_stale (XASL_NODE * hj_xasl);
 int unitseam_hj_join_pair (THREAD_ENTRY * thread_p, XASL_NODE * hj_xasl, bool first_is_outer,
 			   QFILE_TUPLE_RECORD * first_rec, QFILE_TUPLE_RECORD * second_rec, bool *first_null,
 			   bool *second_null, unsigned int *first_hash, unsigned int *second_hash, bool *key_eq,
 			   bool *compare_eq);
 int unitseam_hj_init_manager (THREAD_ENTRY * thread_p, XASL_NODE * hj_xasl);
 
-/* v3 (1a7bccdcc): struct hjoin_bloom_worker read through hooks.cpp; present = false on a revision without it */
+/* v3 (1a7bccdcc): struct hjoin_bloom_worker read through hooks.cpp; present = false on a revision without it.
+ * v4: ready (the state as of the worker's last batch) and seen_unflushed; earlier ready = true, seen_unflushed = -1. */
 struct unitseam_worker_view
 {
   bool present;
@@ -150,6 +207,8 @@ struct unitseam_worker_view
   const void *row_buf;
   int row_buf_size;
   bool disabled;
+  bool ready;
+  long long seen_unflushed;
   long long tested;
   long long skipped;
 };
@@ -359,7 +418,8 @@ struct fake_list
   bool fail_open = false;
   int stop_at = -1;
   bool stop_sets_error = true;
-  int opens = 0;
+  int opens = 0;		/* successful opens */
+  int open_calls = 0;		/* every call, failed ones too (v4: a failed fill is not retried) */
 };
 static std::vector<fake_list *> g_lists;
 
@@ -378,6 +438,10 @@ int
 qfile_open_list_scan (QFILE_LIST_ID * list_id_p, QFILE_LIST_SCAN_ID * scan_id_p)
 {
   fake_list *fl = fake_list_of (list_id_p);
+  if (fl != nullptr)
+    {
+      fl->open_calls++;
+    }
   if (fl == nullptr || fl->fail_open)
     {
       er_set (ER_ERROR_SEVERITY, __FILE__, __LINE__, ER_FAILED, 0);
@@ -714,6 +778,40 @@ view (XASL_NODE * x)
   return v;
 }
 
+/* the TU's constants and whether it stages the filter (hooks.cpp) */
+static const unitseam_bloom_consts &
+C ()
+{
+  static unitseam_bloom_consts c;
+  static bool done = false;
+  if (!done)
+    {
+      unitseam_bloom_consts_of (&c);
+      done = true;
+    }
+  return c;
+}
+
+/* the threshold attach gives a first input of first_rows rows: staged max (1,024, first rows / 2); earlier 1 (built at
+ * the second input's first row) */
+static long long
+expected_threshold (long long first_rows)
+{
+  if (!C ().staged)
+    {
+      return 1;
+    }
+  return std::max (C ().min_second_rows, first_rows / C ().first_per_second);
+}
+
+static unitseam_stats_view
+stats (const join & j)
+{
+  unitseam_stats_view s;
+  unitseam_bloom_stats_of (j.hj, &s);
+  return s;
+}
+
 static std::vector<DB_VALUE>
 ints (std::initializer_list<int> xs)
 {
@@ -743,7 +841,9 @@ v_null ()
   return d;
 }
 
-/* the decision on one second-input row, through a record bound to the second list (the hook's well-defined path) */
+/* the decision on one second-input row, through a record bound to the second list (the hook's well-defined path):
+ * the owner's per-row path - counted, set up / filled as the owner's rows do it, the sample judged.
+ * -1 not checked, 0 kept, 1 skipped */
 static int
 decide (const join & j, std::vector<DB_VALUE> vals, THREAD_ENTRY * t = nullptr)
 {
@@ -753,6 +853,43 @@ decide (const join & j, std::vector<DB_VALUE> vals, THREAD_ENTRY * t = nullptr)
   int d = unitseam_bloom_skip_bound (t ? t : owner_thread (), j.second (), &r);
   free (tpl);
   return d;
+}
+
+/* the filled filter's decision alone - the bits and the key, nothing counted, no sample judged (B1, B3's false-positive
+ * rate: more than 4,096 rows that must not turn it off). -1 not ready, -2 fetch failed, 0 kept, 1 skipped */
+static int
+check_only (const join & j, std::vector<DB_VALUE> vals)
+{
+  QFILE_LIST_ID *l = j.second ()->list_id;
+  char *tpl = make_tuple (l, vals);
+  QFILE_TUPLE_RECORD r = bound (l, tpl);
+  int d = unitseam_bloom_check_bound (owner_thread (), j.second (), &r);
+  free (tpl);
+  return d;
+}
+
+/*
+ * The owner's rows before the filter is filled: staged, the second input's rows up to threshold - 1 are counted and go
+ * through unchecked (NULL keys here: they would be dropped if checked); a revision that built the filter at the first
+ * row has none. The next owner row fills the filter and is checked. Returns how many rows went through.
+ */
+static long long
+owner_rows_before_fill (const join & j)
+{
+  unitseam_bloom_view v = view (j.second ());
+  REQUIRE (v.present);
+  long long n = v.threshold - 1 - (v.seen > 0 ? v.seen : 0);
+  long long through = 0;
+  for (long long i = 0; i < n; i++)
+    {
+      through += decide (j, { v_null () }) == -1;
+    }
+  REQUIRE (through == n);
+  if (C ().staged)
+    {
+      REQUIRE (view (j.second ()).state == C ().waiting);
+    }
+  return n;
 }
 
 /* an INNER join of INT keys whose first input (outer) holds the given keys, filter attached to the inner */
@@ -787,23 +924,22 @@ TEST_CASE ("B1: every first-input key, as a second-input row, is kept - 100,000 
   join j = int_join_with (keys);
   hjoin_bloom_attach (owner_thread (), j.hj, j.second ());
   REQUIRE (view (j.second ()).present);
-  REQUIRE_FALSE (view (j.second ()).built);
+  REQUIRE_FALSE (view (j.second ()).set_up);
+  unitseam_bloom_fill_now (owner_thread (), j.second ());
 
   int dropped = 0, inactive = 0;
   for (int k : keys)
     {
-      int d = decide (j, { v_int (k) });
+      int d = check_only (j, { v_int (k) });
       dropped += (d == 1);
-      inactive += (d == -1);
+      inactive += (d < 0);
     }
   unitseam_bloom_view v = view (j.second ());
-  CHECK (v.built);
-  CHECK_FALSE (v.disabled);
+  CHECK (v.set_up);
+  CHECK (v.state == C ().ready);
   CHECK (v.keys == 100000);
   CHECK (inactive == 0);
   CHECK (dropped == 0);
-  CHECK (v.tested == 100000);
-  CHECK (v.skipped == 0);
 
   hjoin_bloom_release (owner_thread (), j.second ());
   CHECK (j.second ()->hj_bloom == NULL);
@@ -828,18 +964,20 @@ TEST_CASE ("B1: a two-column key (INT, VARCHAR) - every first-input key pair is 
   first_done (j);
   hjoin_bloom_attach (owner_thread (), j.hj, j.second ());
   REQUIRE (view (j.second ()).present);
+  unitseam_bloom_fill_now (owner_thread (), j.second ());
+  REQUIRE (view (j.second ()).state == C ().ready);
 
   int dropped = 0;
   for (auto &r : rows)
     {
-      dropped += decide (j, { cast_text (r.second.c_str (), vc), v_int (r.first) }) == 1;
+      dropped += check_only (j, { cast_text (r.second.c_str (), vc), v_int (r.first) }) == 1;
     }
   CHECK (dropped == 0);
   /* the same pair with one column off is mostly skipped */
   int skipped = 0;
   for (int i = 0; i < 1000; i++)
     {
-      skipped += decide (j, { cast_text ("absent", vc), v_int (i) }) == 1;
+      skipped += check_only (j, { cast_text ("absent", vc), v_int (i) }) == 1;
     }
   CHECK (skipped > 900);
   hjoin_bloom_release (owner_thread (), j.second ());
@@ -883,6 +1021,7 @@ run_pair (pair_spec & ps)
   first_done (j);
   hjoin_bloom_attach (owner_thread (), j.hj, j.second ());
   REQUIRE (view (j.second ()).present);
+  unitseam_bloom_fill_now (owner_thread (), j.second ());
 
   pair_result r;
   QFILE_LIST_ID *fl = j.first ()->list_id, *sl = j.second ()->list_id;
@@ -1154,6 +1293,7 @@ TEST_CASE ("B3: a NULL-key second row is skipped and counted; a NULL first-input
   add_row (j.first ()->list_id, { v_int (2) });
   first_done (j);
   hjoin_bloom_attach (owner_thread (), j.hj, j.second ());
+  unitseam_bloom_fill_now (owner_thread (), j.second ());
   CHECK (decide (j, { v_null () }) == 1);
   CHECK (decide (j, { v_int (1) }) == 0);
   CHECK (decide (j, { v_int (2) }) == 0);
@@ -1169,6 +1309,7 @@ TEST_CASE ("B3: a NULL-key second row is skipped and counted; a NULL first-input
   add_row (n.first ()->list_id, { v_null () });
   first_done (n);
   hjoin_bloom_attach (owner_thread (), n.hj, n.second ());
+  unitseam_bloom_fill_now (owner_thread (), n.second ());
   CHECK (decide (n, { v_int (0) }) == 1);
   CHECK (decide (n, { v_int (1) }) == 1);
   CHECK (view (n.second ()).keys == 0);
@@ -1202,6 +1343,7 @@ measure_fpr ()
   join j = int_join_with (keys);
   hjoin_bloom_attach (owner_thread (), j.hj, j.second ());
   REQUIRE (view (j.second ()).present);
+  unitseam_bloom_fill_now (owner_thread (), j.second ());
   int probes = 0, passed = 0;
   while (probes < 100000)
     {
@@ -1211,7 +1353,7 @@ measure_fpr ()
 	  continue;
 	}
       probes++;
-      passed += decide (j, { v_int (k) }) == 0;
+      passed += check_only (j, { v_int (k) }) == 0;
     }
   unitseam_bloom_view v = view (j.second ());
   f.bits = (unsigned long long) v.mask + 1;
@@ -1226,10 +1368,11 @@ measure_fpr ()
     }
   join s = int_join_with (seq);
   hjoin_bloom_attach (owner_thread (), s.hj, s.second ());
+  unitseam_bloom_fill_now (owner_thread (), s.second ());
   int spassed = 0;
   for (int i = 100001; i <= 200000; i++)
     {
-      spassed += decide (s, { v_int (i) }) == 0;
+      spassed += check_only (s, { v_int (i) }) == 0;
     }
   f.sequential_keys = spassed / 100000.0;
   hjoin_bloom_release (owner_thread (), s.second ());
@@ -1278,7 +1421,7 @@ TEST_CASE ("B3: bit array = the power of two >= 10 x first-input row count, at l
       j.first ()->list_id->tuple_cnt = c.rows;	/* the sizing reads tuple_cnt; the scan reads the three tuples */
       hjoin_bloom_attach (owner_thread (), j.hj, j.second ());
       REQUIRE (view (j.second ()).present);
-      unitseam_bloom_build (owner_thread (), j.second ());
+      unitseam_bloom_fill_now (owner_thread (), j.second ());
       INFO ("rows " << c.rows);
       CHECK ((unsigned long long) view (j.second ()).mask + 1 == c.bits);
       CHECK (decide (j, { v_int (2) }) == 0);
@@ -1307,7 +1450,15 @@ attached_after (join & j)
       CHECK (v.owner_thread == owner_thread ());
       CHECK (v.hj_xasl == j.hj);
       CHECK (v.first_is_outer == j.first_is_outer);
-      CHECK_FALSE (v.built);
+      CHECK_FALSE (v.set_up);
+      CHECK (v.state == C ().waiting);
+      CHECK (v.bits == NULL);
+      if (C ().staged)
+	{
+	  CHECK (v.first_rows == j.first ()->list_id->tuple_cnt);
+	  CHECK (v.threshold == expected_threshold (j.first ()->list_id->tuple_cnt));
+	  CHECK (v.seen == 0);
+	}
       hjoin_bloom_release (owner_thread (), j.second ());
     }
   return a;
@@ -1440,36 +1591,43 @@ TEST_CASE ("B4: a thread other than the owner and a cloned node let every row th
   stage_descr (sl, absent);
   char *tpl = make_tuple (sl, absent);
 
-  /* another thread: no build, no decision (these return before reading the row) */
+  /* another thread: no set-up, no row counted, no decision (these return before reading the row) */
   CHECK_FALSE (hjoin_bloom_skip_descr (other_thread (), j.second ()));
   CHECK_FALSE (hjoin_bloom_skip_tuple (other_thread (), j.second (), tpl));
   CHECK (decide (j, ints ({ 99 }), other_thread ()) == -1);
-  CHECK_FALSE (view (j.second ()).built);
+  CHECK_FALSE (view (j.second ()).set_up);
   CHECK (view (j.second ()).tested == 0);
+  if (C ().staged)
+    {
+      CHECK (view (j.second ()).seen == 0);
+    }
 
-  /* the owner builds and decides */
+  /* the owner: its rows up to the threshold go through unchecked (staged), then it fills and decides */
+  owner_rows_before_fill (j);
   CHECK (decide (j, ints ({ 99 })) == 1);
   CHECK (decide (j, ints ({ 20 })) == 0);
   unitseam_bloom_view before = view (j.second ());
-  REQUIRE (before.built);
+  REQUIRE (before.state == C ().ready);
 
   /* a clone carrying the pointer (a parallel worker's node) */
   XASL_NODE *clone = (XASL_NODE *) malloc (sizeof (XASL_NODE));
   memcpy (clone, j.second (), sizeof (XASL_NODE));
   REQUIRE (clone->hj_bloom == j.second ()->hj_bloom);
+  long long seen_before = view (j.second ()).seen;
   CHECK_FALSE (hjoin_bloom_skip_descr (owner_thread (), clone));
   CHECK_FALSE (hjoin_bloom_skip_tuple (owner_thread (), clone, tpl));
   {
     QFILE_TUPLE_RECORD r = bound (sl, tpl);
     CHECK (unitseam_bloom_skip_bound (owner_thread (), clone, &r) == -1);
   }
+  CHECK (view (j.second ()).seen == seen_before);	/* a clone's rows are not the owner's */
   /* detach on the clone moves nothing */
   HASHJOIN_BLOOM_STATS *g = &j.hj->proc.hashjoin.bloom_stats;
-  g->used = false;
-  g->keys = -7;
+  unitseam_bloom_stats_stale (j.hj);
+  HASHJOIN_BLOOM_STATS snap;
+  memcpy (&snap, g, sizeof (snap));
   hjoin_bloom_detach (owner_thread (), clone);
-  CHECK (g->keys == -7);
-  CHECK_FALSE (g->used);
+  CHECK (memcmp (&snap, g, sizeof (snap)) == 0);
   /* release on the clone: the clone forgets it, nothing is freed */
   hjoin_bloom_release (owner_thread (), clone);
   CHECK (clone->hj_bloom == NULL);
@@ -1497,31 +1655,46 @@ TEST_CASE ("B4: a thread other than the owner and a cloned node let every row th
   free (tpl);
 }
 
-TEST_CASE ("B4: a build that cannot complete lets every row through (open fails, scan error with an error id)",
-	   "[contract]")
+TEST_CASE ("B4: a filter that cannot be filled lets every row through (open fails, scan error with an error id) - "
+	   "from the row that fills it (staged: the threshold-th; earlier: the first), tried once", "[contract]")
 {
   boot_types ();
   set_bloom_param (true);
   {
     join j = int_join_with ({ 1, 2, 3 });
-    fake_list_of (j.first ()->list_id)->fail_open = true;
+    fake_list *fl = fake_list_of (j.first ()->list_id);
+    fl->fail_open = true;
     hjoin_bloom_attach (owner_thread (), j.hj, j.second ());
-    CHECK (decide (j, ints ({ 99 })) == -1);
+    owner_rows_before_fill (j);
+    CHECK (fl->open_calls == 0);
+    CHECK (decide (j, ints ({ 99 })) == -1);	/* the row that fills it: the fill fails */
     CHECK (decide (j, ints ({ 1 })) == -1);
     unitseam_bloom_view v = view (j.second ());
-    CHECK (v.built);
-    CHECK (v.disabled);
+    CHECK (v.set_up);
+    CHECK (v.state == C ().off);
+    CHECK (v.off_reason == C ().out_off_failed);
+    CHECK (fl->open_calls == 1);	/* not retried */
     CHECK (er_errid () == NO_ERROR);	/* the filter is an optimization: its failure is cleared */
     hjoin_bloom_detach (owner_thread (), j.second ());
-    CHECK_FALSE (j.hj->proc.hashjoin.bloom_stats.used);
+    unitseam_stats_view s = stats (j);
+    if (C ().staged)
+      {
+	CHECK (s.shown);	/* "BLOOM (off: could not be built)" */
+	CHECK (s.outcome == C ().out_off_failed);
+      }
+    else
+      {
+	CHECK_FALSE (s.shown);
+      }
   }
   {
     join j = int_join_with ({ 1, 2, 3, 4, 5, 6 });
     fake_list_of (j.first ()->list_id)->stop_at = 3;
     fake_list_of (j.first ()->list_id)->stop_sets_error = true;
     hjoin_bloom_attach (owner_thread (), j.hj, j.second ());
+    owner_rows_before_fill (j);
     CHECK (decide (j, ints ({ 5 })) == -1);
-    CHECK (view (j.second ()).disabled);
+    CHECK (view (j.second ()).state == C ().off);
     CHECK (er_errid () == NO_ERROR);
     hjoin_bloom_release (owner_thread (), j.second ());
   }
@@ -1529,13 +1702,15 @@ TEST_CASE ("B4: a build that cannot complete lets every row through (open fails,
 
 /* ================================================================ B5: detach */
 
-TEST_CASE ("B5: detach moves keys / tested / skipped to the hash join's bloom_stats, marks it used, frees the filter",
-	   "[contract]")
+TEST_CASE ("B5: detach moves keys / tested / skipped to the hash join's bloom_stats, marks it shown (staged: with the "
+	   "outcome, threshold and seen), frees the filter; a filter no row reached is reported not built (staged) or "
+	   "not at all (earlier)", "[contract]")
 {
   boot_types ();
   set_bloom_param (true);
   join j = int_join_with ({ 1, 2, 3, 4 });
   hjoin_bloom_attach (owner_thread (), j.hj, j.second ());
+  long long unchecked = owner_rows_before_fill (j);
   CHECK (decide (j, ints ({ 2 })) == 0);
   CHECK (decide (j, ints ({ 4 })) == 0);
   CHECK (decide (j, { v_null () }) == 1);
@@ -1547,22 +1722,41 @@ TEST_CASE ("B5: detach moves keys / tested / skipped to the hash join's bloom_st
   unitseam_bloom_view v = view (j.second ());
   struct hjoin_bloom *b = j.second ()->hj_bloom;
   hjoin_bloom_detach (owner_thread (), j.second ());
-  HASHJOIN_BLOOM_STATS *g = &j.hj->proc.hashjoin.bloom_stats;
-  CHECK (g->used);
-  CHECK (g->keys == 4);
-  CHECK (g->tested == 43);
-  CHECK (g->skipped == 1 + extra);
-  CHECK (g->tested == v.tested);
-  CHECK (g->skipped == v.skipped);
+  unitseam_stats_view g = stats (j);
+  CHECK (g.shown);
+  CHECK (g.outcome == C ().out_checked);
+  CHECK (g.keys == 4);
+  CHECK (g.tested == 43);
+  CHECK (g.skipped == 1 + extra);
+  CHECK (g.tested == v.tested);
+  CHECK (g.skipped == v.skipped);
+  if (C ().staged)
+    {
+      CHECK (g.threshold == v.threshold);
+      CHECK (g.threshold == expected_threshold (4));
+      CHECK (g.seen == unchecked + 43);
+    }
   CHECK (j.second ()->hj_bloom == NULL);
   CHECK (live ().count (b) == 0);
 
-  /* attached but no row came: not used, nothing counted */
+  /* attached but no row came: nothing filled, nothing counted */
   join e = int_join_with ({ 1 });
   hjoin_bloom_attach (owner_thread (), e.hj, e.second ());
   hjoin_bloom_detach (owner_thread (), e.second ());
-  CHECK_FALSE (e.hj->proc.hashjoin.bloom_stats.used);
-  CHECK (e.hj->proc.hashjoin.bloom_stats.keys == 0);
+  unitseam_stats_view es = stats (e);
+  if (C ().staged)
+    {
+      CHECK (es.shown);		/* "BLOOM (not built: second input gave 0 rows, threshold 1024)" */
+      CHECK (es.outcome == C ().out_not_built);
+      CHECK (es.seen == 0);
+      CHECK (es.threshold == expected_threshold (1));
+    }
+  else
+    {
+      CHECK_FALSE (es.shown);
+    }
+  CHECK (es.keys == 0);
+  CHECK (es.tested == 0);
   CHECK (e.second ()->hj_bloom == NULL);
 }
 
@@ -1570,18 +1764,14 @@ TEST_CASE ("B5: detach moves keys / tested / skipped to the hash join's bloom_st
 static void
 stale_bloom_stats (const join & j)
 {
-  HASHJOIN_BLOOM_STATS *g = &j.hj->proc.hashjoin.bloom_stats;
-  g->used = true;
-  g->keys = 5;
-  g->tested = 6;
-  g->skipped = 7;
+  unitseam_bloom_stats_stale (j.hj);
 }
 
 static bool
 bloom_stats_clear (const join & j)
 {
-  const HASHJOIN_BLOOM_STATS *g = &j.hj->proc.hashjoin.bloom_stats;
-  return !g->used && g->keys == 0 && g->tested == 0 && g->skipped == 0;
+  static const char zero[sizeof (HASHJOIN_BLOOM_STATS)] = { 0 };
+  return memcmp (&j.hj->proc.hashjoin.bloom_stats, zero, sizeof (zero)) == 0;
 }
 
 TEST_CASE ("B5: attach clears the hash join's bloom_stats at each execution, also when it attaches nothing (the aptr "
@@ -1621,11 +1811,14 @@ TEST_CASE ("B5: attach clears the hash join's bloom_stats at each execution, als
     hjoin_bloom_attach (owner_thread (), j.hj, j.second ());
     REQUIRE (j.second ()->hj_bloom != NULL);
     CHECK (bloom_stats_clear (j));
+    unitseam_bloom_fill_now (owner_thread (), j.second ());
     CHECK (decide (j, ints ({ 2 })) == 0);
     hjoin_bloom_detach (owner_thread (), j.second ());
-    CHECK (j.hj->proc.hashjoin.bloom_stats.used);
-    CHECK (j.hj->proc.hashjoin.bloom_stats.keys == 2);
-    CHECK (j.hj->proc.hashjoin.bloom_stats.tested == 1);
+    unitseam_stats_view s = stats (j);
+    CHECK (s.shown);
+    CHECK (s.outcome == C ().out_checked);
+    CHECK (s.keys == 2);
+    CHECK (s.tested == 1);
   }
 }
 
@@ -1640,14 +1833,15 @@ TEST_CASE ("F2 contract: the BLOOM counters detach wrote survive hjoin_init_mana
   add_row (j.second ()->list_id, ints ({ 2 }));	/* the second input's list has its rows when the join starts */
   j.second ()->status = XASL_SUCCESS;
   hjoin_bloom_attach (owner_thread (), j.hj, j.second ());
+  unitseam_bloom_fill_now (owner_thread (), j.second ());
   CHECK (decide (j, ints ({ 2 })) == 0);
   CHECK (decide (j, ints ({ 77 })) == 1);
   hjoin_bloom_detach (owner_thread (), j.hj->proc.hashjoin.inner.xasl);
-  HASHJOIN_BLOOM_STATS *g = &j.hj->proc.hashjoin.bloom_stats;
-  REQUIRE (g->used);		/* the aptr loop's detach did its part */
-  REQUIRE (g->keys == 3);
-  REQUIRE (g->tested == 2);
-  REQUIRE (g->skipped == 1);
+  unitseam_stats_view g = stats (j);
+  REQUIRE (g.shown);		/* the aptr loop's detach did its part */
+  REQUIRE (g.keys == 3);
+  REQUIRE (g.tested == 2);
+  REQUIRE (g.skipped == 1);
 
   /* qexec_execute_mainblock_internal: aptr loop (attach .. detach) -> HASHJOIN_PROC -> qexec_hash_join ->
    * hjoin_init_manager, which memsets proc->stats_group when the thread is on trace. A sentinel in the stats_group
@@ -1658,11 +1852,18 @@ TEST_CASE ("F2 contract: the BLOOM counters detach wrote survive hjoin_init_mana
   owner_thread ()->on_trace = false;
   REQUIRE (rc == NO_ERROR);
   REQUIRE (j.hj->proc.hashjoin.stats_group.context_cnt == 0);
-  /* qdump_print_hashjoin_stats_text prints BLOOM when proc->bloom_stats.used */
-  CHECK (g->used);
-  CHECK (g->keys == 3);
-  CHECK (g->tested == 2);
-  CHECK (g->skipped == 1);
+  /* qdump_print_hashjoin_stats_text prints BLOOM when proc->bloom_stats is shown (staged: attached; earlier: used) */
+  g = stats (j);
+  CHECK (g.shown);
+  CHECK (g.outcome == C ().out_checked);
+  CHECK (g.keys == 3);
+  CHECK (g.tested == 2);
+  CHECK (g.skipped == 1);
+  if (C ().staged)
+    {
+      CHECK (g.seen == 2);
+      CHECK (g.threshold == expected_threshold (3));
+    }
 }
 
 /* ================================================================ F3 (latent): a partial filter */
@@ -1681,15 +1882,16 @@ TEST_CASE ("PR27659 F3 (latent): a first-input scan that stops on S_ERROR withou
   fake_list_of (j.first ()->list_id)->stop_at = 10;
   fake_list_of (j.first ()->list_id)->stop_sets_error = false;
   hjoin_bloom_attach (owner_thread (), j.hj, j.second ());
+  unitseam_bloom_fill_now (owner_thread (), j.second ());
   int dropped = 0;
   for (int k : keys)
     {
       dropped += decide (j, ints ({ k })) == 1;
     }
   unitseam_bloom_view v = view (j.second ());
-  WARN ("filter on after S_ERROR without an error id: disabled=" << v.disabled << " keys=" << v.keys << " dropped "
-	<< dropped << " of 50 first-input keys");
-  CHECK_FALSE (v.disabled);
+  WARN ("filter state after S_ERROR without an error id: " << v.state << " (ready " << C ().ready << ", off " << C ().off
+	<< ") keys=" << v.keys << " dropped " << dropped << " of 50 first-input keys");
+  CHECK (v.state == C ().ready);
   CHECK (v.keys == 10);
   CHECK (dropped > 30);
   hjoin_bloom_release (owner_thread (), j.second ());
@@ -1823,8 +2025,8 @@ f1_setup ()
   first_done (s.j);
   hjoin_bloom_attach (owner_thread (), s.j.hj, s.j.second ());
   REQUIRE (s.j.second ()->hj_bloom != NULL);
-  unitseam_bloom_build (owner_thread (), s.j.second ());
-  REQUIRE_FALSE (view (s.j.second ()).disabled);
+  unitseam_bloom_fill_now (owner_thread (), s.j.second ());
+  REQUIRE (view (s.j.second ()).state == C ().ready);
   /* the precondition: through a bound record, key 42 is kept and key 900000 is skipped */
   REQUIRE (decide (s.j, ints ({ 42, 900000 })) == 0);
   REQUIRE (decide (s.j, ints ({ 900000, 42 })) == 1);
@@ -2152,9 +2354,10 @@ V3_TEST_CASE (b6_aptr_order, "B6: the aptr list order picks the second input - r
 
 /* ================================================================ B7: hjoin_bloom_prepare */
 
-V3_TEST_CASE (b7_prepare, "B7: prepare on the owner thread builds the filter and returns it, once - the owner's later "
-	      "rows use it without a second build; another thread, a cloned node, a node without a filter, NULL and a "
-	      "build that fails -> NULL", "[contract]")
+V3_TEST_CASE (b7_prepare, "B7: prepare on the owner thread sets the filter up and returns it, once - staged: domains "
+	      "and key only, the owner's rows fill it at the threshold (one pass over the first input); earlier: built at "
+	      "once; another thread, a cloned node, a node without a filter, NULL, a set-up that fails and a filter turned "
+	      "off (a failed fill) -> NULL", "[contract]")
 {
   boot_types ();
   set_bloom_param (true);
@@ -2167,32 +2370,48 @@ V3_TEST_CASE (b7_prepare, "B7: prepare on the owner thread builds the filter and
   fake_list *first_scan = fake_list_of (j.first ()->list_id);
   hjoin_bloom_attach (owner_thread (), j.hj, j.second ());
   REQUIRE (j.second ()->hj_bloom != NULL);
-  REQUIRE (first_scan->opens == 0);
+  REQUIRE (first_scan->open_calls == 0);
 
-  /* not the owner: no build, no filter */
+  /* not the owner: no set-up, no filter */
   CHECK (hjoin_bloom_prepare (other_thread (), j.second ()) == NULL);
   XASL_NODE *clone = (XASL_NODE *) malloc (sizeof (XASL_NODE));
   memcpy (clone, j.second (), sizeof (XASL_NODE));
   CHECK (hjoin_bloom_prepare (owner_thread (), clone) == NULL);
-  CHECK_FALSE (view (j.second ()).built);
-  CHECK (first_scan->opens == 0);
+  CHECK_FALSE (view (j.second ()).set_up);
+  CHECK (first_scan->open_calls == 0);
 
-  /* the owner: built now, before any row */
+  /* the owner: set up now, before any row */
   HJOIN_BLOOM *b = hjoin_bloom_prepare (owner_thread (), j.second ());
   REQUIRE (b != NULL);
   CHECK (b == j.second ()->hj_bloom);
   unitseam_bloom_view v = view (j.second ());
-  CHECK (v.built);
-  CHECK_FALSE (v.disabled);
-  CHECK (v.keys == 100);
+  CHECK (v.set_up);
+  CHECK (v.key != NULL);
   CHECK (v.tested == 0);
-  CHECK (first_scan->opens == 1);
+  if (C ().staged)
+    {
+      /* the bits wait for threshold rows */
+      CHECK (v.state == C ().waiting);
+      CHECK (v.bits == NULL);
+      CHECK (v.keys == 0);
+      CHECK (v.seen == 0);
+      CHECK (first_scan->open_calls == 0);
+    }
+  else
+    {
+      CHECK (v.state == C ().ready);
+      CHECK (v.keys == 100);
+      CHECK (first_scan->open_calls == 1);
+    }
+  int opens_after_prepare = first_scan->open_calls;
 
-  /* again: the same filter, no second scan of the first input */
+  /* again: the same filter, nothing more done */
   CHECK (hjoin_bloom_prepare (owner_thread (), j.second ()) == b);
-  CHECK (first_scan->opens == 1);
+  CHECK (first_scan->open_calls == opens_after_prepare);
 
-  /* the owner's own rows (rows a serial part of the scan writes on the owner thread) use the prepared bits */
+  /* the owner's own rows (rows a serial part of the scan writes on the owner thread): up to the threshold through
+   * unchecked (staged), then the filled bits - one pass over the first input in all */
+  owner_rows_before_fill (j);
   std::vector<DB_VALUE> present = ints ({ 7 * 50 }), absent = ints ({ 3 });
   QFILE_LIST_ID *sl = j.second ()->list_id;
   stage_descr (sl, present);
@@ -2203,11 +2422,13 @@ V3_TEST_CASE (b7_prepare, "B7: prepare on the owner thread builds the filter and
   CHECK (hjoin_bloom_skip_tuple (owner_thread (), j.second (), t));
   free (t);
   unitseam_bloom_view after = view (j.second ());
-  CHECK (first_scan->opens == 1);
-  CHECK (after.bits == v.bits);
+  CHECK (first_scan->open_calls == 1);
+  CHECK (after.state == C ().ready);
   CHECK (after.keys == 100);
   CHECK (after.tested == 3);
   CHECK (after.skipped == 2);
+  CHECK (hjoin_bloom_prepare (owner_thread (), j.second ()) == b);	/* still on: still the filter */
+  CHECK (first_scan->open_calls == 1);
 
   /* no filter on the node, or no node */
   CHECK (hjoin_bloom_prepare (owner_thread (), j.first ()) == NULL);
@@ -2215,17 +2436,52 @@ V3_TEST_CASE (b7_prepare, "B7: prepare on the owner thread builds the filter and
   free (clone);
   hjoin_bloom_release (owner_thread (), j.second ());
 
-  /* a build that cannot complete: NULL, and the owner lets every row through */
-  join f = int_join_with ({ 1, 2, 3 });
-  fake_list_of (f.first ()->list_id)->fail_open = true;
-  hjoin_bloom_attach (owner_thread (), f.hj, f.second ());
-  REQUIRE (f.second ()->hj_bloom != NULL);
-  CHECK (hjoin_bloom_prepare (owner_thread (), f.second ()) == NULL);
-  CHECK (view (f.second ()).built);
-  CHECK (view (f.second ()).disabled);
-  CHECK (er_errid () == NO_ERROR);
-  CHECK (decide (f, ints ({ 99 })) == -1);
-  hjoin_bloom_release (owner_thread (), f.second ());
+  /* a set-up that cannot complete (the second list is not open yet - type_cnt 0): NULL, off, every row through */
+  {
+    join f = int_join_with ({ 1, 2, 3 });
+    hjoin_bloom_attach (owner_thread (), f.hj, f.second ());
+    REQUIRE (f.second ()->hj_bloom != NULL);
+    int saved = f.second ()->list_id->type_list.type_cnt;
+    f.second ()->list_id->type_list.type_cnt = 0;
+    CHECK (hjoin_bloom_prepare (owner_thread (), f.second ()) == NULL);
+    f.second ()->list_id->type_list.type_cnt = saved;
+    unitseam_bloom_view fv = view (f.second ());
+    CHECK (fv.set_up);
+    CHECK (fv.state == C ().off);
+    CHECK (fv.off_reason == C ().out_off_failed);
+    CHECK (fake_list_of (f.first ()->list_id)->open_calls == 0);
+    CHECK (er_errid () == NO_ERROR);
+    CHECK (decide (f, ints ({ 99 })) == -1);
+    CHECK (hjoin_bloom_prepare (owner_thread (), f.second ()) == NULL);
+    hjoin_bloom_release (owner_thread (), f.second ());
+  }
+
+  /* a fill that cannot complete (the first list does not open): earlier at prepare (NULL); staged at the fill - prepare
+   * gave the filter, the threshold row's fill turns it off, prepare gives NULL from then on */
+  {
+    join f = int_join_with ({ 1, 2, 3 });
+    fake_list_of (f.first ()->list_id)->fail_open = true;
+    hjoin_bloom_attach (owner_thread (), f.hj, f.second ());
+    HJOIN_BLOOM *fb = hjoin_bloom_prepare (owner_thread (), f.second ());
+    if (C ().staged)
+      {
+	CHECK (fb == f.second ()->hj_bloom);
+	owner_rows_before_fill (f);
+	CHECK (decide (f, ints ({ 99 })) == -1);	/* the threshold row: the fill fails */
+      }
+    else
+      {
+	CHECK (fb == NULL);
+      }
+    unitseam_bloom_view fv = view (f.second ());
+    CHECK (fv.state == C ().off);
+    CHECK (fv.off_reason == C ().out_off_failed);
+    CHECK (fake_list_of (f.first ()->list_id)->open_calls == 1);
+    CHECK (er_errid () == NO_ERROR);
+    CHECK (hjoin_bloom_prepare (owner_thread (), f.second ()) == NULL);
+    CHECK (decide (f, ints ({ 99 })) == -1);
+    hjoin_bloom_release (owner_thread (), f.second ());
+  }
 }
 
 /* ================================================================ B8: parallel scan workers */
@@ -2269,7 +2525,10 @@ owner_skip (const join & j, std::vector<DB_VALUE> &row)
   return hjoin_bloom_skip_descr (owner_thread (), j.second ());
 }
 
-/* 3,000 random INT first-input keys (+ two NULL keys); rows: those keys, 3,000 absent keys and 20 NULLs, shuffled */
+/* nkeys random INT first-input keys (+ two NULL keys); rows: those keys, 2 x nkeys absent keys and 20 NULLs, shuffled -
+ * about 2/3 dropped, far from the 50% bound of a staged filter's 4,096-row sample (a sample near it would turn the
+ * filter off for some checkers and not others). The filter is prepared and filled before any worker begins (staged:
+ * what hjoin_bloom_poll does once the workers have given threshold rows; earlier: prepare builds it). */
 struct int_scene
 {
   join j;
@@ -2300,6 +2559,8 @@ int_scene_setup (int nkeys, unsigned seed)
   REQUIRE (s.j.second ()->hj_bloom != NULL);
   s.b = hjoin_bloom_prepare (owner_thread (), s.j.second ());
   REQUIRE (s.b != NULL);
+  unitseam_bloom_fill_now (owner_thread (), s.j.second ());
+  REQUIRE (view (s.j.second ()).state == C ().ready);
   REQUIRE (view (s.j.second ()).keys == nkeys);
 
   std::vector<std::pair<std::vector<DB_VALUE>, bool>> rows;
@@ -2308,7 +2569,7 @@ int_scene_setup (int nkeys, unsigned seed)
       rows.push_back ({ ints ({ k }), true });
     }
   int absent = 0;
-  while (absent < nkeys)
+  while (absent < 2 * nkeys)
     {
       int k = (int) rng ();
       if (!member.count (k))
@@ -2382,13 +2643,13 @@ V3_TEST_CASE (b8_share, "B8: two workers on one prepared filter share its bits (
   CHECK_FALSE (is_live (bv.bits));
 }
 
-V3_TEST_CASE (b8_same_decision, "B8: a worker decides as the owner does - on the same rows (3,000 first-input keys, "
-	      "3,000 absent, NULLs) two workers, through the descriptor and the tuple path, skip exactly the rows the "
+V3_TEST_CASE (b8_same_decision, "B8: a worker decides as the owner does - on the same rows (2,000 first-input keys, "
+	      "4,000 absent, NULLs) two workers, through the descriptor and the tuple path, skip exactly the rows the "
 	      "owner skips; no first-input key is skipped", "[contract]")
 {
   boot_types ();
   set_bloom_param (true);
-  int_scene s = int_scene_setup (3000, 27659);
+  int_scene s = int_scene_setup (2000, 27659);
   HJOIN_BLOOM_WORKER *w1 = hjoin_bloom_worker_begin (worker_thread (0), s.b);
   HJOIN_BLOOM_WORKER *w2 = hjoin_bloom_worker_begin (worker_thread (1), s.b);
   REQUIRE (w1 != NULL);
@@ -2452,6 +2713,7 @@ run_pair_workers (pair_spec & ps)
   REQUIRE (j.second ()->hj_bloom != NULL);
   HJOIN_BLOOM *b = hjoin_bloom_prepare (owner_thread (), j.second ());
   REQUIRE (b != NULL);
+  unitseam_bloom_fill_now (owner_thread (), j.second ());	/* what hjoin_bloom_poll does at the threshold */
   HJOIN_BLOOM_WORKER *w = hjoin_bloom_worker_begin (worker_thread (0), b);
   REQUIRE (w != NULL);
   QFILE_LIST_ID *wl = worker_list (j);
@@ -2635,12 +2897,13 @@ V3_TEST_CASE (b8_end_sums, "B8: worker_end adds each worker's tested / skipped t
   CHECK_FALSE (is_live (v2.row_buf));
 
   hjoin_bloom_detach (owner_thread (), s.j.second ());
-  HASHJOIN_BLOOM_STATS *g = &s.j.hj->proc.hashjoin.bloom_stats;
-  CHECK (g->used);
-  CHECK (g->keys == 1000);
-  CHECK (g->tested == (long long) n);
-  CHECK (g->tested == t0 + t1 + t2);
-  CHECK (g->skipped == s0 + s1 + s2);
+  unitseam_stats_view g = stats (s.j);
+  CHECK (g.shown);
+  CHECK (g.outcome == C ().out_checked);
+  CHECK (g.keys == 1000);
+  CHECK (g.tested == (long long) n);
+  CHECK (g.tested == t0 + t1 + t2);
+  CHECK (g.skipped == s0 + s1 + s2);
   CHECK (s.j.second ()->hj_bloom == NULL);
 }
 
@@ -2664,6 +2927,7 @@ V3_TEST_CASE (b8_failure, "B8: a worker whose key fetch fails lets its rows thro
   hjoin_bloom_attach (owner_thread (), j.hj, j.second ());
   HJOIN_BLOOM *b = hjoin_bloom_prepare (owner_thread (), j.second ());
   REQUIRE (b != NULL);
+  unitseam_bloom_fill_now (owner_thread (), j.second ());	/* what hjoin_bloom_poll does at the threshold */
   REQUIRE (j.hj->proc.hashjoin.domain_info.need_coerce_domains);
   HJOIN_BLOOM_WORKER *w1 = hjoin_bloom_worker_begin (worker_thread (0), b);
   HJOIN_BLOOM_WORKER *w2 = hjoin_bloom_worker_begin (worker_thread (1), b);
@@ -2694,7 +2958,7 @@ V3_TEST_CASE (b8_failure, "B8: a worker whose key fetch fails lets its rows thro
   CHECK (wview (w1).disabled);
   CHECK (wview (w1).tested == w1_tested);	/* the failed row is not counted */
   CHECK (er_errid () == NO_ERROR);
-  CHECK_FALSE (view (j.second ()).disabled);	/* the shared filter is untouched */
+  CHECK (view (j.second ()).state == C ().ready);	/* the shared filter is untouched */
 
   int w1_skipped = 0, w2_skipped = 0, owner_skipped = 0, skipped_key = -1;
   for (int i = 2; i < 52; i++)
@@ -2823,7 +3087,7 @@ V3_TEST_CASE (b8_threads, "B8: two workers on two threads read the same bits at 
 {
   boot_types ();
   set_bloom_param (true);
-  int_scene s = int_scene_setup (5000, 99);
+  int_scene s = int_scene_setup (3000, 99);
   size_t n = s.rows.size ();
 
   /* the owner's decision on every row, first (counted in the filter: subtracted below) */
@@ -2909,4 +3173,1118 @@ V3_TEST_CASE (b8_threads, "B8: two workers on two threads read the same bits at 
 	}
     }
   hjoin_bloom_release (owner_thread (), s.j.second ());
+}
+
+/* ================================================================ v4 (e8f629fcc): waiting -> ready / off */
+
+/*
+ * e8f629fcc fills the bits only once the second input has given threshold rows, judges the first 4,096 checked rows,
+ * and has the owner fill a parallel scan's filter while it polls for the workers (hjoin_bloom_poll). Weak, as the v3
+ * API: on a revision without hjoin_bloom_poll, B9-B12 are not registered (not applicable - no base result).
+ */
+void hjoin_bloom_poll (THREAD_ENTRY * thread_p, HJOIN_BLOOM * bloom) __attribute__ ((weak));
+
+#include <chrono>
+
+#define V4_TEST_CASE(fn, name, tags) \
+  static void fn (); \
+  static const bool fn##_registered __attribute__ ((unused)) = hjoin_bloom_poll != nullptr \
+    && v3_api_linked_count () == V3_API_COUNT \
+    && (Catch::AutoReg (Catch::makeTestInvoker (&fn), CATCH_INTERNAL_LINEINFO, Catch::StringRef (), \
+			Catch::NameAndTags { name, tags }), true); \
+  static void fn ()
+
+/* registered on every revision: hjoin_bloom_poll and the staged struct (hooks: HJOIN_BLOOM_SEEN_BATCH) come together */
+TEST_CASE ("B9-B12 guard: hjoin_bloom_poll links exactly on a revision whose filter waits for a threshold (the TU "
+	   "defines HJOIN_BLOOM_SEEN_BATCH) - B9-B12 are registered only there", "[contract]")
+{
+  bool poll = hjoin_bloom_poll != nullptr;
+  WARN ("hjoin_bloom_poll " << (poll ? "linked" : "absent") << ", staged filter " << (C ().staged ? "yes" : "no")
+	<< (poll && C ().staged ? " - B9-B12 registered" : !poll && !C ().staged ?
+	    " - B9-B12 not applicable on this revision" : ""));
+  CHECK (poll == C ().staged);
+  if (poll)
+    {
+      CHECK (v3_api_linked_count () == V3_API_COUNT);
+    }
+}
+
+static std::vector<DB_VALUE>
+null_row ()
+{
+  return { v_null () };
+}
+
+/* one owner row through a public entry: path 0 the descriptor (hjoin_bloom_skip_descr: qexec_end_one_iteration),
+ * 1 the tuple (hjoin_bloom_skip_tuple: the big-record / set path) */
+static bool
+owner_entry (const join & j, std::vector<DB_VALUE> row, int path)
+{
+  QFILE_LIST_ID *sl = j.second ()->list_id;
+  if (path == 0)
+    {
+      stage_descr (sl, row);
+      return hjoin_bloom_skip_descr (owner_thread (), j.second ());
+    }
+  char *t = make_tuple (sl, row);
+  bool s = hjoin_bloom_skip_tuple (owner_thread (), j.second (), t);
+  free (t);
+  return s;
+}
+
+static std::vector<int>
+int_range (int from, int to)
+{
+  std::vector<int> v;
+  for (int i = from; i <= to; i++)
+    {
+      v.push_back (i);
+    }
+  return v;
+}
+
+/* ================================================================ B9: the owner's rows - threshold, fill, sample */
+
+V4_TEST_CASE (b9_threshold, "B9: the threshold is max (1,024, first rows / 2) - 1, 2,048 and 2,049 first rows -> "
+	      "1,024, 2,050 -> 1,025, 3,000 -> 1,500, 10,000,000 -> 5,000,000; the owner's rows before it go through "
+	      "unchecked through both entries (a NULL key, an absent key, a first-input key alike), each counted in seen; "
+	      "the first sets up the domains and the key without reading the first input - no bits, no keys, nothing "
+	      "tested; another thread's rows and a NULL tuple are not counted", "[contract]")
+{
+  boot_types ();
+  set_bloom_param (true);
+  struct
+  {
+    long long rows;
+    long long threshold;
+  } cases[] = { {1, 1024}, {2048, 1024}, {2049, 1024}, {2050, 1025}, {3000, 1500}, {10000000, 5000000} };
+  for (auto &c : cases)
+    {
+      join j = int_join_with ({ 1, 2, 3 });
+      j.first ()->list_id->tuple_cnt = c.rows;	/* attach reads tuple_cnt */
+      hjoin_bloom_attach (owner_thread (), j.hj, j.second ());
+      unitseam_bloom_view v = view (j.second ());
+      INFO ("first rows " << c.rows);
+      REQUIRE (v.present);
+      CHECK (v.first_rows == c.rows);
+      CHECK (v.threshold == c.threshold);
+      CHECK (v.threshold == expected_threshold (c.rows));
+      CHECK (v.state == C ().waiting);
+      CHECK_FALSE (v.set_up);
+      CHECK (v.seen == 0);
+      hjoin_bloom_release (owner_thread (), j.second ());
+    }
+
+  std::vector<int> keys;
+  for (int i = 1; i <= 3000; i++)
+    {
+      keys.push_back (i * 7);
+    }
+  join j = int_join_with (keys);
+  fake_list *first = fake_list_of (j.first ()->list_id);
+  hjoin_bloom_attach (owner_thread (), j.hj, j.second ());
+  REQUIRE (view (j.second ()).threshold == 1500);
+
+  /* the first row: set up, the first input not read */
+  CHECK_FALSE (owner_entry (j, null_row (), 0));
+  unitseam_bloom_view v = view (j.second ());
+  CHECK (v.set_up);
+  CHECK (v.key != NULL);
+  CHECK (v.state == C ().waiting);
+  CHECK (v.seen == 1);
+  CHECK (first->open_calls == 0);
+
+  /* rows 2 .. 1,499 go through unchecked */
+  int through = 0;
+  for (int i = 2; i <= 1499; i++)
+    {
+      std::vector<DB_VALUE> row = i % 3 == 0 ? null_row () : i % 3 == 1 ? ints ({ i * 7 + 1 }) : ints ({ keys[i] });
+      through += !owner_entry (j, row, i % 2);
+    }
+  CHECK (through == 1498);
+  /* not rows of the owner: a NULL tuple, another thread's row */
+  CHECK_FALSE (hjoin_bloom_skip_tuple (owner_thread (), j.second (), NULL));
+  {
+    std::vector<DB_VALUE> row = ints ({ 7 });
+    stage_descr (j.second ()->list_id, row);
+    CHECK_FALSE (hjoin_bloom_skip_descr (other_thread (), j.second ()));
+  }
+  v = view (j.second ());
+  CHECK (v.seen == 1499);
+  CHECK (v.state == C ().waiting);
+  CHECK (v.bits == NULL);
+  CHECK (v.keys == 0);
+  CHECK (v.tested == 0);
+  CHECK (v.skipped == 0);
+  CHECK (v.row_buf == NULL);	/* no row was serialized for a check */
+  CHECK (first->open_calls == 0);
+  hjoin_bloom_release (owner_thread (), j.second ());
+}
+
+V4_TEST_CASE (b9_fill, "B9: the threshold-th owner row fills the bits - one pass over the first input - and is itself "
+	      "checked (a NULL key: dropped); after it no first-input key is dropped (2,000 rows, both entries) and absent "
+	      "keys mostly are (2,000; 4,001 checked rows in all, under the sample), and the first input is not read "
+	      "again", "[contract]")
+{
+  boot_types ();
+  set_bloom_param (true);
+  std::mt19937 rng (59);
+  std::vector<int> keys;
+  std::unordered_set<int> member;
+  while (keys.size () < 3000)
+    {
+      int k = (int) rng ();
+      if (member.insert (k).second)
+	{
+	  keys.push_back (k);
+	}
+    }
+  std::vector<int> absent;
+  while (absent.size () < 3499)
+    {
+      int k = (int) rng ();
+      if (!member.count (k))
+	{
+	  absent.push_back (k);
+	}
+    }
+  join j = int_join_with (keys);
+  fake_list *first = fake_list_of (j.first ()->list_id);
+  hjoin_bloom_attach (owner_thread (), j.hj, j.second ());
+  REQUIRE (view (j.second ()).threshold == 1500);
+
+  /* rows 1 .. 1,499: absent keys, through unchecked */
+  int through = 0;
+  for (int i = 0; i < 1499; i++)
+    {
+      through += !owner_entry (j, ints ({ absent[i] }), i % 2);
+    }
+  CHECK (through == 1499);
+  CHECK (first->open_calls == 0);
+  CHECK (view (j.second ()).state == C ().waiting);
+
+  /* row 1,500: filled, then checked */
+  CHECK (owner_entry (j, null_row (), 0));
+  unitseam_bloom_view v = view (j.second ());
+  CHECK (v.state == C ().ready);
+  CHECK (first->open_calls == 1);
+  CHECK (v.keys == 3000);
+  CHECK (v.bits != NULL);
+  CHECK (v.seen == 1500);
+  CHECK (v.tested == 1);
+  CHECK (v.skipped == 1);
+
+  int dropped = 0, skipped_absent = 0;
+  for (int i = 0; i < 2000; i++)
+    {
+      dropped += owner_entry (j, ints ({ keys[i] }), i % 2);
+      skipped_absent += owner_entry (j, ints ({ absent[1499 + i] }), (i + 1) % 2);
+    }
+  v = view (j.second ());
+  WARN ("after the fill: first-input keys dropped " << dropped << "/2000, absent keys dropped " << skipped_absent
+	<< "/2000");
+  CHECK (dropped == 0);
+  CHECK (skipped_absent > 1900);
+  CHECK (v.tested == 4001);
+  CHECK (v.skipped == 1 + skipped_absent);
+  CHECK (v.seen == 5500);
+  CHECK (v.state == C ().ready);
+  CHECK (first->open_calls == 1);
+  hjoin_bloom_release (owner_thread (), j.second ());
+}
+
+V4_TEST_CASE (b9_sample, "B9: the first 4,096 checked rows decide - 2,047 dropped (under 50%) turns the filter off "
+	      "(OFF_LOW_SKIP) at the 4,096th, not before; the rows after go through unchecked and uncounted in tested; "
+	      "2,048 dropped (50%) keeps it on, and it is not judged again (3,000 more kept rows, still checked)",
+	      "[contract]")
+{
+  boot_types ();
+  set_bloom_param (true);
+  std::vector<int> keys = int_range (1, 3000);
+  /* NULL keys are always dropped and first-input keys never: the sample's drop count is exact */
+  for (int nulls : { 2047, 2048 })
+    {
+      INFO ("NULL rows in the sample: " << nulls);
+      join j = int_join_with (keys);
+      hjoin_bloom_attach (owner_thread (), j.hj, j.second ());
+      unitseam_bloom_fill_now (owner_thread (), j.second ());
+      REQUIRE (view (j.second ()).state == C ().ready);
+      int kept = 0, dropped = 0;
+      for (int i = 0; i < 4096 - nulls; i++)
+	{
+	  kept += decide (j, ints ({ keys[i % 3000] })) == 0;
+	}
+      for (int i = 0; i < nulls - 1; i++)
+	{
+	  dropped += decide (j, null_row ()) == 1;
+	}
+      CHECK (kept == 4096 - nulls);
+      CHECK (dropped == nulls - 1);
+      unitseam_bloom_view v = view (j.second ());
+      CHECK (v.tested == 4095);
+      CHECK (v.state == C ().ready);	/* not judged before the 4,096th */
+      CHECK (decide (j, null_row ()) == 1);	/* the 4,096th: dropped, then judged */
+      v = view (j.second ());
+      CHECK (v.tested == 4096);
+      CHECK (v.skipped == nulls);
+      if (nulls == 2047)
+	{
+	  CHECK (v.state == C ().off);
+	  CHECK (v.off_reason == C ().out_off_low_skip);
+	  int through = 0;
+	  for (int i = 0; i < 100; i++)
+	    {
+	      through += decide (j, null_row ()) == -1;
+	    }
+	  CHECK (through == 100);
+	  v = view (j.second ());
+	  CHECK (v.tested == 4096);
+	  CHECK (v.skipped == 2047);
+	  CHECK (v.seen == 4196);
+	  hjoin_bloom_detach (owner_thread (), j.second ());
+	  unitseam_stats_view s = stats (j);
+	  CHECK (s.outcome == C ().out_off_low_skip);
+	  CHECK (s.tested == 4096);
+	  CHECK (s.skipped == 2047);
+	}
+      else
+	{
+	  CHECK (v.state == C ().ready);
+	  int kept2 = 0;
+	  for (int i = 0; i < 3000; i++)
+	    {
+	      kept2 += decide (j, ints ({ keys[i] })) == 0;
+	    }
+	  CHECK (kept2 == 3000);
+	  CHECK (decide (j, null_row ()) == 1);
+	  v = view (j.second ());
+	  CHECK (v.state == C ().ready);
+	  CHECK (v.tested == 7097);
+	  CHECK (v.skipped == 2049);
+	  hjoin_bloom_release (owner_thread (), j.second ());
+	}
+    }
+}
+
+/* ================================================================ B10: hjoin_bloom_poll */
+
+V4_TEST_CASE (b10_poll, "B10: hjoin_bloom_poll fills only on the owner thread, on a filter set up, waiting, whose seen "
+	      "has reached the threshold - nothing before set-up (even past the threshold), at seen 0 or 1,023 of 1,024, "
+	      "while a worker's 255 rows are still its own, on another thread, with NULL, once ready, once off; a failed "
+	      "fill is not retried and prepare then gives NULL", "[contract]")
+{
+  boot_types ();
+  set_bloom_param (true);
+  std::vector<int> keys = int_range (1, 1000);
+  join j = int_join_with (keys);
+  fake_list *first = fake_list_of (j.first ()->list_id);
+  hjoin_bloom_attach (owner_thread (), j.hj, j.second ());
+  HJOIN_BLOOM *raw = j.second ()->hj_bloom;
+  REQUIRE (raw != NULL);
+  REQUIRE (view (j.second ()).threshold == 1024);
+
+  /* not set up yet: nothing, even with seen past the threshold (a state injection) */
+  unitseam_bloom_set_seen (j.second (), 5000);
+  hjoin_bloom_poll (owner_thread (), raw);
+  CHECK_FALSE (view (j.second ()).set_up);
+  CHECK (view (j.second ()).state == C ().waiting);
+  CHECK (first->open_calls == 0);
+  unitseam_bloom_set_seen (j.second (), 0);
+
+  HJOIN_BLOOM *b = hjoin_bloom_prepare (owner_thread (), j.second ());
+  REQUIRE (b == raw);
+  hjoin_bloom_poll (owner_thread (), NULL);
+  hjoin_bloom_poll (owner_thread (), b);	/* seen 0 */
+  CHECK (first->open_calls == 0);
+
+  /* 1,023 of 1,024: the owner's rows, each counted at once */
+  for (int i = 0; i < 1023; i++)
+    {
+      REQUIRE (decide (j, null_row ()) == -1);
+    }
+  REQUIRE (view (j.second ()).seen == 1023);
+  hjoin_bloom_poll (owner_thread (), b);
+  CHECK (view (j.second ()).state == C ().waiting);
+  CHECK (first->open_calls == 0);
+
+  /* a worker's rows count in batches: 255 still its own, the 256th hands them over -> 1,279 */
+  HJOIN_BLOOM_WORKER *w = hjoin_bloom_worker_begin (worker_thread (0), b);
+  REQUIRE (w != NULL);
+  QFILE_LIST_ID *wl = worker_list (j);
+  std::vector<DB_VALUE> nul = null_row ();
+  for (int i = 0; i < 255; i++)
+    {
+      REQUIRE_FALSE (worker_skip (w, worker_thread (0), wl, nul, false));
+    }
+  hjoin_bloom_poll (owner_thread (), b);
+  CHECK (view (j.second ()).seen == 1023);
+  CHECK (first->open_calls == 0);
+  REQUIRE_FALSE (worker_skip (w, worker_thread (0), wl, nul, false));
+  CHECK (view (j.second ()).seen == 1279);
+
+  /* not the owner thread: nothing */
+  hjoin_bloom_poll (other_thread (), b);
+  hjoin_bloom_poll (worker_thread (0), b);
+  CHECK (view (j.second ()).state == C ().waiting);
+  CHECK (first->open_calls == 0);
+
+  /* the owner: filled, once */
+  hjoin_bloom_poll (owner_thread (), b);
+  unitseam_bloom_view v = view (j.second ());
+  CHECK (v.state == C ().ready);
+  CHECK (v.keys == 1000);
+  CHECK (first->open_calls == 1);
+  hjoin_bloom_poll (owner_thread (), b);
+  CHECK (first->open_calls == 1);
+  CHECK (view (j.second ()).bits == v.bits);
+  CHECK (view (j.second ()).keys == 1000);
+
+  /* off (the owner's sample: 4,096 kept rows): nothing either */
+  for (int i = 0; i < 4096; i++)
+    {
+      REQUIRE (decide (j, ints ({ keys[i % 1000] })) == 0);
+    }
+  REQUIRE (view (j.second ()).state == C ().off);
+  hjoin_bloom_poll (owner_thread (), b);
+  CHECK (view (j.second ()).state == C ().off);
+  CHECK (view (j.second ()).off_reason == C ().out_off_low_skip);
+  CHECK (first->open_calls == 1);
+  hjoin_bloom_worker_end (worker_thread (0), w);
+  hjoin_bloom_release (owner_thread (), j.second ());
+
+  /* a fill that fails from poll: off, not retried, prepare then gives NULL */
+  {
+    join f = int_join_with (keys);
+    fake_list *ff = fake_list_of (f.first ()->list_id);
+    ff->fail_open = true;
+    hjoin_bloom_attach (owner_thread (), f.hj, f.second ());
+    HJOIN_BLOOM *fb = hjoin_bloom_prepare (owner_thread (), f.second ());
+    REQUIRE (fb != NULL);
+    unitseam_bloom_set_seen (f.second (), 1024);
+    hjoin_bloom_poll (owner_thread (), fb);
+    unitseam_bloom_view fv = view (f.second ());
+    CHECK (fv.state == C ().off);
+    CHECK (fv.off_reason == C ().out_off_failed);
+    CHECK (ff->open_calls == 1);
+    CHECK (er_errid () == NO_ERROR);
+    hjoin_bloom_poll (owner_thread (), fb);
+    CHECK (ff->open_calls == 1);
+    CHECK (hjoin_bloom_prepare (owner_thread (), f.second ()) == NULL);
+    hjoin_bloom_release (owner_thread (), f.second ());
+  }
+
+  /* observation, not a contract: poll goes by seen alone, so it fills when the last batches arrive at worker_end -
+   * after every row is written (px_scan's reader polls once more after the last worker reports done). 2,200 first
+   * rows: threshold 1,100; two workers x 600 rows hand over 1,024 while running, 1,200 at end */
+  {
+    join o = int_join_with (int_range (1, 2200));
+    fake_list *of = fake_list_of (o.first ()->list_id);
+    hjoin_bloom_attach (owner_thread (), o.hj, o.second ());
+    HJOIN_BLOOM *ob = hjoin_bloom_prepare (owner_thread (), o.second ());
+    REQUIRE (ob != NULL);
+    HJOIN_BLOOM_WORKER *w1 = hjoin_bloom_worker_begin (worker_thread (0), ob);
+    HJOIN_BLOOM_WORKER *w2 = hjoin_bloom_worker_begin (worker_thread (1), ob);
+    QFILE_LIST_ID *l1 = worker_list (o), *l2 = worker_list (o);
+    for (int i = 0; i < 600; i++)
+      {
+	worker_skip (w1, worker_thread (0), l1, nul, false);
+	worker_skip (w2, worker_thread (1), l2, nul, false);
+      }
+    hjoin_bloom_poll (owner_thread (), ob);
+    long long seen_running = view (o.second ()).seen;
+    int fills_running = of->open_calls;
+    hjoin_bloom_worker_end (worker_thread (0), w1);
+    hjoin_bloom_worker_end (worker_thread (1), w2);
+    hjoin_bloom_poll (owner_thread (), ob);
+    unitseam_bloom_view ov = view (o.second ());
+    WARN ("observation: two workers x 600 rows (threshold " << ov.threshold << ") - seen while running "
+	  << seen_running << ", fills " << fills_running << "; after both ended seen " << ov.seen << ", poll -> state "
+	  << ov.state << " (ready " << C ().ready << "), first input read " << of->open_calls
+	  << " time(s), rows checked " << ov.tested
+	  << " - a fill with no row left to check");
+    hjoin_bloom_release (owner_thread (), o.second ());
+  }
+}
+
+/* ================================================================ B11: parallel scan workers */
+
+V4_TEST_CASE (b11_workers, "B11: a worker lets its rows through unchecked until it sees the filter ready - it hands "
+	      "its row count over every 256 rows and reads the state then (and at begin); a worker that begins after the fill "
+	      "checks from its first row; a worker whose own 4,096-row sample drops under 50% turns the filter off for all "
+	      "- the owner at once, every worker (itself too) from its next batch; worker_end hands over the rest of the "
+	      "count; detach reports the owner's and every worker's rows", "[contract]")
+{
+  boot_types ();
+  set_bloom_param (true);
+  std::vector<int> keys = int_range (1, 1000);
+  join j = int_join_with (keys);
+  hjoin_bloom_attach (owner_thread (), j.hj, j.second ());
+  HJOIN_BLOOM *b = hjoin_bloom_prepare (owner_thread (), j.second ());
+  REQUIRE (b != NULL);
+  REQUIRE (view (j.second ()).threshold == 1024);
+  REQUIRE (C ().seen_batch == 256);
+  HJOIN_BLOOM_WORKER *w1 = hjoin_bloom_worker_begin (worker_thread (0), b);
+  HJOIN_BLOOM_WORKER *w2 = hjoin_bloom_worker_begin (worker_thread (1), b);
+  REQUIRE (w1 != NULL);
+  REQUIRE (w2 != NULL);
+  CHECK_FALSE (wview (w1).ready);
+  CHECK_FALSE (wview (w2).ready);
+  QFILE_LIST_ID *l1 = worker_list (j), *l2 = worker_list (j), *l3 = worker_list (j);
+  std::vector<DB_VALUE> nul = null_row ();
+  long long rows0 = 0, rows1 = 0, rows2 = 0, rows3 = 0;
+  /* one row through worker k, alternating the descriptor and the tuple path */
+  auto feed = [&] (HJOIN_BLOOM_WORKER * w, int k, QFILE_LIST_ID * l, std::vector<DB_VALUE> row, long long &rows)
+  {
+    rows++;
+    return worker_skip (w, worker_thread (k), l, row, rows % 2 == 0);
+  };
+
+  /* waiting: 255 rows through unchecked (NULL keys: dropped if checked), nothing handed over */
+  int through = 0;
+  for (int i = 0; i < 255; i++)
+    {
+      through += !feed (w1, 0, l1, nul, rows1);
+    }
+  CHECK (through == 255);
+  CHECK (wview (w1).seen_unflushed == 255);
+  CHECK (wview (w1).tested == 0);
+  CHECK (view (j.second ()).seen == 0);
+  /* the 256th: the batch handed over; still waiting, so still unchecked */
+  CHECK_FALSE (feed (w1, 0, l1, nul, rows1));
+  CHECK (wview (w1).seen_unflushed == 0);
+  CHECK (view (j.second ()).seen == 256);
+  CHECK_FALSE (wview (w1).ready);
+
+  /* w2: three batches -> seen 1,024, the threshold */
+  for (int i = 0; i < 768; i++)
+    {
+      REQUIRE_FALSE (feed (w2, 1, l2, nul, rows2));
+    }
+  CHECK (view (j.second ()).seen == 1024);
+  CHECK (wview (w2).tested == 0);
+
+  /* the owner polls: filled */
+  hjoin_bloom_poll (owner_thread (), b);
+  REQUIRE (view (j.second ()).state == C ().ready);
+
+  /* w1 learns it at its next batch: 255 rows still through unchecked, the 256th checked (dropped) */
+  through = 0;
+  for (int i = 0; i < 255; i++)
+    {
+      through += !feed (w1, 0, l1, nul, rows1);
+    }
+  CHECK (through == 255);
+  CHECK (wview (w1).tested == 0);
+  CHECK (feed (w1, 0, l1, nul, rows1));
+  CHECK (wview (w1).ready);
+  CHECK (wview (w1).tested == 1);
+  CHECK (wview (w1).skipped == 1);
+  CHECK (view (j.second ()).seen == 1280);
+
+  /* a worker that begins now checks from its first row */
+  HJOIN_BLOOM_WORKER *w3 = hjoin_bloom_worker_begin (worker_thread (2), b);
+  REQUIRE (w3 != NULL);
+  CHECK (wview (w3).ready);
+  CHECK (feed (w3, 2, l3, nul, rows3));
+  long long t3 = wview (w3).tested, s3 = wview (w3).skipped;
+  CHECK (t3 == 1);
+  hjoin_bloom_worker_end (worker_thread (2), w3);
+  CHECK (view (j.second ()).seen == 1281);
+
+  /* w2 to its next batch (first-input keys: kept whether checked or not), then 100 checked rows */
+  for (int i = 0; i < 256; i++)
+    {
+      REQUIRE_FALSE (feed (w2, 1, l2, ints ({ keys[i] }), rows2));
+    }
+  CHECK (wview (w2).ready);
+  CHECK (wview (w2).tested == 1);
+  for (int i = 0; i < 100; i++)
+    {
+      REQUIRE_FALSE (feed (w2, 1, l2, ints ({ keys[i] }), rows2));
+    }
+  CHECK (wview (w2).tested == 101);
+  long long u2 = wview (w2).seen_unflushed;
+  CHECK (u2 == 100);
+
+  /* the owner checks its own rows too (the shared tested already holds w3's, added at its end) */
+  CHECK (view (j.second ()).tested == t3);
+  rows0++;
+  CHECK (decide (j, nul) == 1);
+  rows0++;
+  CHECK (decide (j, ints ({ 5 })) == 0);
+  long long owner_tested = view (j.second ()).tested - t3;
+  CHECK (owner_tested == 2);
+
+  /* w1's own sample: first-input keys only (1 of 4,096 dropped) - off at its 4,096th checked row, not before */
+  for (int i = 0; i < 4094; i++)
+    {
+      REQUIRE_FALSE (feed (w1, 0, l1, ints ({ keys[i % 1000] }), rows1));
+    }
+  CHECK (wview (w1).tested == 4095);
+  CHECK (view (j.second ()).state == C ().ready);
+  REQUIRE_FALSE (feed (w1, 0, l1, ints ({ keys[0] }), rows1));
+  CHECK (wview (w1).tested == 4096);
+  unitseam_bloom_view v = view (j.second ());
+  CHECK (v.state == C ().off);
+  CHECK (v.off_reason == C ().out_off_low_skip);
+
+  /* the owner: at once */
+  rows0++;
+  CHECK (decide (j, nul) == -1);
+  CHECK (view (j.second ()).tested == owner_tested + t3);
+
+  /* w2: its cached state until its next batch - 255 - u2 more rows checked (NULL keys: dropped), then through */
+  int checked2 = 0;
+  for (long long i = 0; i < 255 - u2; i++)
+    {
+      checked2 += feed (w2, 1, l2, nul, rows2);
+    }
+  CHECK (checked2 == 255 - u2);
+  CHECK_FALSE (feed (w2, 1, l2, nul, rows2));	/* the batch boundary: off seen */
+  CHECK_FALSE (wview (w2).ready);
+  through = 0;
+  for (int i = 0; i < 300; i++)
+    {
+      through += !feed (w2, 1, l2, nul, rows2);
+    }
+  CHECK (through == 300);
+  CHECK (wview (w2).tested == 101 + 255 - u2);
+
+  /* w1 itself: the same */
+  long long u1 = wview (w1).seen_unflushed;
+  int checked1 = 0;
+  for (long long i = 0; i < 255 - u1; i++)
+    {
+      checked1 += feed (w1, 0, l1, nul, rows1);
+    }
+  CHECK (checked1 == 255 - u1);
+  CHECK_FALSE (feed (w1, 0, l1, nul, rows1));
+  CHECK_FALSE (wview (w1).ready);
+
+  /* end: the rest of each count handed over; detach reports all of it */
+  long long t1 = wview (w1).tested, s1 = wview (w1).skipped, t2 = wview (w2).tested, s2 = wview (w2).skipped;
+  hjoin_bloom_worker_end (worker_thread (0), w1);
+  hjoin_bloom_worker_end (worker_thread (1), w2);
+  v = view (j.second ());
+  CHECK (v.seen == rows0 + rows1 + rows2 + rows3);
+  CHECK (v.tested == owner_tested + t1 + t2 + t3);
+  CHECK (v.skipped == 1 + s1 + s2 + s3);
+  hjoin_bloom_detach (owner_thread (), j.second ());
+  unitseam_stats_view s = stats (j);
+  CHECK (s.shown);
+  CHECK (s.outcome == C ().out_off_low_skip);
+  CHECK (s.seen == v.seen);
+  CHECK (s.tested == v.tested);
+  CHECK (s.skipped == v.skipped);
+  CHECK (s.keys == 1000);
+  CHECK (s.threshold == 1024);
+}
+
+/* a scan's own work on a row (a page read, the predicates) before the filter sees it: about 1.5 us. Without it a row
+ * the filter lets through unchecked costs nanoseconds here, the workers end before the owner's first poll, and no fill
+ * ever races them. */
+static void
+scan_work ()
+{
+  std::chrono::steady_clock::time_point until = std::chrono::steady_clock::now () + std::chrono::nanoseconds (1500);
+  while (std::chrono::steady_clock::now () < until)
+    {
+    }
+}
+
+V4_TEST_CASE (b11_threads, "B11: two workers on two threads and the owner polling on a third every 50 us (as px_scan's "
+	      "reader does while it waits for them; each row costs a worker about 1.5 us of scan work): every worker row "
+	      "counted once in seen, at most one fill per filter, published only filled - no first-input key dropped, "
+	      "every dropped row one the filled filter drops, no row checked without the fill; the counts are exact sums "
+	      "(20,000 first-input keys, 2 x 8,000 rows, 200 rounds)", "[contract]")
+{
+  boot_types ();
+  set_bloom_param (true);
+  std::mt19937 rng (31337);
+  std::unordered_set<int> member;
+  std::vector<int> present;
+  while (present.size () < 20000)
+    {
+      int k = (int) rng ();
+      if (member.insert (k).second)
+	{
+	  present.push_back (k);
+	}
+    }
+  /* 20,000 first-input keys: threshold 10,000, reached when each worker has given about 5,000 rows; the fill is a pass
+   * over 20,000 keys, long enough to span several of a worker's 256-row batches */
+  join j = int_join_with (present);
+  fake_list *first = fake_list_of (j.first ()->list_id);
+  /* each worker: 2,667 first-input keys and 5,333 absent ones, shuffled, serialized in advance (make_tuple REQUIREs -
+   * Catch2 assertions stay on the test thread); fewer than 4,096 of them checked, so no worker's sample is judged */
+  QFILE_LIST_ID *lists[2] = { worker_list (j), worker_list (j) };
+  std::vector<std::vector<char *>> tuples (2);
+  std::vector<std::vector<char>> is_present (2), ref (2);
+  for (int k = 0; k < 2; k++)
+    {
+      std::vector<std::pair<int, bool>> rows;
+      for (int i = 0; i < 2667; i++)
+	{
+	  rows.push_back ({ present[k * 2667 + i], true });
+	}
+      while (rows.size () < 8000)
+	{
+	  int x = (int) rng ();
+	  if (!member.count (x))
+	    {
+	      rows.push_back ({ x, false });
+	    }
+	}
+      std::shuffle (rows.begin (), rows.end (), rng);
+      for (auto &r : rows)
+	{
+	  std::vector<DB_VALUE> v = ints ({ r.first });
+	  tuples[k].push_back (make_tuple (lists[k], v));
+	  is_present[k].push_back (r.second);
+	}
+    }
+  /* the filled filter's decision on every row (an attach of its own, filled at once) */
+  hjoin_bloom_attach (owner_thread (), j.hj, j.second ());
+  unitseam_bloom_fill_now (owner_thread (), j.second ());
+  REQUIRE (view (j.second ()).state == C ().ready);
+  for (int k = 0; k < 2; k++)
+    {
+      for (char *t : tuples[k])
+	{
+	  QFILE_TUPLE_RECORD r = bound (lists[k], t);
+	  int d = unitseam_bloom_check_bound (owner_thread (), j.second (), &r);
+	  REQUIRE (d >= 0);
+	  ref[k].push_back (d == 1);
+	}
+    }
+  hjoin_bloom_release (owner_thread (), j.second ());
+  const long long n = (long long) tuples[0].size ();
+
+  const int rounds = 200;
+  int no_filter = 0, begin_failed = 0, bad_seen = 0, bad_sum = 0, bad_fill = 0, bad_state = 0, unfilled_checks = 0;
+  long long wrong_drop = 0, false_neg = 0, checked = 0;
+  int filled_while_running = 0, filled_after_rows = 0, never_filled = 0;
+  for (int round = 0; round < rounds; round++)
+    {
+      hjoin_bloom_attach (owner_thread (), j.hj, j.second ());
+      HJOIN_BLOOM *b = hjoin_bloom_prepare (owner_thread (), j.second ());
+      if (b == NULL)
+	{
+	  no_filter++;
+	  hjoin_bloom_release (owner_thread (), j.second ());
+	  continue;
+	}
+      int opens_before = first->open_calls;
+      std::atomic<int> active (2);
+      spin_barrier start (4);
+      long long tested[2] = { 0, 0 }, skipped[2] = { 0, 0 }, drops[2] = { 0, 0 }, wd[2] = { 0, 0 }, fn[2] = { 0, 0 };
+      bool began[2] = { false, false };
+      auto worker = [&] (int k)
+      {
+	THREAD_ENTRY *t = worker_thread (k);
+	HJOIN_BLOOM_WORKER *w = hjoin_bloom_worker_begin (t, b);
+	began[k] = w != NULL;
+	start.wait ();
+	for (long long i = 0; i < n; i++)
+	  {
+	    scan_work ();
+	    bool sk = hjoin_bloom_worker_skip_tuple (t, w, lists[k], tuples[k][i]);
+	    drops[k] += sk;
+	    wd[k] += sk && !ref[k][i];
+	    fn[k] += sk && is_present[k][i];
+	  }
+	unitseam_worker_view wv = wview (w);
+	tested[k] = wv.tested;
+	skipped[k] = wv.skipped;
+	hjoin_bloom_worker_end (t, w);
+	active.fetch_sub (1);
+      };
+      auto poller = [&] ()
+      {
+	start.wait ();
+	while (active.load () != 0)
+	  {
+	    std::this_thread::sleep_for (std::chrono::microseconds (50));
+	    hjoin_bloom_poll (owner_thread (), b);
+	  }
+      };
+      std::thread t0 (worker, 0), t1 (worker, 1), tp (poller);
+      start.wait ();
+      t0.join ();
+      t1.join ();
+      tp.join ();
+
+      begin_failed += !began[0] + !began[1];
+      wrong_drop += wd[0] + wd[1];
+      false_neg += fn[0] + fn[1];
+      checked += tested[0] + tested[1];
+      unitseam_bloom_view v = view (j.second ());
+      bad_seen += v.seen != 2 * n;
+      bad_sum += v.tested != tested[0] + tested[1];
+      bad_sum += v.skipped != skipped[0] + skipped[1];
+      bad_sum += drops[0] != skipped[0];
+      bad_sum += drops[1] != skipped[1];
+      int fills = first->open_calls - opens_before;
+      if (v.state == C ().ready)
+	{
+	  bad_fill += fills != 1 || v.keys != 20000;
+	  if (tested[0] + tested[1] > 0)
+	    {
+	      filled_while_running++;
+	    }
+	  else
+	    {
+	      filled_after_rows++;
+	    }
+	}
+      else if (v.state == C ().waiting)
+	{
+	  bad_fill += fills != 0;
+	  unfilled_checks += tested[0] + tested[1] != 0;
+	  never_filled++;
+	}
+      else
+	{
+	  bad_state++;		/* off: no failure injected, and no worker reaches a 4,096-row sample */
+	  WARN ("round " << round << ": off, reason " << v.off_reason << ", checked " << tested[0] << " + " << tested[1]);
+	}
+      hjoin_bloom_release (owner_thread (), j.second ());
+    }
+  WARN ("2 workers x " << n << " rows (first input " << present.size () << " keys) x " << rounds
+	<< " rounds: filled while the workers ran " << filled_while_running
+	<< ", filled after their last checked row " << filled_after_rows << ", never filled " << never_filled
+	<< "; rows checked " << checked << ", dropped rows the filled filter keeps " << wrong_drop
+	<< ", first-input keys dropped " << false_neg);
+  CHECK (no_filter == 0);
+  CHECK (begin_failed == 0);
+  CHECK (bad_seen == 0);
+  CHECK (bad_sum == 0);
+  CHECK (bad_fill == 0);
+  CHECK (bad_state == 0);
+  CHECK (unfilled_checks == 0);
+  CHECK (wrong_drop == 0);
+  CHECK (false_neg == 0);
+  CHECK (filled_while_running > 0);	/* else no round had the fill race the workers: the round proves nothing */
+  for (auto &v : tuples)
+    {
+      for (char *t : v)
+	{
+	  free (t);
+	}
+    }
+}
+
+/* ================================================================ B12: detach's report, failures */
+
+V4_TEST_CASE (b12_detach, "B12: detach reports what the filter did and frees it - attached, the outcome (NOT_BUILT: "
+	      "seen under the threshold; CHECKED; OFF_LOW_SKIP; OFF_FAILED), the threshold, seen (the owner's rows and "
+	      "every worker's, the rest handed over at end), keys, tested, skipped; a clone's detach reports nothing",
+	      "[contract]")
+{
+  boot_types ();
+  set_bloom_param (true);
+  std::vector<int> keys = int_range (1, 1000);
+
+  /* NOT_BUILT: 10 owner rows and a worker's 300 (256 handed over at its batch, 44 at end) */
+  {
+    join j = int_join_with (keys);
+    hjoin_bloom_attach (owner_thread (), j.hj, j.second ());
+    HJOIN_BLOOM *b = hjoin_bloom_prepare (owner_thread (), j.second ());
+    REQUIRE (b != NULL);
+    for (int i = 0; i < 10; i++)
+      {
+	REQUIRE (decide (j, null_row ()) == -1);
+      }
+    HJOIN_BLOOM_WORKER *w = hjoin_bloom_worker_begin (worker_thread (0), b);
+    QFILE_LIST_ID *wl = worker_list (j);
+    std::vector<DB_VALUE> nul = null_row ();
+    for (int i = 0; i < 300; i++)
+      {
+	REQUIRE_FALSE (worker_skip (w, worker_thread (0), wl, nul, i % 2 == 0));
+      }
+    CHECK (view (j.second ()).seen == 266);
+    hjoin_bloom_worker_end (worker_thread (0), w);
+    CHECK (view (j.second ()).seen == 310);
+    /* a clone's detach: nothing reported, nothing freed */
+    XASL_NODE *clone = (XASL_NODE *) malloc (sizeof (XASL_NODE));
+    memcpy (clone, j.second (), sizeof (XASL_NODE));
+    HASHJOIN_BLOOM_STATS snap;
+    memcpy (&snap, &j.hj->proc.hashjoin.bloom_stats, sizeof (snap));
+    hjoin_bloom_detach (owner_thread (), clone);
+    CHECK (memcmp (&snap, &j.hj->proc.hashjoin.bloom_stats, sizeof (snap)) == 0);
+    CHECK (is_live (b));
+    free (clone);
+    hjoin_bloom_detach (owner_thread (), j.second ());
+    unitseam_stats_view s = stats (j);
+    CHECK (s.shown);
+    CHECK (s.outcome == C ().out_not_built);
+    CHECK (s.keys == 0);
+    CHECK (s.threshold == 1024);
+    CHECK (s.seen == 310);
+    CHECK (s.tested == 0);
+    CHECK (s.skipped == 0);
+    CHECK (j.second ()->hj_bloom == NULL);
+    CHECK_FALSE (is_live (b));
+  }
+
+  /* CHECKED: the threshold row fills; 5 kept and 4 dropped rows checked in all */
+  {
+    join j = int_join_with (keys);
+    hjoin_bloom_attach (owner_thread (), j.hj, j.second ());
+    owner_rows_before_fill (j);
+    CHECK (decide (j, null_row ()) == 1);
+    for (int i = 0; i < 5; i++)
+      {
+	CHECK (decide (j, ints ({ keys[i] })) == 0);
+      }
+    for (int i = 0; i < 3; i++)
+      {
+	CHECK (decide (j, null_row ()) == 1);
+      }
+    hjoin_bloom_detach (owner_thread (), j.second ());
+    unitseam_stats_view s = stats (j);
+    CHECK (s.shown);
+    CHECK (s.outcome == C ().out_checked);
+    CHECK (s.keys == 1000);
+    CHECK (s.threshold == 1024);
+    CHECK (s.seen == 1032);
+    CHECK (s.tested == 9);
+    CHECK (s.skipped == 4);
+  }
+
+  /* OFF_LOW_SKIP: 4,096 kept rows */
+  {
+    join j = int_join_with (keys);
+    hjoin_bloom_attach (owner_thread (), j.hj, j.second ());
+    unitseam_bloom_fill_now (owner_thread (), j.second ());
+    for (int i = 0; i < 4096; i++)
+      {
+	REQUIRE (decide (j, ints ({ keys[i % 1000] })) == 0);
+      }
+    hjoin_bloom_detach (owner_thread (), j.second ());
+    unitseam_stats_view s = stats (j);
+    CHECK (s.shown);
+    CHECK (s.outcome == C ().out_off_low_skip);
+    CHECK (s.keys == 1000);
+    CHECK (s.seen == 4096);
+    CHECK (s.tested == 4096);
+    CHECK (s.skipped == 0);
+  }
+
+  /* OFF_FAILED: the fill cannot open the first input */
+  {
+    join j = int_join_with (keys);
+    fake_list_of (j.first ()->list_id)->fail_open = true;
+    hjoin_bloom_attach (owner_thread (), j.hj, j.second ());
+    owner_rows_before_fill (j);
+    CHECK (decide (j, null_row ()) == -1);
+    hjoin_bloom_detach (owner_thread (), j.second ());
+    unitseam_stats_view s = stats (j);
+    CHECK (s.shown);
+    CHECK (s.outcome == C ().out_off_failed);
+    CHECK (s.keys == 0);
+    CHECK (s.seen == 1024);
+    CHECK (s.tested == 0);
+  }
+
+  /* observation, not a contract: a filter still waiting whose seen reached the threshold (the workers' last batches
+   * came after the reader's last poll, or the reader found them all done and did not poll) is reported NOT_BUILT -
+   * "second input gave N rows, threshold T" with N >= T */
+  {
+    join j = int_join_with (keys);
+    hjoin_bloom_attach (owner_thread (), j.hj, j.second ());
+    HJOIN_BLOOM *b = hjoin_bloom_prepare (owner_thread (), j.second ());
+    HJOIN_BLOOM_WORKER *w = hjoin_bloom_worker_begin (worker_thread (0), b);
+    QFILE_LIST_ID *wl = worker_list (j);
+    std::vector<DB_VALUE> nul = null_row ();
+    for (int i = 0; i < 1100; i++)
+      {
+	worker_skip (w, worker_thread (0), wl, nul, false);
+      }
+    hjoin_bloom_worker_end (worker_thread (0), w);
+    hjoin_bloom_detach (owner_thread (), j.second ());
+    unitseam_stats_view s = stats (j);
+    WARN ("observation: waiting at detach with seen " << s.seen << " >= threshold " << s.threshold << " -> outcome "
+	  << s.outcome << " (NOT_BUILT " << C ().out_not_built << ")");
+  }
+}
+
+V4_TEST_CASE (b12_failures, "B12: a filter that cannot be set up or filled turns off (OFF_FAILED) and lets every row "
+	      "through, the error cleared, the first input not read again, prepare NULL from then on - set-up: the second "
+	      "list not open (at the first row), an allocation fails; fill: the first list does not open, its scan stops "
+	      "on an error with or without an error id, the bit array allocation fails; a check that fails once ready "
+	      "(the owner's row buffer) turns it off too, and the first reason is kept (a worker's low sample right "
+	      "after does not overwrite it)", "[contract]")
+{
+  boot_types ();
+  set_bloom_param (true);
+  std::vector<int> keys = int_range (1, 1000);
+
+  /* set-up: the second list is not open (type_cnt 0) - at the owner's first row */
+  {
+    join j = int_join_with (keys);
+    hjoin_bloom_attach (owner_thread (), j.hj, j.second ());
+    QFILE_LIST_ID *sl = j.second ()->list_id;
+    std::vector<DB_VALUE> row = ints ({ 5 });
+    char *t = make_tuple (sl, row);
+    int saved = sl->type_list.type_cnt;
+    sl->type_list.type_cnt = 0;
+    CHECK_FALSE (hjoin_bloom_skip_tuple (owner_thread (), j.second (), t));
+    sl->type_list.type_cnt = saved;
+    free (t);
+    unitseam_bloom_view v = view (j.second ());
+    CHECK (v.set_up);
+    CHECK (v.state == C ().off);
+    CHECK (v.off_reason == C ().out_off_failed);
+    CHECK (v.seen == 1);
+    CHECK (er_errid () == NO_ERROR);
+    CHECK (hjoin_bloom_prepare (owner_thread (), j.second ()) == NULL);
+    int through = 0;
+    for (int i = 0; i < 2000; i++)
+      {
+	through += decide (j, null_row ()) == -1;
+      }
+    CHECK (through == 2000);	/* past the threshold too: nothing filled */
+    CHECK (fake_list_of (j.first ()->list_id)->open_calls == 0);
+    hjoin_bloom_detach (owner_thread (), j.second ());
+    CHECK (stats (j).outcome == C ().out_off_failed);
+    CHECK (stats (j).seen == 2001);
+  }
+
+  /* set-up: an allocation fails (domains or the owner's key) */
+  {
+    join j = int_join_with (keys);
+    hjoin_bloom_attach (owner_thread (), j.hj, j.second ());
+    fail_nth_alloc (1);
+    int d = decide (j, ints ({ 5 }));
+    int left = g_alloc_countdown.load ();
+    fail_nth_alloc (0);
+    CHECK (left == 0);
+    CHECK (d == -1);
+    unitseam_bloom_view v = view (j.second ());
+    CHECK (v.state == C ().off);
+    CHECK (v.off_reason == C ().out_off_failed);
+    CHECK (er_errid () == NO_ERROR);
+    CHECK (hjoin_bloom_prepare (owner_thread (), j.second ()) == NULL);
+    hjoin_bloom_release (owner_thread (), j.second ());
+  }
+
+  /* fill: at the threshold row */
+  const char *what[] = { "the first list does not open", "its scan stops on S_ERROR with an error id",
+    "its scan stops on S_ERROR without an error id", "the bit array allocation fails"
+  };
+  for (int mode = 0; mode < 4; mode++)
+    {
+      INFO (what[mode]);
+      join j = int_join_with (keys);
+      fake_list *fl = fake_list_of (j.first ()->list_id);
+      if (mode == 0)
+	{
+	  fl->fail_open = true;
+	}
+      else if (mode == 1 || mode == 2)
+	{
+	  fl->stop_at = 3;
+	  fl->stop_sets_error = mode == 1;
+	}
+      hjoin_bloom_attach (owner_thread (), j.hj, j.second ());
+      owner_rows_before_fill (j);
+      if (mode == 3)
+	{
+	  fail_nth_alloc (1);
+	}
+      int d = decide (j, ints ({ 5 }));	/* the threshold row */
+      int left = g_alloc_countdown.load ();
+      fail_nth_alloc (0);
+      CHECK (d == -1);
+      CHECK (left == 0);
+      unitseam_bloom_view v = view (j.second ());
+      CHECK (v.state == C ().off);
+      CHECK (v.off_reason == C ().out_off_failed);
+      CHECK (er_errid () == NO_ERROR);
+      int calls = fl->open_calls;
+      CHECK (calls == (mode == 3 ? 0 : 1));
+      int through = 0;
+      for (int i = 0; i < 100; i++)
+	{
+	  through += decide (j, null_row ()) == -1;
+	}
+      CHECK (through == 100);
+      CHECK (fl->open_calls == calls);	/* not retried */
+      CHECK (hjoin_bloom_prepare (owner_thread (), j.second ()) == NULL);
+      hjoin_bloom_detach (owner_thread (), j.second ());
+      CHECK (stats (j).outcome == C ().out_off_failed);
+    }
+
+  /* observation, not a contract: the fill reads any pending error id as its own failure - an error id an earlier row's
+   * evaluation left set (e.g. numeric_opfunc.c sets ER_IT_DATA_OVERFLOW at warning severity) turns the filter off at
+   * the threshold row and is cleared with it; 1a7bccdcc built at the first row, so only an id pending then did so */
+  {
+    join j = int_join_with (keys);
+    hjoin_bloom_attach (owner_thread (), j.hj, j.second ());
+    owner_rows_before_fill (j);
+    er_set (ER_WARNING_SEVERITY, __FILE__, __LINE__, ER_IT_DATA_OVERFLOW, 1, "INTEGER");
+    int d = decide (j, ints ({ 5 }));
+    unitseam_bloom_view v = view (j.second ());
+    WARN ("observation: error id " << ER_IT_DATA_OVERFLOW << " pending at the threshold row -> row " << d
+	  << ", state " << v.state << " (off " << C ().off << "), reason " << v.off_reason << " (failed "
+	  << C ().out_off_failed << "), error id after " << er_errid ());
+    er_clear ();
+    hjoin_bloom_release (owner_thread (), j.second ());
+  }
+
+  /* a check that fails once ready - the owner's row buffer cannot grow - and the first reason kept: a worker whose
+   * cached state still says ready reaches its 4,096th checked row right after, with nothing dropped */
+  {
+    join j = int_join_with (keys);
+    hjoin_bloom_attach (owner_thread (), j.hj, j.second ());
+    HJOIN_BLOOM *b = hjoin_bloom_prepare (owner_thread (), j.second ());
+    REQUIRE (b != NULL);
+    HJOIN_BLOOM_WORKER *w = hjoin_bloom_worker_begin (worker_thread (0), b);
+    REQUIRE (w != NULL);
+    QFILE_LIST_ID *wl = worker_list (j);
+    std::vector<DB_VALUE> kept = ints ({ 7 });
+    for (int i = 0; i < 10; i++)
+      {
+	REQUIRE_FALSE (worker_skip (w, worker_thread (0), wl, kept, false));
+      }
+    unitseam_bloom_fill_now (owner_thread (), j.second ());	/* what hjoin_bloom_poll does at the threshold */
+    REQUIRE (view (j.second ()).state == C ().ready);
+    for (int i = 0; i < 246; i++)
+      {
+	REQUIRE_FALSE (worker_skip (w, worker_thread (0), wl, kept, false));
+      }
+    REQUIRE (wview (w).tested == 1);
+    for (int i = 0; i < 4094; i++)
+      {
+	REQUIRE_FALSE (worker_skip (w, worker_thread (0), wl, kept, false));
+      }
+    REQUIRE (wview (w).tested == 4095);
+    REQUIRE (wview (w).seen_unflushed == 254);
+    /* the owner's first descriptor row: its row buffer cannot grow */
+    std::vector<DB_VALUE> row = ints ({ 7 });
+    stage_descr (j.second ()->list_id, row);
+    fail_nth_alloc (1);
+    bool s = hjoin_bloom_skip_descr (owner_thread (), j.second ());
+    int left = g_alloc_countdown.load ();
+    fail_nth_alloc (0);
+    CHECK (left == 0);
+    CHECK_FALSE (s);
+    unitseam_bloom_view v = view (j.second ());
+    CHECK (v.state == C ().off);
+    CHECK (v.off_reason == C ().out_off_failed);
+    CHECK (er_errid () == NO_ERROR);
+    /* the worker's 4,096th checked row: its sample (none dropped) tries to turn the filter off - already off */
+    CHECK_FALSE (worker_skip (w, worker_thread (0), wl, kept, false));
+    CHECK (wview (w).tested == 4096);
+    v = view (j.second ());
+    CHECK (v.state == C ().off);
+    CHECK (v.off_reason == C ().out_off_failed);
+    /* its next row is a batch boundary: off seen, through */
+    CHECK_FALSE (worker_skip (w, worker_thread (0), wl, kept, false));
+    CHECK_FALSE (wview (w).ready);
+    hjoin_bloom_worker_end (worker_thread (0), w);
+    hjoin_bloom_detach (owner_thread (), j.second ());
+    CHECK (stats (j).outcome == C ().out_off_failed);
+  }
 }
