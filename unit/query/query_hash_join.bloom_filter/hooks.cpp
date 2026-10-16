@@ -11,12 +11,75 @@
  * The views below map the earlier layout onto the staged one (built = set up, !built = WAITING, built && !disabled =
  * READY, built && disabled = OFF for a failure, threshold 1: the build ran at the second input's first row), so one
  * test.cpp reads both.
+ *
+ * v5: two later layouts of the staged struct are told apart by their members (SFINAE, no macro marks them):
+ *   concurrent (8ad5ee2df on, member first_done): first_xasl, first_done; the set-up moved into the fill; owner_thread
+ *           bound at its first use; hjoin_bloom_input_done / _finish
+ *   early      (3726fd95d on, member key_regus): key_regus, key_cast; static hjoin_bloom_fetch_key_values /
+ *           _key_absent; the fill in an error stack frame (hjoin_bloom_fill_bits)
+ * What exists on one revision only is reached in templates over the struct type, inside if constexpr, so a revision
+ * never instantiates the branch it lacks; names the earlier layouts do not have at all stay behind
+ * UNITSEAM_BLOOM_STAGED.
  */
 
 #if defined (HJOIN_BLOOM_SEEN_BATCH)
 #define UNITSEAM_BLOOM_STAGED 1
 #else
 #define UNITSEAM_BLOOM_STAGED 0
+#endif
+
+/* v5: which members the struct has (8ad5ee2df: first_done; 3726fd95d: key_regus) */
+template < typename B, typename = void > struct unitseam_has_first_done
+{
+  static const bool value = false;
+};
+template < typename B > struct unitseam_has_first_done <B, decltype ((void) &B::first_done) >
+{
+  static const bool value = true;
+};
+template < typename B, typename = void > struct unitseam_has_key_regus
+{
+  static const bool value = false;
+};
+template < typename B > struct unitseam_has_key_regus <B, decltype ((void) &B::key_regus) >
+{
+  static const bool value = true;
+};
+
+#define UNITSEAM_BLOOM_CONCURRENT (unitseam_has_first_done < struct hjoin_bloom >::value)
+#define UNITSEAM_BLOOM_EARLY (unitseam_has_key_regus < struct hjoin_bloom >::value)
+
+/* stand-ins for the outcomes a revision does not have (never equal to a real one) */
+#define UNITSEAM_ABSENT_FIRST_LATE	(-20)
+#define UNITSEAM_ABSENT_OFF_FIRST_ROWS	(-21)
+#define UNITSEAM_ABSENT_ENDED_FIRST	(-22)
+
+#if UNITSEAM_BLOOM_STAGED
+/* the outcomes 8ad5ee2df / 3726fd95d added to enum hashjoin_bloom_outcome, read through the enum's name */
+template < typename E, typename = void > struct unitseam_out_first_late
+{
+  static const int value = UNITSEAM_ABSENT_FIRST_LATE;
+};
+template < typename E > struct unitseam_out_first_late <E, decltype ((void) E::HASHJOIN_BLOOM_FIRST_LATE) >
+{
+  static const int value = (int) E::HASHJOIN_BLOOM_FIRST_LATE;
+};
+template < typename E, typename = void > struct unitseam_out_off_first_rows
+{
+  static const int value = UNITSEAM_ABSENT_OFF_FIRST_ROWS;
+};
+template < typename E > struct unitseam_out_off_first_rows <E, decltype ((void) E::HASHJOIN_BLOOM_OFF_FIRST_ROWS) >
+{
+  static const int value = (int) E::HASHJOIN_BLOOM_OFF_FIRST_ROWS;
+};
+template < typename E, typename = void > struct unitseam_out_ended_first
+{
+  static const int value = UNITSEAM_ABSENT_ENDED_FIRST;
+};
+template < typename E > struct unitseam_out_ended_first <E, decltype ((void) E::HASHJOIN_BLOOM_ENDED_FIRST) >
+{
+  static const int value = (int) E::HASHJOIN_BLOOM_ENDED_FIRST;
+};
 #endif
 
 /* the earlier layout's stand-ins for enum hashjoin_bloom_outcome (it has none) */
@@ -54,6 +117,13 @@ struct unitseam_bloom_consts
   long long sample_rows;
   long long min_skip_percent;
   long long seen_batch;
+  /* v5 */
+  bool concurrent;
+  bool early;
+  int out_first_late;
+  int out_off_first_rows;
+  int out_ended_first;
+  long long max_first_rows;
 };
 
 void
@@ -74,6 +144,9 @@ unitseam_bloom_consts_of (unitseam_bloom_consts * c)
   c->sample_rows = HJOIN_BLOOM_SAMPLE_ROWS;
   c->min_skip_percent = HJOIN_BLOOM_MIN_SKIP_PERCENT;
   c->seen_batch = HJOIN_BLOOM_SEEN_BATCH;
+  c->out_first_late = unitseam_out_first_late < enum hashjoin_bloom_outcome >::value;
+  c->out_off_first_rows = unitseam_out_off_first_rows < enum hashjoin_bloom_outcome >::value;
+  c->out_ended_first = unitseam_out_ended_first < enum hashjoin_bloom_outcome >::value;
 #else
   c->staged = false;
   c->waiting = 0;
@@ -88,6 +161,16 @@ unitseam_bloom_consts_of (unitseam_bloom_consts * c)
   c->sample_rows = 0;
   c->min_skip_percent = 0;
   c->seen_batch = 0;
+  c->out_first_late = UNITSEAM_ABSENT_FIRST_LATE;
+  c->out_off_first_rows = UNITSEAM_ABSENT_OFF_FIRST_ROWS;
+  c->out_ended_first = UNITSEAM_ABSENT_ENDED_FIRST;
+#endif
+  c->concurrent = UNITSEAM_BLOOM_CONCURRENT;
+  c->early = UNITSEAM_BLOOM_EARLY;
+#if defined (HJOIN_BLOOM_MAX_FIRST_ROWS)
+  c->max_first_rows = HJOIN_BLOOM_MAX_FIRST_ROWS;
+#else
+  c->max_first_rows = 10000000;	/* the earlier attach's literal bound */
 #endif
 }
 
@@ -113,7 +196,38 @@ struct unitseam_bloom_view
   long long keys;
   long long tested;
   long long skipped;
+  /* v5 */
+  const void *first_xasl;	/* concurrent; NULL earlier */
+  long long first_done;		/* concurrent: 0 / 1; -1 earlier */
+  const void *key_regus;	/* early; NULL earlier */
+  const void *key_cast;		/* early; NULL earlier */
 };
+
+/* the v5 members, where the struct has them */
+template < typename B > static void
+unitseam_view_v5 (B * bloom, unitseam_bloom_view * v)
+{
+  if constexpr (unitseam_has_first_done < B >::value)
+    {
+      v->first_xasl = bloom->first_xasl;
+      v->first_done = bloom->first_done;
+    }
+  else
+    {
+      v->first_xasl = NULL;
+      v->first_done = -1;
+    }
+  if constexpr (unitseam_has_key_regus < B >::value)
+    {
+      v->key_regus = bloom->key_regus;
+      v->key_cast = bloom->key_cast;
+    }
+  else
+    {
+      v->key_regus = NULL;
+      v->key_cast = NULL;
+    }
+}
 
 void
 unitseam_bloom_view_of (XASL_NODE * xasl, unitseam_bloom_view * v)
@@ -154,26 +268,38 @@ unitseam_bloom_view_of (XASL_NODE * xasl, unitseam_bloom_view * v)
   v->keys = bloom->keys;
   v->tested = bloom->tested;
   v->skipped = bloom->skipped;
+  unitseam_view_v5 (bloom, v);
 }
 
 /*
  * The filter of xasl as the owner has it once the second input has given threshold rows: staged - hjoin_bloom_setup
  * () if not yet, then hjoin_bloom_fill () if still waiting (what hjoin_bloom_owner_row / hjoin_bloom_poll do at the
- * threshold); earlier - hjoin_bloom_build () if not yet built (what the first row triggered). Counts no row.
+ * threshold); concurrent (8ad5ee2df on) - hjoin_bloom_fill () alone, which sets up inside; earlier -
+ * hjoin_bloom_build () if not yet built (what the first row triggered). Counts no row.
  */
-void
-unitseam_bloom_fill_now (THREAD_ENTRY * thread_p, XASL_NODE * xasl)
+template < typename B > static void
+unitseam_fill_now_impl (THREAD_ENTRY * thread_p, B * bloom)
 {
-  HJOIN_BLOOM *bloom = xasl->hj_bloom;
-
 #if UNITSEAM_BLOOM_STAGED
-  if (!bloom->set_up)
+  if constexpr (unitseam_has_first_done < B >::value)
     {
-      hjoin_bloom_setup (thread_p, bloom);
+      /* concurrent: the fill sets up itself (hjoin_bloom_fill_bits / the fill of 8ad5ee2df); it runs once the first
+       * input is done - the caller's attach made it so */
+      if (bloom->state == HJOIN_BLOOM_WAITING)
+	{
+	  hjoin_bloom_fill (thread_p, bloom);
+	}
     }
-  if (bloom->state == HJOIN_BLOOM_WAITING)
+  else
     {
-      hjoin_bloom_fill (thread_p, bloom);
+      if (!bloom->set_up)
+	{
+	  hjoin_bloom_setup (thread_p, bloom);
+	}
+      if (bloom->state == HJOIN_BLOOM_WAITING)
+	{
+	  hjoin_bloom_fill (thread_p, bloom);
+	}
     }
 #else
   if (!bloom->built)
@@ -181,6 +307,12 @@ unitseam_bloom_fill_now (THREAD_ENTRY * thread_p, XASL_NODE * xasl)
       hjoin_bloom_build (thread_p, bloom);
     }
 #endif
+}
+
+void
+unitseam_bloom_fill_now (THREAD_ENTRY * thread_p, XASL_NODE * xasl)
+{
+  unitseam_fill_now_impl (thread_p, (struct hjoin_bloom *) xasl->hj_bloom);
 }
 
 /* staged only: the shared row count, written as a state injection (earlier: nothing) */
@@ -443,6 +575,9 @@ struct unitseam_worker_view
   long long seen_unflushed;
   long long tested;
   long long skipped;
+  /* v5 (3726fd95d): the key columns' regu variables the worker found in its clone's output list; NULL earlier */
+  const void *key_regu0;
+  const void *key_cast;
 };
 
 template < typename W, typename = void >struct unitseam_worker_access
@@ -479,6 +614,11 @@ template < typename W > struct unitseam_worker_access <W, decltype ((void) sizeo
 #endif
     v->tested = w->tested;
     v->skipped = w->skipped;
+    if constexpr (unitseam_has_key_regus < W >::value)
+      {
+	v->key_regu0 = w->key_regus != NULL ? w->key_regus[0] : NULL;
+	v->key_cast = w->key_cast;
+      }
   }
 };
 
@@ -486,4 +626,151 @@ void
 unitseam_worker_view_of (const void *worker, unitseam_worker_view * v)
 {
   unitseam_worker_access < struct hjoin_bloom_worker >::view (worker, v);
+}
+
+/* ================================================================ v5 (8ad5ee2df, 3726fd95d) */
+
+/* 3726fd95d: the regu variable attach found for key k in the checked input's output list; NULL when the filter has none
+ * (a computed key, or a revision without the check before the projection) */
+template < typename B > static const void *
+unitseam_key_regu_impl (B * bloom, int k)
+{
+  if constexpr (unitseam_has_key_regus < B >::value)
+    {
+      return (bloom != NULL && bloom->key_regus != NULL) ? (const void *) bloom->key_regus[k] : NULL;
+    }
+  else
+    {
+      return NULL;
+    }
+}
+
+const void *
+unitseam_bloom_key_regu (XASL_NODE * xasl, int k)
+{
+  return unitseam_key_regu_impl ((struct hjoin_bloom *) xasl->hj_bloom, k);
+}
+
+#if UNITSEAM_BLOOM_STAGED
+/*
+ * 3726fd95d: the owner's check of a row before its projection, taken apart - hjoin_bloom_fetch_key_values () into the
+ * owner's key (each key_cast slot set to NULL first, so cast_mask says which keys went through it: a value not of its
+ * list column's domain), the key's hash qdata_hash_scan_key (key, UINT_MAX, HASH_METH_IN_MEM), and on a filled filter
+ * the decision of the bits (hjoin_bloom_key_absent). Counts no row and judges no sample (what hjoin_bloom_check_values
+ * does, without the error clear).
+ *   return: -3 no key_regus (a computed key, or a revision without it), -4 not set up, -2 the fetch failed (its error id
+ *	     left as set), 1 a NULL key, 0 a key; decision -1 not ready, 0 keep, 1 skip
+ */
+template < typename B > static int
+unitseam_early_key_impl (THREAD_ENTRY * thread_p, B * bloom, VAL_DESCR * vd, unsigned int *hash, int *cast_mask,
+			 int *decision)
+{
+  *hash = 0;
+  *cast_mask = 0;
+  *decision = -1;
+  if constexpr (unitseam_has_key_regus < B >::value)
+    {
+      bool skip = false;
+      int k, key_cnt;
+
+      if (bloom == NULL || bloom->key_regus == NULL)
+	{
+	  return -3;
+	}
+      if (!bloom->set_up || bloom->key == NULL || bloom->key_cast == NULL)
+	{
+	  return -4;
+	}
+      key_cnt = bloom->hj_xasl->proc.hashjoin.merge_info.ls_column_cnt;
+      for (k = 0; k < key_cnt; k++)
+	{
+	  pr_clear_value (&bloom->key_cast[k]);
+	  db_make_null (&bloom->key_cast[k]);
+	}
+      if (hjoin_bloom_fetch_key_values (thread_p, &bloom->second, bloom->key_regus, bloom->key_cast, vd, bloom->key,
+					&skip) != NO_ERROR)
+	{
+	  return -2;
+	}
+      for (k = 0; k < key_cnt; k++)
+	{
+	  if (!DB_IS_NULL (&bloom->key_cast[k]))
+	    {
+	      *cast_mask |= 1 << k;
+	    }
+	}
+      if (skip)
+	{
+	  *decision = bloom->state == HJOIN_BLOOM_READY ? 1 : -1;
+	  return 1;
+	}
+      *hash = qdata_hash_scan_key (bloom->key, UINT_MAX, HASH_METH_IN_MEM);
+      if (bloom->state == HJOIN_BLOOM_READY)
+	{
+	  *decision = hjoin_bloom_key_absent (bloom, bloom->key) ? 1 : 0;
+	}
+      return 0;
+    }
+  else
+    {
+      (void) thread_p;
+      (void) bloom;
+      (void) vd;
+      return -3;
+    }
+}
+
+int
+unitseam_bloom_early_key (THREAD_ENTRY * thread_p, XASL_NODE * xasl, VAL_DESCR * vd, unsigned int *hash,
+			  int *cast_mask, int *decision)
+{
+  return unitseam_early_key_impl (thread_p, (struct hjoin_bloom *) xasl->hj_bloom, vd, hash, cast_mask, decision);
+}
+#else
+int
+unitseam_bloom_early_key (THREAD_ENTRY *, XASL_NODE *, VAL_DESCR *, unsigned int *hash, int *cast_mask, int *decision)
+{
+  *hash = 0;
+  *cast_mask = 0;
+  *decision = -1;
+  return -3;
+}
+#endif
+
+/*
+ * The join's own key of a second-input row read from its list: hjoin_fetch_key () with the fetch info
+ * hjoin_init_manager () builds from proc->domain_info (call unitseam_hj_init_domain_info first), then
+ * qdata_hash_scan_key (key, UINT_MAX, HASH_METH_IN_MEM) - what the in-memory table and the filled bits are keyed by.
+ *   return: -1 the fetch failed, 1 a NULL key (the join skips the row), 0 a key (hash set)
+ */
+int
+unitseam_hj_second_key (THREAD_ENTRY * thread_p, XASL_NODE * hj_xasl, bool first_is_outer, QFILE_TUPLE_RECORD * record,
+			unsigned int *hash)
+{
+  HASHJOIN_PROC_NODE *proc = &hj_xasl->proc.hashjoin;
+  HASHJOIN_DOMAIN_INFO *domain_info = &proc->domain_info;
+  HASHJOIN_FETCH_INFO second;
+  HASH_SCAN_KEY *key;
+  int key_cnt = proc->merge_info.ls_column_cnt;
+  bool skip = false;
+  int rc;
+
+  memset (&second, 0, sizeof (second));
+  second.input = first_is_outer ? &domain_info->inner : &domain_info->outer;
+  second.coerce_domains = domain_info->coerce_domains;
+  second.need_coerce_domains = domain_info->need_coerce_domains;
+  *hash = 0;
+
+  key = qdata_alloc_hscan_key (thread_p, key_cnt, true);
+  if (key == NULL)
+    {
+      return -1;
+    }
+  rc = hjoin_fetch_key (thread_p, &second, record, key, NULL, &skip) != NO_ERROR ? -1 : skip ? 1 : 0;
+  if (rc == 0)
+    {
+      *hash = qdata_hash_scan_key (key, UINT_MAX, HASH_METH_IN_MEM);
+    }
+  qdata_free_hscan_key (thread_p, key, key_cnt);
+  return rc;
 }

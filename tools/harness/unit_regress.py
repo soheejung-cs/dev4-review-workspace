@@ -5,6 +5,8 @@ PR head 와 base 에 다시 돌린다. 결과는 OUT/unit_regress.{json,md} — 
   [contract]  계약. head FAIL & base PASS → **회귀 후보**. head PASS → 유지. 둘 다 FAIL → suite 가 낡았다(갱신 필요).
   [defect]    지난 리뷰의 결함 재현(PASS = 결함 있음). head PASS → 결함 여전함. head FAIL & base PASS → **고쳐졌거나 동작이 바뀌었다**.
               suite.json 의 defects_fixed_in(커밋)이 있으면 이력 케이스 — head FAIL = 정상(이력), head PASS = **재발**.
+              defects_fixed_in 이 {케이스 이름 접두어: 커밋} 사전이면 그 접두어로 시작하는 [defect] 케이스만 이력이다
+              (한 suite 에 고쳐진 결함과 아직 열린 결함이 같이 있을 때).
   태그 없음  contract 로 본다.
 suite.json 의 requires(대상 심볼)로 적용 여부를 먼저 본다: head 에 없고 base 에 있으면 '이 PR 이 대상 코드를 지웠다 — 이관 필요',
 둘 다 없으면 '적용 안 됨'(출처 PR 이 아직 안 들어온 리비전), base 에만 없으면 신설. 대상이 있는데 head 컴파일 실패 → suite 갱신 필요.
@@ -30,6 +32,14 @@ def suites():
 def select(changed):
     ch = set(changed)
     return [s for s in suites() if ch & set([s['file']] + s.get('watch', []))]
+
+
+def fixed_in_for(suite, name):
+    """defects_fixed_in: 문자열이면 suite 의 모든 [defect] 케이스, 사전이면 이름이 그 키로 시작하는 케이스만."""
+    f = suite.get('defects_fixed_in', '')
+    if isinstance(f, dict):
+        return next((v for k, v in f.items() if name.startswith(k)), '')
+    return f
 
 
 def verdict(kind, head_ok, base_ok, fixed_in=''):
@@ -92,7 +102,7 @@ def run(out, head, base, changed, log=print, repo=US.DEF_REPO, build=US.DEF_BUIL
         for c in h.get('cases', []):
             kind = 'defect' if '[defect]' in (c.get('tags') or '') else 'contract'
             bc = bmap.get(c['name'])
-            v, txt = verdict(kind, c['ok'], bc['ok'] if bc else None, s.get('defects_fixed_in', ''))
+            v, txt = verdict(kind, c['ok'], bc['ok'] if bc else None, fixed_in_for(s, c['name']))
             if not bc and b and b.get('status') != 'ran':
                 txt += f" · base {b.get('status')}(base 에 없는 코드면 신설)"
             why = ''
