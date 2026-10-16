@@ -1708,7 +1708,9 @@ TEST_CASE ("PR27659 F3 (latent): a first-input scan that stops on S_ERROR withou
  */
 enum poison_kind
 { POISON_ZERO, POISON_DECOY };
-static const uintptr_t DECOY_ADDR = 0x40008000;
+/* below the non-PIE image (0x400000) so the heap, which ASLR starts at a random address after the image, never
+ * covers it - 0x40008000 collided now and then (MAP_FIXED_NOREPLACE failed: about 2.6% of full runs) */
+static const uintptr_t DECOY_ADDR = 0x00208000;
 
 __attribute__ ((noinline)) static void
 poison_stack (poison_kind kind)
