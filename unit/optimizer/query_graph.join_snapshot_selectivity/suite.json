@@ -1,0 +1,29 @@
+{
+ "name": "qo_snapshot_apply — 소형 상수 필터 노드의 행 스냅샷으로 노드·조인 선택도 재산정(CBRD-27478 1단계): 계산식·NULL·중복 키·행 수 경계·폴백·에러 격리",
+ "requires": [
+  "qo_snapshot_apply",
+  "QO_TERM_SEL_FROM_SNAPSHOT"
+ ],
+ "file": "src/optimizer/query_graph.c",
+ "mode": "cs",
+ "seams": [],
+ "appendix": "hooks.cpp",
+ "test": "test.cpp",
+ "watch": [
+  "src/optimizer/query_graph.h",
+  "src/optimizer/query_bitset.c",
+  "src/optimizer/query_bitset.h",
+  "src/optimizer/histogram/histogram_cl.cpp",
+  "src/optimizer/histogram/histogram_cl.hpp",
+  "src/compat/db_info.c",
+  "src/object/schema_manager.c"
+ ],
+ "fakes": "진짜: TU static 4개(qo_snapshot_threshold·qo_snapshot_const_value·qo_snapshot_sarg_matches·qo_snapshot_apply, hooks.cpp 로 호출), bitset(query_bitset.c 를 test.cpp 에 #include — malloc 만 쓰는 순수 코드), dbtype inline 접근자. 가짜(다른 TU): db_get_all_objects — db_info.c:274 → sm_fetch_all_objects_internal(schema_manager.c:2792) 분기: 인스턴스를 앞에 붙여(역 힙 순서) DB_OBJLIST 로, 빈 클래스는 NULL·에러 없음, 실패(au_fetch_class)는 er_set 후 NULL. sm_fetch_all_objects_of_dirty_version — schema_manager.c:2768, 같은 internal 이라 같은 목록(cc3c4e821 은 부르지 않음; 설계리뷰 Q2-B 로 바뀔 호출 대상을 미리 덮음). db_objlist_free — db_admin.c:2811 ml_ext_free. db_get — db_obj.c:234 → obj_get: 값 복사(NULL 은 NULL), 없는 속성·읽기 실패는 er_set + ER_OBJ_INVALID_ATTRIBUTE. histogram_get_equal_selectivity — histogram_cl.cpp:1032: rhs NULL·히스토그램 없음·키 kind 불일치면 success=false·선택도 미변경, 아니면 비-NULL 조건부 (0,1] 값과 success=true(1188-1209) — 테스트가 열 이름별 MCV 표 + 나머지 값으로 최종 숫자를 준다. tp_value_compare — object_domain.c tp_value_compare_with_error 의 NULL 분기(total_order 면 (NULL,NULL)=EQ·(NULL,x)=LT·(x,NULL)=GT) + 정수 비교(장면은 정수만, 다른 타입은 세어 0 을 단정). db_set_size/db_set_get — db_set.c:559/510(원소 복사, 범위 밖 ER_SET_INVALID_INDEX). pr_clear_value — 정수는 소유 메모리 없음. er_set/er_errid/er_stack_push/er_stack_pop — error_manager.c: push 는 현재 항목을 저장하고 빈 항목으로 시작, pop 은 저장 항목 복원, er_set 은 현재 항목 덮어씀. QO_ENV/QO_NODE/QO_TERM/PT_NODE 는 qo_add_node·qo_add_term·qo_node_add_sarg(1/ncard 하한 포함)가 남기는 필드만 채운다.",
+ "note": "결함 없음 — 계약 26건, 변이 5종(nf 인자 삭제·NULL 키를 k 에서 뺌·임계값 >=·빈 목록 경로 pop 누락·옛 값과 MIN 결합)이 모두 잡힌다. '(현재 동작)' 이 이름에 붙은 3건은 설계 판정 대기 관찰을 고정한 것이다: (1) 생존 키가 전부 NULL 이면 항이 히스토그램 값으로 남는다(키 하나만 non-NULL 이어도 P/k 로 내려감 — 비단조), (2) 두 스냅샷 노드가 서로 조인하면 idx 가 큰 노드가 항을 마지막으로 덮는다(순서 의존, 두 쪽 생존 행으로 정확히 셀 수 있는 경우), (3) nf_other == 1.0 이면 (1-nf) 인자를 생략한다(base qo_expr_selectivity 는 nf>=0 이면 곱한다). 이 셋을 바꾸는 커밋은 해당 케이스를 '회귀 후보' 로 띄운다 — 의도한 변경이면 케이스를 갱신한다. 상한 클램프(sel>1→1)는 실제 histogram_get_equal_selectivity 가 1 을 넘기지 않고 (1-nf)<=1 이라 도달 불가 — 경계(=1.0)만 단정했다. CHAR 패딩·콜레이션·숫자 승격 비교는 가짜 비교기(정수 전용) 밖이다.",
+ "origin": {
+  "pr": 8029,
+  "finding": "계약 suite(결함 없음, 관찰 3건) — CBRD-27478 1단계 행 스냅샷 조인 선택도",
+  "comment": null,
+  "date": "2026-10-16"
+ }
+}
