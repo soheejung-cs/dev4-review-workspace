@@ -82,6 +82,15 @@ def main():
                     if declared: res['checks'].setdefault('gates-declared', []).append(f'{fn.fid}: {unbalanced} — 계약: {declared[:120]}')
                     elif delta and g_before is not None and g_before.function(fn.fid): fail('gates', f'{fn.fid}: 이 변경이 관문 카운트를 바꿈 {delta} (현재 불균형 {unbalanced}) 인데 plan.gate_contract 가 비어 있음')
                     else: res['checks'].setdefault('gates-note', []).append(f'{fn.fid}: 불균형 {unbalanced} 은 변경 전에도 같음(또는 before 그래프 없음) — 빌더의 소유권 이전이면 정상, 아니면 선재 결함 후보')
+    # (5) 구조 먼저 — 성능 작업이면 structure.json (harness/구조우선-성능작업.md)
+    perf_like = any(c.get('rule_ids') for c in plan.get('changes', []))
+    if plan.get('perf') or perf_like:
+        from . import structure_check as SC
+        sp = plan.get('structure') or os.path.join(out, 'structure.json')
+        errs, notes = SC.check(os.path.expanduser(sp), 'gate')
+        for e in errs: fail('structure', e)
+        for n in notes: res['checks'].setdefault('structure-note', []).append(n)
+        if perf_like and not plan.get('perf'): res['checks'].setdefault('structure-note', []).append('changes 에 성능 rule_ids 가 있어 성능 작업으로 보고 검사했다 — plan.perf=true 로 적는다')
     res['changed_files'] = changed_files; res['touched_functions'] = touched
     json.dump(res, open(os.path.join(out, 'gate.json'), 'w'), ensure_ascii=False, indent=1)
     verdict = 'GATE FAIL' if not res['ok'] else ('GATE OK' if not res.get('skipped') else 'GATE OK* (건너뛴 검사 있음 — 컴파일을 확인한 것이 아니다)')

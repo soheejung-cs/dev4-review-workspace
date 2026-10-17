@@ -109,6 +109,7 @@ skills/
 | 코드를 고쳐 PR 까지(신규·리뷰 대응) | harness-implement | 리뷰 코멘트에 답하는 단계는 review-response |
 | 달린 리뷰에 답하기·resolve | review-response | 결함이 확인되면 harness-implement 로 고친 뒤 돌아온다 |
 | 무엇을 돌려 검증하나(CTP/JOB/TPC-H) | review-testing | 측정 자체는 tools/ab |
+| 성능 작업을 어디서 시작하나(시간 지도·횟수·커버리지·미시 벤치) | harness-implement S1.5 | `harness/구조우선-성능작업.md`, tools/perf |
 | 끝났을 때 어디에 남기나 | record | 세션을 닫을 땐 pre-clear(퍼스널) |
 
 references/

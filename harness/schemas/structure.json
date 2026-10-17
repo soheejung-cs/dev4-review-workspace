@@ -1,0 +1,138 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "structure.json — 성능 작업의 구조 먼저 (harness/구조우선-성능작업.md)",
+  "description": "코드를 고치기 전에 세우는 것: 시간이 어디로 가는지(time_map), 단위당 비용을 센 것(cost_census), 파이프라인이 어디서 끊기는지(coverage), 병렬 직렬 구간, 객체 수명, 기능이 실제 플랜에 도착하는지, 기법별 미시 벤치, 범위. implement_gate 가 plan.perf=true 일 때 검사한다.",
+  "type": "object",
+  "required": ["key", "workload", "time_map", "target", "cost_census", "coverage", "parallel", "memory", "plan_arrival", "mechanism_bench", "scope"],
+  "properties": {
+    "key": {"type": "string"},
+    "workload": {
+      "type": "object",
+      "required": ["macro", "mechanism"],
+      "properties": {
+        "macro": {"type": "string", "description": "거시 벤치(TPC-H SF10 22 등) — 사용자가 받는 효과"},
+        "mechanism": {"type": "string", "description": "미시 벤치 shapes 파일 경로 — 기법 하나만 도는 질의들"}
+      }
+    },
+    "time_map": {
+      "type": "array", "minItems": 1,
+      "description": "질의(또는 질의군)별 비용 축 비율. tools/perf/prof_bucket.py 출력. 합이 90~110%.",
+      "items": {
+        "type": "object",
+        "required": ["query", "source", "buckets"],
+        "properties": {
+          "query": {"type": "string"},
+          "source": {"type": "string", "description": "perf.data 또는 flat 파일 경로"},
+          "buckets": {"type": "object", "additionalProperties": {"type": "number"}}
+        }
+      }
+    },
+    "target": {
+      "type": "object",
+      "required": ["buckets", "ceiling"],
+      "description": "이 변경이 줄이는 축과 상한(Amdahl). 축 비율이 작으면 기법이 좋아도 질의는 안 준다 — 조인 질의에서 eval 은 10% 안팎이었다.",
+      "properties": {
+        "buckets": {"type": "array", "items": {"type": "string"}, "minItems": 1},
+        "ceiling": {"type": "string", "description": "예: 'Q7: eval 9% → 질의 최대 −9%; Q1: eval 70% → 최대 −70%'"}
+      }
+    },
+    "cost_census": {
+      "type": "array", "minItems": 1,
+      "description": "단위(행·그룹·탐색·페이지)당 횟수를 센 것. 코드(file:line) 또는 trace(fetch/rows) 근거.",
+      "items": {
+        "type": "object",
+        "required": ["unit", "kind", "count", "evidence"],
+        "properties": {
+          "unit": {"type": "string", "description": "row / group / probe / page / chunk"},
+          "kind": {"type": "string", "description": "alloc / free / page_fix / latch / call / copy / serial_step"},
+          "count": {"type": "number"},
+          "evidence": {"type": "string"},
+          "after": {"type": "number", "description": "변경 뒤 기대 횟수"}
+        }
+      }
+    },
+    "coverage": {
+      "type": "object",
+      "required": ["map", "breaks"],
+      "properties": {
+        "map": {"type": "string", "description": "tools/perf/trace_scan.py 출력 경로 — 스캔·노드별 경로(batch/row)와 거절 사유"},
+        "breaks": {
+          "type": "array",
+          "description": "블로킹 노드에 닿기 전에 행 단위로 끊기는 곳. 각각 이번에 잇는지, 아니면 이유.",
+          "items": {
+            "type": "object",
+            "required": ["where", "why", "decision"],
+            "properties": {
+              "where": {"type": "string"}, "why": {"type": "string"},
+              "time_share": {"type": "string"},
+              "decision": {"type": "string", "description": "이번에 잇는다 / 남긴다(이유)"}
+            }
+          }
+        }
+      }
+    },
+    "parallel": {
+      "type": "object",
+      "required": ["stages", "serial_added"],
+      "properties": {
+        "stages": {"type": "array", "items": {"type": "string"}, "description": "병렬 플랜의 단계(스캔 → 부분집계 → 병합 …)와 각각 병렬/직렬"},
+        "serial_added": {
+          "type": "array",
+          "description": "이 변경이 새로 만드는 직렬 구간. 비어 있어야 한다 — 아니면 justification + measured 필수 (CBRD-27361: 직렬 해시 병합이 병렬 정렬보다 느렸다 28.7s vs 18s)",
+          "items": {"type": "object", "required": ["where", "justification", "measured"], "properties": {"where": {"type": "string"}, "justification": {"type": "string"}, "measured": {"type": "string"}}}
+        }
+      }
+    },
+    "memory": {
+      "type": "array",
+      "description": "단위마다 생기는 객체: 할당 횟수와 수명, 수명에 맞는 전략. 할당이 2회 넘게 붙는 객체가 연산자 수명이면 malloc 은 사유 필수 (CBRD-27361: 그룹 하나에 할당 약 10회 + 하나씩 해제 → slab).",
+      "items": {
+        "type": "object",
+        "required": ["object", "allocs_per_unit", "lifetime", "strategy"],
+        "properties": {
+          "object": {"type": "string"},
+          "allocs_per_unit": {"type": "number"},
+          "lifetime": {"type": "string", "enum": ["row", "chunk", "group", "operator", "query", "session"]},
+          "strategy": {"type": "string", "enum": ["stack", "arena", "slab", "pool", "malloc"]},
+          "justification": {"type": "string"},
+          "evidence": {"type": "string"}
+        }
+      }
+    },
+    "plan_arrival": {
+      "type": "array", "minItems": 1,
+      "description": "기능(모양)마다: 옵티마이저 재작성 뒤 실제 플랜에 어떤 모양으로 도착하고, trace 로 그 경로를 탔다는 증거. (CBRD-27361: IN 은 = 의 OR 로 펴져 도착했고 CHAR = 가 일반 비교로 남아 batch 를 못 탔다)",
+      "items": {
+        "type": "object",
+        "required": ["shape", "arrives_as", "verified_by"],
+        "properties": {
+          "shape": {"type": "string"},
+          "arrives_as": {"type": "string", "description": "옵티마이저 출력(Query stmt / term[])에서 본 모양"},
+          "verified_by": {"type": "string", "description": "trace 줄 또는 trace_scan 출력 경로 — 비면 게이트 실패"}
+        }
+      }
+    },
+    "mechanism_bench": {
+      "type": "object",
+      "required": ["shapes", "rounds"],
+      "properties": {
+        "shapes": {"type": "string", "description": "tools/perf/mech_bench.sh 의 shapes 파일 — plan_arrival 의 모양마다 한 줄 이상"},
+        "rounds": {"type": "string", "description": "예: 'NEW→REF→REF→NEW, 각 예열 1 + 3'"},
+        "result": {"type": "string", "description": "mech_summarize.py 출력 경로(측정 뒤)"}
+      }
+    },
+    "scope": {
+      "type": "object",
+      "required": ["risk_types", "decision"],
+      "properties": {
+        "risk_types": {"type": "array", "items": {"type": "string"}, "description": "executor / storage(btree·heap·pgbuf) / optimizer / parallel / memory / trace … — 둘 이상이면 나눌지 결정"},
+        "decision": {"type": "string", "description": "한 PR 로 간다(이유) / 나눈다(무엇을 어디로)"}
+      }
+    },
+    "residual": {
+      "type": "array",
+      "description": "변경 뒤 남은 큰 축 — 다음 목표 후보(측정 뒤 채운다)",
+      "items": {"type": "string"}
+    }
+  }
+}

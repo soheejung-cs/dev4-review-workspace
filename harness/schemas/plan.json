@@ -2,6 +2,8 @@
   "required": ["key", "area", "invariants", "tier", "sharing", "summary", "alternatives", "changes", "tests"],
   "properties": {
     "key": {"type": "string", "description": "CBRD-n"},
+    "perf": {"type": "boolean", "description": "성능 경로 작업 — true 면 structure.json 필수, implement_gate 가 검사(harness/구조우선-성능작업.md)"},
+    "structure": {"type": "string", "description": "structure.json 경로(기본: plan 과 같은 디렉터리)"},
     "area": {"type": "string", "description": "이건 [X] 영역 작업이므로 ~를 고려해야 한다 — 한 문단"},
     "invariants": {"type": "array", "items": {"type": "object", "required": ["id", "touched", "why"], "properties": {"id": {"enum": ["INV-1", "INV-2", "INV-3", "INV-4", "INV-5"]}, "touched": {"type": "boolean"}, "why": {"type": "string"}}}, "minItems": 5},
     "tier": {"enum": ["Tier-0", "Tier-1", "Tier-2", "n/a"]},

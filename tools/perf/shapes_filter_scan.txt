@@ -1,0 +1,15 @@
+F01 숫자 비교 (NUMERIC < 정수)|select @H count(*), sum(l_extendedprice) from lineitem where l_quantity < 24;
+F02 날짜 범위|select @H count(*), sum(l_extendedprice) from lineitem where l_shipdate >= date '1994-01-01' and l_shipdate < date '1995-01-01';
+F03 NUMERIC BETWEEN|select @H count(*), sum(l_extendedprice) from lineitem where l_discount between 0.05 and 0.07;
+F04 Q6 모양 (날짜·BETWEEN·숫자 AND)|select @H sum(l_extendedprice * l_discount) from lineitem where l_shipdate >= date '1994-01-01' and l_shipdate < date '1995-01-01' and l_discount between 0.05 and 0.07 and l_quantity < 24;
+F05 두 컬럼 비교|select @H count(*), sum(l_extendedprice) from lineitem where l_commitdate < l_receiptdate;
+F06 VARCHAR LIKE '%..%'|select @H count(*), sum(l_extendedprice) from lineitem where l_comment like '%furiously%';
+F07 VARCHAR NOT LIKE|select @H count(*), sum(l_extendedprice) from lineitem where l_comment not like '%special%requests%';
+F08 CHAR =|select @H count(*), sum(l_extendedprice) from lineitem where l_shipmode = 'MAIL';
+F09 CHAR IN|select @H count(*), sum(l_extendedprice) from lineitem where l_shipmode in ('MAIL', 'SHIP', 'AIR');
+F10 정수 IN|select @H count(*), sum(l_extendedprice) from lineitem where l_linenumber in (1, 3, 5);
+F11 OR (숫자)|select @H count(*), sum(l_extendedprice) from lineitem where l_quantity < 5 or l_discount > 0.09;
+F12 OR of AND (문자·숫자)|select @H count(*), sum(l_extendedprice) from lineitem where (l_shipmode in ('AIR', 'REG AIR') and l_quantity < 10) or (l_shipinstruct = 'DELIVER IN PERSON' and l_quantity > 45);
+F13 SUBSTRING IN|select @H count(*), sum(l_extendedprice) from lineitem where substring (l_shipinstruct, 1, 4) in ('DELI', 'TAKE');
+F14 선택적 필터 + 행 반환|select @H l_orderkey, l_linenumber from lineitem where l_quantity = 1 and l_discount = 0.10 and l_shipmode = 'RAIL' and l_comment like '%final%';
+F15 필터 + GROUP BY|select @H l_returnflag, l_linestatus, count(*), sum(l_extendedprice) from lineitem where l_shipdate <= date '1998-09-02' and l_quantity < 30 group by l_returnflag, l_linestatus order by 1, 2;
