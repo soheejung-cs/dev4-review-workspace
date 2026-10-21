@@ -1,0 +1,30 @@
+{
+ "name": "PR#8196(CBRD-27361) numeric_agg_expr_from_disk — 레코드 바이트의 NUMERIC 을 워드 도메인으로: mr_data_writeval_numeric 이 쓴 모든 (p,s)·부호·크기에서 from_dbv·readval 과 같은 수락/거절·계수·스케일·부호, avail 가드, 음의 0 정규화",
+ "file": "src/query/numeric_opfunc.c",
+ "mode": "server",
+ "seams": [],
+ "appendix": "",
+ "test": "test.cpp",
+ "extra": [
+  "src/compat/db_macro.c",
+  "src/object/object_primitive.c"
+ ],
+ "requires": [
+  "numeric_agg_expr_from_disk"
+ ],
+ "watch": [
+  "src/query/numeric_opfunc.h",
+  "src/query/expr_batch.c",
+  "src/object/object_primitive.c",
+  "src/object/object_primitive.h"
+ ],
+ "fakes": "er_set/er_errid/er_clear(코드만 기록), prm_Def(기본값). 그 밖은 실코드: numeric_opfunc.c(대상 TU), db_macro.c, object_primitive.c(mr_data_writeval_numeric·mr_data_readval_numeric — 계약의 기준).",
+ "note": "from_disk 는 header[1] 의 precision 을 읽지 않는다 — 호출자 eb_new_col_vec 가 floating NUMERIC 열(precision == DB_DEFAULT_NUMERIC_PRECISION)을 거절하므로 고정 precision 열에서만 쓰인다는 전제. 이 suite 는 고정 (p,s) 값만 쓴다.",
+ "origin": {
+  "pr": 8196,
+  "jira": "CBRD-27361",
+  "finding": "계약 suite(리뷰 2026-10-16 G3) — 결함 없음",
+  "comment": "https://github.com/CUBRID/cubrid/pull/8196",
+  "date": "2026-10-16"
+ }
+}
