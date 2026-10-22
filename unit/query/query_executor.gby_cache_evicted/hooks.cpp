@@ -83,3 +83,23 @@ unitseam_gby_evict_scenario (int n_evict, int home, int *n_left, int *stale_foun
 
   return unitseam_gby_evict_scenario_keep (n_evict, home, 0, n_left, stale_found, stale_slot, &kept);
 }
+
+/* The TU's private-heap calls (db_private_alloc () and friends, CBRD-27361 review T10): no thread entry and no
+ * LEA heap here, so they are plain malloc / free -- what the hand-built objects above are made with. */
+extern "C" void *
+db_private_alloc_release (THREAD_ENTRY * thrd, size_t size, bool rc_track)
+{
+  return malloc (size);
+}
+
+extern "C" void
+db_private_free_release (THREAD_ENTRY * thrd, void *ptr, bool rc_track)
+{
+  free (ptr);
+}
+
+extern "C" void *
+db_private_realloc_release (THREAD_ENTRY * thrd, void *ptr, size_t size, bool rc_track)
+{
+  return realloc (ptr, size);
+}

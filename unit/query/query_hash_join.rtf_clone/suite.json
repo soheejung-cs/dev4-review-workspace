@@ -1,0 +1,36 @@
+{
+ "name": "PR#8196 G3G4-01 hash join runtime filter on a parallel worker's clone -- hjoin_rtf_bind_clone () aliases the leader's filter on the worker's clone node, hjoin_rtf_release () resets only the leader tree's two inputs and frees it, so a clone retired to the xcache pool keeps the freed pointer; the next execution that gets that clone and declines hjoin_rtf_build () (first input > HJOIN_RTF_MAX_KEYS) runs its row loop on it",
+ "file": "src/query/query_hash_join.c",
+ "mode": "server",
+ "seams": [],
+ "appendix": "hooks.cpp",
+ "test": "test.cpp",
+ "requires": [
+  "hjoin_rtf_bind_clone",
+  "hjoin_rtf_unbind_clone",
+  "hjoin_rtf_release",
+  "hjoin_rtf_build",
+  "hjoin_rtf_first_input",
+  "hjoin_rtf_contains"
+ ],
+ "watch": [
+  "src/query/query_hash_join.h",
+  "src/query/xasl.h",
+  "src/query/query_executor.c",
+  "src/query/parallel/px_scan/px_scan_task.cpp",
+  "src/query/xasl_cache.c",
+  "src/query/stream_to_xasl.c"
+ ],
+ "fakes": "No seam; stub_calls empty on head and patched. hooks.cpp (same TU) builds the filter the way hjoin_rtf_build ()'s success path leaves it (query_hash_join.c:4906-4959: cap = next power of two >= 2n, calloc'd HJOIN_RUNTIME_FILTER, slots/used, mask, is_date false, val_index, open-addressing insert with hjoin_rtf_hash ()) and attaches it as the success tail does (4962-4967: hj->rtf, rtf_keys, rtf_rows = rtf_dropped = 0, target->rtf, target->rtf_val); the real build's list scan (qfile_slot_read_column_value is a header inline over a tuple layout) is not reproduced -- the decline branch at 4876 (tuple_cnt > HJOIN_RTF_MAX_KEYS) is the TU's own and runs before any list access. XASL trees are calloc'd (status XASL_BUILD, rtf NULL, as stream_to_xasl leaves them); the probe node is a BUILDLIST with one TARGET_CLASS spec whose cls_regu_list_rest TYPE_ATTR_ID fetches the key into the value list's second cell (what hjoin_rtf_target_cell () wants); the INTEGER domain is a zeroed PR_TYPE-sized block with id set (the TU reads dom->type->id only). worker_retire () models px_scan_task::finalize () on the clone: status XASL_CLEARED (qexec_clear_xasl; IS_XASL_INITIAL_STATUS holds) and the proposed hjoin_rtf_unbind_clone () only where it links (weak reference; head has none). hooks.cpp also defines the TU's db_private_alloc/free/realloc () over malloc / free (the filter is private-heap memory since the T10 allocator change; hjoin_rtf_release () takes thread_p, nullptr here).",
+ "note": "head 908bdc5af: [contract] 4 PASS, [contract] 'retired clone carries no filter pointer' FAIL, [defect] 3 PASS (reproduced). base c966fabc6: compile-error (no hjoin_rtf_*, new code). Mutation: fix.diff (OUT/unit/G3G4-01 -- (1) hjoin_rtf_unbind_clone () called in finalize () after qexec_free_xasl_state, (2) target->rtf = target->rtf_val = NULL at hjoin_rtf_build () entry) -> [defect] 3 FAIL, [contract] 5 PASS; fix.build_only.diff ((2) alone) closes the two dereference cases but the pool still carries the pointer ([defect] 1 PASS, [contract] 5 FAIL). Reachability: the clone pool is LIFO (xasl_cache.c:1123 pop / 2393 push), the worker retires at finalize (px_scan_task.cpp:662) before the leader retires at query end (query_manager.c:1709), so a sequential re-run in one session gets the leader's own clean clone; a worker-retired clone goes to the next leader only while the previous leader's clone is still out (concurrent sessions on the same prepared statement, or two open cursors), plus a build decline (bind value making the build side > 2^20 rows). The unit test shows the pointer equals the freed address; the dereference itself (crash / wrong rows) is left to a server reproduction. Fixed in be6c64d40 (unbind in finalize () + build entry reset): [defect] 3 FAIL, [contract] 5 PASS. Updated for the counter move (A14, decision (a)): hjoin_rtf_pass () is a lookup only, hjoin_rtf_unbind_clone (clone, orig) merges the clone's rtf_rows / rtf_dropped into orig's with __atomic_add_fetch, hjoin_rtf_release () copies the target node's counters into the join node; contract cases added for the merge (3/1 + 5/2 + the leader's 1 -> 9/3), an unbound clone (adds nothing) and hjoin_rtf_contains () (the batch leaf's lookup, A7 decision (c)).",
+ "origin": {
+  "pr": 8196,
+  "jira": "CBRD-27361",
+  "finding": "G3G4-01 (px_scan_task.cpp:122 / query_hash_join.c:5026, 5043; refute.G3G4.json corrected the trigger to 'previous leader clone not yet retired + build decline')",
+  "reviewed_head": "908bdc5af",
+  "base": "c966fabc6",
+  "artifact": "/home/cubrid/dev/utils/harness-out/8196/908bdc5af/unit/G3G4-01/",
+  "date": "2026-10-21"
+ },
+ "defects_fixed_in": "be6c64d40"
+}
