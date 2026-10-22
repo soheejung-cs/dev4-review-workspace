@@ -1,0 +1,54 @@
+--- a/src/query/query_executor.c
++++ b/src/query/query_executor.c
+@@ -11825,7 +11825,11 @@
+ 	  continue;
+ 	}
+       st->cache[i] = st->cache[j];
+-      st->cache[i].value->batch_slot = (int) i;
++      if (st->cache[i].value != NULL)
++	{
++	  /* NULL: tagged by qexec_gby_cache_evicted () -- its group is freed */
++	  st->cache[i].value->batch_slot = (int) i;
++	}
+       st->cache[j].len = -1;
+       st->cache[j].bytes = NULL;
+       st->cache[j].key = NULL;
+@@ -11901,8 +11905,11 @@
+ qexec_gby_cache_evicted (THREAD_ENTRY * thread_p, QEXEC_BATCH_GBY * st, AGGREGATE_HASH_VALUE ** note_val,
+ 			 const int *note_slot, int n)
+ {
+-  int i;
++  int i, k;
++  bool again;
+ 
++  /* pass 1: tag the entries while every noted slot still holds what it held before the call (a removal
++   * moves the later entries of its cluster, so a noted slot is only valid before the first removal) */
+   for (i = 0; i < n; i++)
+     {
+       int slot = note_slot[i];
+@@ -11910,9 +11917,24 @@
+       /* the value pointer compares as a number: a freed group's slot may hold another group by now */
+       if (slot >= 0 && slot < QEXEC_GBY_CACHE_SIZE && st->cache[slot].len >= 0 && st->cache[slot].value == note_val[i])
+ 	{
+-	  qexec_gby_cache_remove (thread_p, st, (unsigned int) slot);
++	  st->cache[slot].value = NULL;
++	}
++    }
++  /* pass 2: remove the tagged entries wherever the shifts put them (an eviction happens at the table's
++   * memory budget, after a group was dumped to a list file: the table walk is cheap beside it) */
++  do
++    {
++      again = false;
++      for (k = 0; k < QEXEC_GBY_CACHE_SIZE; k++)
++	{
++	  if (st->cache[k].len >= 0 && st->cache[k].value == NULL)
++	    {
++	      qexec_gby_cache_remove (thread_p, st, (unsigned int) k);
++	      again = true;
++	    }
+ 	}
+     }
++  while (again);
+ }
+ 
+ static int

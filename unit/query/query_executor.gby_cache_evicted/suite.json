@@ -1,0 +1,23 @@
+{
+ "name": "page batch hash GROUP BY cache -- qexec_gby_cache_evicted () must drop every evicted group's entry even when two or more evicted groups share one linear-probe cluster (the backward-shift delete of the first moves the second)",
+ "file": "src/query/query_executor.c",
+ "mode": "server",
+ "seams": [],
+ "appendix": "hooks.cpp",
+ "test": "test.cpp",
+ "watch": [
+  "src/query/query_aggregate.hpp"
+ ],
+ "fakes": "No seam. hooks.cpp builds a QEXEC_BATCH_GBY by hand (cache malloc'd, every len -1, as qexec_gby_cache_add () initializes it), places n groups with the same home slot (hash == home, so they sit in one cluster: home, home+1, ...), sets each group's batch_slot as cache_add does, notes value+slot as qexec_batch_gby_consume () notes the LRU head before a row-path call (12158-12162), then calls the real qexec_gby_cache_evicted () with n and reads n_cached and qexec_gby_cache_find () for each group's bytes. e->key is NULL so qdata_free_agg_hkey () is never reached; e->bytes is malloc'd so free_and_init () is real. AGGREGATE_HASH_VALUE objects are static (only batch_slot is touched).",
+ "note": "fix_f1_evicted.diff is the fix our review proposed (tag in pass 1 by the noted slots, remove tagged entries in pass 2 with a table rescan; qexec_gby_cache_remove () skips the batch_slot write for a tagged entry). With --patch it passes the four [contract] cases and fails the [defect] case. Applies only to revisions that have qexec_gby_cache_evicted (PR#8196 head 908bdc5af and later); base c966fabc6 has none of these functions. 2026-10-22 (c503fcaa2): pass 2 was changed to a home-cluster probe (no table rescan); two [contract] cases with a kept (not evicted) group inside the cluster (keep_mask in hooks.cpp) check that the tagged entries the backward shift pulled back are still found and removed from the home.",
+ "origin": {
+  "pr": 8196,
+  "jira": "CBRD-27361",
+  "finding": "F1 (bot greptile query_executor.c:11913, verified)",
+  "reviewed_head": "908bdc5af",
+  "date": "2026-10-21"
+ },
+ "requires": [
+  "qexec_gby_cache_evicted"
+ ]
+}
