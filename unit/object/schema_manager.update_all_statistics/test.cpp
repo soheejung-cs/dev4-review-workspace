@@ -70,6 +70,10 @@ static int g_hist_arity;
 static int g_last_er;
 static std::vector < CLASS_STATS * >g_freed;
 static int g_got;
+/* PR#8194: the progress clock and the run start each phase received */
+static INT64 g_clock = 1000;		/* the fake steady clock: each read advances by 10 ms */
+static int g_clock_reads;
+static INT64 g_stats_run_start = -1, g_hist_run_start = -1;
 
 static void
 reset ()
@@ -83,6 +87,8 @@ reset ()
   g_last_er = NO_ERROR;
   g_freed.clear ();
   g_got = 0;
+  g_clock_reads = 0;
+  g_stats_run_start = g_hist_run_start = -1;
 }
 
 /* ---- the resident class list (work_space.c global) ---- */
@@ -162,6 +168,35 @@ stats_update_all_statistics (int with_fullscan, int print_summary)
   return g_stats_rc;
 }
 
+/* PR#8194 head: the same call with the run start of the progress log (one value for both phases) */
+
+INT64
+stats_progress_clock_msec (void)
+{
+  g_seq.push_back ("clock");
+  g_clock_reads++;
+  g_clock += 10;
+  return g_clock;
+}
+
+int
+stats_update_all_statistics (int with_fullscan, int print_summary, INT64 run_start_msec)
+{
+  g_stats_run_start = run_start_msec;
+  return stats_update_all_statistics (with_fullscan, print_summary);
+}
+
+/* the histogram pass, PR#8194 head signature (no skip list on its base) */
+int
+update_histogram_for_all_classes (int random_seed, INT64 run_start_msec)
+{
+  g_seq.push_back ("hist");
+  g_hist_arity = 2;
+  g_hist_seed = random_seed;
+  g_hist_run_start = run_start_msec;
+  return g_hist_rc;
+}
+
 /* the histogram pass, PR base signature */
 int
 update_histogram_for_all_classes (int random_seed)
@@ -233,6 +268,10 @@ seq ()
   std::string s;
   for (auto &x : g_seq)
     {
+      if (x == "clock")
+	{
+	  continue;		/* PR#8194: the progress clock is checked by its own case */
+	}
       s += (s.empty ()? "" : ",") + x;
     }
   return s;
@@ -394,6 +433,44 @@ TEST_CASE ("no skip list (UPDATE STATISTICS ON ALL CLASSES passes NULL, 0)", "[c
     }
   else
     {
-      CHECK (g_hist_arity == 1);
+      CHECK ((g_hist_arity == 1 || g_hist_arity == 2));
     }
+}
+
+/* ---- PR#8194 (CBRD-27663): the progress log's run start ---- */
+
+TEST_CASE ("progress: one run start, read before the flush, reaches both phases unchanged", "[contract][new]")
+{
+  reset ();
+  resident_init (true);
+  g_clock = 5000;
+  int rc = run_sm (false, 0, 0, NULL, 0);
+
+  CHECK (rc == NO_ERROR);
+  if (g_clock_reads == 0)
+    {
+      FAIL ("sm_update_all_statistics does not read the progress clock in this revision (new code, not on the PR base)");
+    }
+  CHECK (g_clock_reads == 1);
+  REQUIRE (g_seq.size () >= 2);
+  CHECK (g_seq[0] == "clock");	/* taken before locator_all_flush: elapsed covers the flush too */
+  CHECK (g_seq[1] == "flush");
+  CHECK (g_stats_run_start == 5010);
+  CHECK (g_hist_run_start == 5010);
+}
+
+TEST_CASE ("progress: WITH NO HISTOGRAM -- only the statistics phase gets the run start", "[contract][new]")
+{
+  reset ();
+  resident_init (false);
+  g_clock = 0;
+  int rc = run_sm (false, 0, 1, NULL, 0);
+
+  CHECK (rc == NO_ERROR);
+  if (g_clock_reads == 0)
+    {
+      FAIL ("sm_update_all_statistics does not read the progress clock in this revision (new code, not on the PR base)");
+    }
+  CHECK (g_stats_run_start == 10);
+  CHECK (g_hist_run_start == -1);
 }

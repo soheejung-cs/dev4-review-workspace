@@ -43,14 +43,22 @@ template < typename R, typename ... A > struct arity <R (*)(A ...)>
   static constexpr int value = sizeof ... (A);
 };
 
-static constexpr int H_ARITY = arity < decltype (&update_histogram_for_all_classes) >::value;	/* 1 base, 3 head */
+static constexpr int H_ARITY = arity < decltype (&update_histogram_for_all_classes) >::value;	/* 1 old base, 2 PR#8194 head, 3 develop (#8166), 4 PR#8194 rebased */
 
 template < typename F > static int
 call_h (F f, int seed, MOP * skip, int n)
 {
-  if constexpr (arity < F >::value == 3)
+  if constexpr (arity < F >::value == 4)
+    {
+      return f (seed, skip, n, (INT64) 0);	/* PR#8194 rebased on develop: skip list + run start */
+    }
+  else if constexpr (arity < F >::value == 3)
     {
       return f (seed, skip, n);
+    }
+  else if constexpr (arity < F >::value == 2)
+    {
+      return f (seed, (INT64) 0);	/* PR#8194 on its pre-#8166 base: run start, no skip list */
     }
   else
     {
@@ -338,7 +346,7 @@ hist_names ()
 }
 
 #define NEW_CODE_ONLY() \
-  do { if (H_ARITY != 3) { FAIL ("no skip list in this revision (new code, not on the PR base)"); } } while (0)
+  do { if (H_ARITY != 3 && H_ARITY != 4) { FAIL ("no skip list in this revision (new code, not on the PR base)"); } } while (0)
 
 /* ================================================================================================ */
 

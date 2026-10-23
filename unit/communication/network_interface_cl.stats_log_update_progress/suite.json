@@ -1,0 +1,27 @@
+{
+ "name": "stats_log_update_progress — ALL CLASSES 진행 보고 요청의 직렬화 순서(서버 unpack 과 짝)·INT_MAX 클램프·er_stack 감싸기",
+ "file": "src/communication/network_interface_cl.c",
+ "mode": "cs",
+ "seams": [],
+ "extra": [
+  "src/object/object_representation.c"
+ ],
+ "test": "test.cpp",
+ "watch": [
+  "src/communication/network_interface_cl.h",
+  "src/communication/network.h",
+  "src/storage/statistics.h",
+  "src/communication/network_interface_sr.cpp"
+ ],
+ "fakes": "stats_log_update_progress()·stats_progress_clock_msec() 는 진짜 코드(CS_MODE). net_client_request: 요청 번호·인자 바이트·크기를 기록하고 주입 코드를 돌려준다. er_stack_push/er_stack_pop: 호출 순서만 기록. 시계는 실제 steady clock 이라 소요 시간은 하한/상한 범위로 본다.",
+ "note": "서버 sqst_log_stats_progress 의 unpack 순서(oid, phase, state, seq, total, class_ms, elapsed_ms, error)와 크기 검사 OR_OID_SIZE + OR_INT_SIZE*7 에 맞춘 계약. 한쪽만 필드를 늘리면 첫 케이스가 깨진다.",
+ "origin": {
+  "pr": 8194,
+  "finding": "coverage (진행 보고 요청 직렬화 계약)",
+  "comment": "https://github.com/CUBRID/cubrid/pull/8194",
+  "date": "2026-10-23"
+ },
+ "requires": [
+  "stats_log_update_progress"
+ ]
+}

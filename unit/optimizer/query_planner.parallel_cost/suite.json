@@ -1,0 +1,33 @@
+{
+ "name": "PR#8212 (CBRD-27474) 클라이언트 비용 도우미 — Mackert-Lohman 유효 캐시 MAX(cost_effective_cache_pages, data_buffer_pages)·병렬 할인 제수·해시 조인/입력 스캔 병렬 판정 + F2(PARALLEL(0|1)·MERGE 에서 실행기는 직렬인데 비용은 병렬 할인)·F3(cost_effective_cache_pages=0 '캐시 없음' 계약 소실)",
+ "requires": [
+  "qo_mackert_lohman_pages"
+ ],
+ "file": "src/optimizer/query_planner.c",
+ "mode": "cs",
+ "seams": [],
+ "appendix": "hooks.cpp",
+ "test": "test.cpp",
+ "extra": [
+  "src/base/system_parameter.c"
+ ],
+ "watch": [
+  "src/optimizer/query_planner.h",
+  "src/optimizer/query_graph.h",
+  "src/base/system_parameter.c",
+  "src/base/system_parameter.h",
+  "src/optimizer/plan_generation.c",
+  "src/query/query_hash_join.c",
+  "src/query/parallel/px_parallel.cpp"
+ ],
+ "fakes": "가짜 없음 — TU static(qo_mackert_lohman_pages·qo_parallel_cost_divisor·qo_hjoin_runs_parallel·qo_scan_runs_parallel·qo_join_input_factor)을 hooks.cpp 로 호출, system_parameter.c 는 진짜(prm_Def 정적 초기값 + prm_set_integer_value). 구조체는 calloc 후 도우미가 읽는 필드만 채운다. parallel_opt_use 값은 qo_check_hjoin_for_parallel_opt(query_planner.c:16015-16027 PARALLEL(0|1) → NO, MERGE → CANNOT_USE)가 같은 질의에 남기는 값.",
+ "note": "base(e520d79dc)에는 병렬 도우미가 없다 — hooks.cpp 가 QO_PARALLEL_COST_DIVISOR 로 갈라 base 에서는 [contract] 를 건너뛰고 [defect] 는 FAIL(해당 없음). ML 계약 3건은 두 리비전 모두에서 돈다. 결과(2026-10-23): head c86806fcb — [defect] F2 3건 PASS(결함 있음), [contract] 'cost_effective_cache_pages 0 → 캐시 없음' FAIL(F3, base PASS), 나머지 계약 PASS. 변이: /home/cubrid/dev/utils/harness-out/8212/c86806fcb/unit_reviewer/mut/fix_f2_parallel_eligibility.diff(qo_hjoin_runs_parallel 이 parallel_opt_use 를, qo_scan_runs_parallel 이 PARALLEL(0|1) 을 보게 함) 적용 시 [defect] 3건 FAIL·계약 유지 — 테스트가 그 조건을 정확히 가리킨다.",
+ "origin": {
+  "pr": 8212,
+  "finding": "F2 병렬 판정이 실행기의 parallel_opt_use·PARALLEL 힌트를 보지 않음 · F3 cost_effective_cache_pages 하한화",
+  "comment": null,
+  "date": "2026-10-23",
+  "reviewed_head": "c86806fcb",
+  "base": "e520d79dc"
+ }
+}
