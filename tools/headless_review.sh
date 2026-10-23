@@ -18,7 +18,7 @@ OUT=${HEADLESS_OUT:-$HOME/dev/utils/review-board/site/headless}; mkdir -p "$OUT"
 ts=$(date +%Y%m%d-%H%M%S); base="$OUT/$PR-$ts"
 SYS="헤드리스 실행이다(사용자가 대화에 없다). /harness-review 를 끝까지 돌려 findings.json·report.md·comments.draft.md 까지 만들되 \
 GitHub 에 아무것도 게시하지 않는다(review_reply.py·gh pr comment/review·gh api POST/PATCH 금지). 사용자에게 묻는 대신 보고서의 '결정 Q' 로 남긴다. \
-확인 퀴즈는 내지 않는다. 마지막 메시지는 산출물 경로 목록 + 지적 수(🔴/🟡/🟢) 한 줄로 끝낸다."
+마지막 메시지는 산출물 경로 목록 + 지적 수(🔴/🟡/🟢) 한 줄로 끝낸다."
 args=(-p "/harness-review $PR" --output-format json --max-turns "$MAXT"
       --append-system-prompt "$SYS"
       --allowedTools "Read" "Grep" "Glob" "Write" "Edit" "Agent" "Skill" "Bash(python3 *)" "Bash(gh pr view*)" "Bash(gh pr diff*)" "Bash(gh pr checks*)" "Bash(gh api graphql*)" "Bash(gh api repos/*)" "Bash(git *)" "Bash(ls *)" "Bash(cat *)" "Bash(grep *)" "Bash(mkdir *)" "Bash(diff *)"

@@ -1,6 +1,6 @@
 ---
 name: harness-gatekeeper
-description: 리뷰 하네스 감시 단계(게시 전). 코멘트 초안·답글·findings·검증 기록 같은 산출물 하나를 받아, 적용되는 스킬(review-response·code-review·sql-difftest·확인-퀴즈·메모리 규칙 등)의 규칙을 하나씩 대조해 위반을 규칙 원문 인용과 함께 보고한다. 결론의 옳고 그름은 보지 않고 규약 준수만 본다. 하나라도 차단급 위반이면 "게시 보류". 등급: 반증(effort high).
+description: 리뷰 하네스 감시 단계(게시 전). 코멘트 초안·답글·findings·검증 기록 같은 산출물 하나를 받아, 적용되는 스킬(review-response·code-review·sql-difftest·스펙변화-리마인드·메모리 규칙 등)의 규칙을 하나씩 대조해 위반을 규칙 원문 인용과 함께 보고한다. 결론의 옳고 그름은 보지 않고 규약 준수만 본다. 하나라도 차단급 위반이면 "게시 보류". 등급: 반증(effort high).
 tools: Read, Grep, Glob, Bash
 effort: high
 ---
@@ -14,7 +14,7 @@ effort: high
 - `skills/review-response/SKILL.md` — §2(재현 먼저, **3-1 재현 절차에 셋업 전부 + 게시 전 그대로 재실행**), §3 문체(사람 말투, 빌드 번호로 설명 금지, CTP 수치 금지, 원문 용어), 「코멘트 층 표기」(첫 줄 `[층] [카테고리] 이모지`, 울타리 줄 맨 앞·짝, 문단 600자·🟢1,200/🟡2,500/🔴4,000, 반증 결과 본문 금지, `왜 문제가 되는지:`·`제안:` 문단), 「게시 형태」(새 지적은 원인 함수 줄 인라인), §0(타인 PR 승인 후), §7(배운 것 append).
 - `skills/code-review/SKILL.md` §2 — 규칙 ID 인용, 측정 없는 최적화 제안 금지, 핫/콜드 구분, C 에 C++ 관용구 금지.
 - `skills/sql-difftest/SKILL.md` — 리터럴 대조 오라클, raw diff 줄수, 재컴파일 경로, EXECUTE 한 줄 하나, 메모리 상한.
-- `~/.claude/CLAUDE.md`·메모리: 한국어 응답, 참조 DBMS 는 "database-reference" 로만(제품명 금지), 확인 퀴즈(테스트 반복 루프에서는 건마다 내지 않음·답은 산출물 본문에·코드 질문), 메모리 과다 테스트 금지, 메일·메시지 발신 금지, 타인 PR 코드 수정 금지.
+- `~/.claude/CLAUDE.md`·메모리: 한국어 응답, 참조 DBMS 는 "database-reference" 로만(제품명 금지), 스펙 변화 리마인드(승인 요청에 스펙 변화가 있으면 `스펙 변화 확인:` 블록으로 AS-IS → TO-BE 를 짚었나, 확인 퀴즈를 내지 않았나 — 퀴즈는 2026-10-23 폐지), 메모리 과다 테스트 금지, 메일·메시지 발신 금지, 타인 PR 코드 수정 금지.
 - 하네스 스키마 `harness/schemas/finding.json` — findings 면 필수 필드.
 
 ## 출력 — `gate.<산출물>.md`

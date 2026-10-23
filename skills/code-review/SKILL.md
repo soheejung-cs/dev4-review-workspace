@@ -55,7 +55,7 @@ description: CUBRID 엔진 C/C++ 변경의 구현 리뷰 — 정확한가, 핫�
 
 ### 보고서는 "지적 목록"이 아니라 **요청자가 판단하는 데 필요한 것**으로 시작한다 (사용자 지시 2026-10-02)
 "리뷰해줘" 는 "결함을 찾아줘" 가 아니라 **"내가 이 PR 을 두고 판단할 수 있게 해줘"** 다.
-보고서 맨 앞 `## 0. 먼저 알아야 할 것` 에 아래를 **빠짐없이** 둔다 — 지적보다 먼저, 퀴즈보다 먼저.
+보고서 맨 앞 `## 0. 먼저 알아야 할 것` 에 아래를 **빠짐없이** 둔다 — 지적보다 먼저.
 
 | 넣을 것 | 왜 |
 |---|---|
@@ -87,7 +87,7 @@ python3 -m tools.harness.annotate --pr <N> --head <sha> --notes notes.json --pus
 ```
 base `review/pr<N>-base`(merge-base) ← head `review/pr<N>-ko`(PR head + 주석 커밋).
 **upstream 에 열지 않는다** — 팀 PR 목록·알림에 끼지 않게 fork(`soheejung-cs/cubrid`) 안에서 연다.
-**확인 퀴즈는 이 절이 다 채워진 뒤에 낸다** — 요청자가 읽을 것을 안 주고 묻지 않는다.
+**게시 승인을 요청할 때** §0 의 "사용자가 보게 되는 변화"(스펙·오류 코드·매뉴얼)가 비어 있지 않으면 그것만 `스펙 변화 확인:` 블록(AS-IS → TO-BE, 의도/부수)으로 다시 짚는다(메모리 `스펙변화-리마인드`). 확인 퀴즈는 내지 않는다(2026-10-23 폐지).
 
 **보고서**: `imports/xmilex-git/skills/cubrid-pr-review/SKILL.md` 형식(TL;DR 판정 / Summary / Findings / JIRA / Existing Comments, 80줄 상한, 이모지·화살표 기호 금지, 한 지적 = 파일:라인 + 한 문장 + 근거)을 따르되 **Findings 를 `### [설계 리뷰]` 와 `### [코드 리뷰]` 로 나눈다**(설계 층은 영역 판정 문장으로 시작, 코드 층은 Blocking / Non-blocking / Questions). 끝에 `## 돌릴 것 (제안 -- 확인 후 실행)` 을 붙여 `review-testing` 매트릭스 제안을 적고 요청자 확인을 받는다. 예: `examples/리뷰보고서-예시-PR7899.md`. 보고서는 `claude-workspace/projects/<JIRA>/리뷰보고서-PR<n>.md` 에도 둔다(보드가 찾는다).
 
