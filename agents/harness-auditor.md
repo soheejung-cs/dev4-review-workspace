@@ -16,6 +16,7 @@ tools: Read, Grep, Glob, Bash
 | review-response §2.4·§6·§7 | `repro/` 에 스크립트+출력, 세션기록 갱신, **`references/리뷰에서-배운것.md` 에 이 PR 항목**, 보드 카드 코멘트·worklog, 사람 스레드 미resolve·봇 스레드 resolve |
 | sql-difftest §2.6 | 세트·출력·diff 가 `repro/` 에, 결과 표 문서, 메모리 규칙 준수(`memory.usage` 기록) |
 | record | 세션기록 형식(한 일/검증/리뷰 대응/결정 상태/남은 일), 현황.md 행 |
+| self-evolution | 작업의 최종 보고에 `[회고 및 자가진화 리포트]` 가 있나, 새 규칙이 `references/자가진화-규칙.md` 에 근거·기계화 판정과 함께 append 됐나, `자동화 대기 H-NN` 이면 `claude-workspace/하네스-패치-대기열.md` 에 그 행이 있나 |
 | 환경 | `pgrep -x cub_server` 0, 각 설치본 `conf/cubrid.conf` 에 임시 줄(`max_plan_cache_entries=0`, `oracle_style_empty_string`, `return_null_on_function_errors`) 잔존 없음, `databases.txt` 에 임시 DB 등록 잔존 여부, `~/dev` 최상위·리포에 `csql.err` 없음 |
 | git | 문서 리포 4개 dirty 0·ahead 0(`git status --porcelain`, `git log @{u}..`), 엔진 소스는 커밋만(push 는 사용자) |
 | GitHub | `gh api pulls/<n>/comments` 로 내가 연 스레드 중 작성자가 마지막인데 미응답인 것 |

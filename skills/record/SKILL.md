@@ -16,6 +16,8 @@ description: 세션에서 나온 것을 어디에 어떤 형식으로 남기는�
 | **리뷰가 잡아준 것**(지적 → 검증 → 고침 → 일반화) | **`references/리뷰에서-배운것.md`** — 답글 게시와 한 세트 (`review-response` §7) | 최신이 위로, 항목마다 ①지적 ②검증 ③고친 것 ④일반화 |
 | 재발 방지가 중요한 **환경 함정** | `claude-workspace/공통-CLAUDE.md` 함정 절(세 컨테이너 공통) 또는 `hosts/<ip>.md` | 실측 날짜·컨테이너 |
 | 진행 상태 | agent-todo 보드 카드 코멘트 + `worklog: YYYY-MM-DD` 1줄 | `- [영역] 한 일 (링크) — session_ID앞8자` |
+| **다음 작업에 바로 쓸 규칙**(조건 → 금지/적용) | `references/자가진화-규칙.md` (`skills/self-evolution`) | `[자가진화 규칙 #NNN] 만약 … 이라면, A 금지 / B 적용` + 근거·적용 지점·기계화 |
+| **기계로 막을 함정** | `claude-workspace/하네스-패치-대기열.md` (H-NN) — 함정 절 기록은 그대로 하고 패치는 묶어서 | 함정·근본 원인·지금 방어·패치·은퇴시킬 것 |
 | 설계·분석 문서 | `projects/CBRD-XXXXX/설계문서.md` (+ `projects/현황.md` 행) | `projects/문서규약.md` |
 
 ## 1. `세션기록-YYYYMMDD.md` 형식

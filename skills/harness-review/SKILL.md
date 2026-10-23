@@ -24,6 +24,7 @@ description: 통합 리뷰 하네스 실행 — `/harness-review <PR번호>`. �
 7. **변경 지도·주석 PR**: 리뷰 단계가 `function_notes` 를 냈으면 `OUT/function_notes.json` 으로 모아 두면 `report` 가 §변경 지도를 자동으로 깐다. 읽기용 PR 이 필요하면
    `python3 -m tools.harness.annotate --pr <N> --head <sha> --notes OUT/function_notes.json --push --pr-create` (fork 안 draft, upstream 아님).
 8. 기록: `record` 스킬(episodic 은 러너가 이미 적재).
+9. **자가진화 루프** — `/self-evolution <PR>`(2026-10-23): 이 리뷰가 잡은 결함 유형·놓칠 뻔한 것·하네스가 틀린 것을 `references/자가진화-규칙.md` 에 규칙으로, 기계로 막을 수 있는 것은 하네스 패치 대기열(H-NN)로. 리뷰를 시작할 때 등록부에서 이 PR 이 건드린 축의 규칙을 먼저 훑는다.
 
 ## 서브에이전트 구성 (2026-10-08, 사용자 지시 "서브에이전트를 여러 개 두고 감시 역할")
 정의는 `agents/*.md`(링크 `tools/agent_link.sh` → `~/.claude/agents/`), 표와 흐름은 [`agents/README.md`](../../agents/README.md). 등급·강도는 [`harness/모델-선택.md`](../../harness/모델-선택.md).

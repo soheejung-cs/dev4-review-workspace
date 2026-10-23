@@ -65,6 +65,7 @@ python3 -m tools.harness.implement_gate --plan <out>/plan.json [--base HEAD|upst
    기존 PR 이면 draft 전환·리뷰어 지정을 건드리지 않는다. 답글 초안(스레드별)·PR 본문 갱신분·resolve 요청은 `projects/CBRD-n/리뷰대응-YYYYMMDD/` 에 두고 **게시는 사용자 승인 후**(`review-response`).
 3. 사용자 승인 후 draft 해제. TC PR(`tc/pr-<n>`) 은 Merge Gate 순서(TC 먼저).
 4. 기록: `record`(세션기록·staging 미수정 표기) + `agent-board`(카드 `[CBRD-n/PR#m]` 제목 갱신·worklog). 머지되면 `post-merge`.
+5. **자가진화 루프** — `/self-evolution <PR>`(2026-10-23 사용자 지시): 자기 리뷰 지적·검증 중 데인 것을 `references/자가진화-규칙.md` 의 `[자가진화 규칙 #NNN]` 으로, 기계로 막을 수 있는 것은 `claude-workspace/하네스-패치-대기열.md` 의 H-NN 으로. 최종 보고는 그 스킬의 출력 구조([기술 분석 및 라인/함수 단위 개선안] / [회고 및 자가진화 리포트]). S2 에서 plan 을 쓸 때 등록부의 해당 축 규칙을 먼저 훑는다(예: 수치 경계를 바꾸면 #003 동작표, 이슈 본문에 수정 스케치가 있으면 #007).
 
 ## 산출물 (`~/dev/utils/harness-out/impl/CBRD-n/`)
 `implement_request*.md` · `codegraph.sqlite3`(plan 시점) · `arch.json` · `structure.json`(성능 작업) · `plan.json` · `gate.json` · `codegraph.after.sqlite3` · `manifest.json`
