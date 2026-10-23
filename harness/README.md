@@ -13,6 +13,8 @@ dev4-review-workspace/
     schemas/finding.json      LLM 산출물 계약 — 이 스키마를 지키지 않는 finding 은 adjudicate 가 받지 않는다
     ARCHITECTURE.md           융합 아키텍처·코드 패턴 (Metis CodeGraph/Reachability + Azure infer/risk/diagram)
     META-REVIEW.md            4 Primitives 채점과 리팩토링 포인트
+    하네스-작성-규칙.md       하네스(도구·서브에이전트·토큰 한도·문맥·소스 지식·자가진화)를 만들고 고칠 때의 규칙 — 외부 1차 자료 R-01~R-21 근거
+  references/자가진화-규칙.md 작업에서 나온 [자가진화 규칙 #NNN] 등록부 (skills/self-evolution)
   tools/harness/              구현: codegraph.py · reachability.py · context_pack.py · arch_infer.py · adjudicate.py · run.py
   rules/  references/  skills/  examples/    ← 두 하네스가 공유
 dev4-tc-workspace/            TC 변경·CI 실패 분석(tc-analysis, gha-ci, shell TC 인덱스) — 리뷰 하네스와 분리
