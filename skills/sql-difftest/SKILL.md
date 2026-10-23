@@ -30,7 +30,7 @@ description: 적대적 SQL 차분 테스트 — 같은 SQL 세트를 develop·PR
 | **모드 on/off** | `modes.sh`: 기본 / oracle 호환 / concat·escape·normalization·string_max / `max_plan_cache_entries=0` / `max_plan_cache_clones=0` (+ `review-testing` §1-1 의 신호별 모드) | 캐시 0 에서 원인 오류 대신 -1383, query 인자 빈 문자열 |
 | **세션 파라미터** | `SET NAMES`, `SET SYSTEM PARAMETERS`, 세션변수 `@v` 타입 바꿈(INT→'3'→2.5→NULL), 같은 PREPARE 유지 | A5(세션변수 타입 고정) 적용 범위 |
 | **실행 사이 스키마 변경** | 같은 PREPARE 두고 `ALTER TABLE MODIFY` 타입 변경·`CREATE INDEX`·`ADD COLUMN`·`UPDATE STATISTICS` | 재실행이 새 열 타입을 따라가나 |
-| **특수 타입** | ENUM·SET·JSON·BIT VARYING·DATE/TIME/TIMESTAMP/DATETIME 교차, 날짜 산술, 인덱스 키 변환(10 / 10.0 / '10' / ' 10' / '1e1'), 바인드 1000개 IN, `LIMIT ?, ?` | 0 diff |
+| **특수 타입** | ENUM·SET·JSON·BIT VARYING·DATE/TIME/TIMESTAMP/DATETIME 교차, 날짜 산술, 인덱스 키 변환(10 / 10.0 / '10' / ' 10' / '1e1'), 바인드 IN(≤200개 — 메모리-과다-테스트-금지), `LIMIT ?, ?` | 0 diff |
 | **수명·메모리** | `lifetime.sh`: 문장 1000개 PREPARE/EXECUTE×4/DEALLOCATE + 고유 문장 200개 × 6라운드, 오류 경로 600회 × 3 | RSS 1라운드 뒤 고정, plandump churn 정상 |
 | **PL/Java** | `loadjava` + `CREATE FUNCTION` + PREPARE 로 인자 타입 확인 함수(`BigDecimal.scale()` 등) | 0 diff. `int` 원시 인자에 NULL 은 내 설계 오류(IllegalArgumentException) |
 
