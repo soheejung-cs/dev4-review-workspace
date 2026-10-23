@@ -152,12 +152,16 @@ long __unitseam_stub (const char *name)
 
 
 def make_stubs(objs, names, path):
-    plt = set()
+    plt, tls = set(), set()
     for o in objs:
         for l in sh(['objdump', '-r', o]).stdout.splitlines():
             m = re.search(r'R_X86_64_PLT32\s+(\S+?)(?:-0x[0-9a-f]+)?$', l)
             if m:
                 plt.add(m.group(1))
+            # thread_local 참조(cubmem::mmon_stat_id_cache 등) — .bss 로 stub 하면 ld 가 "TLS reference mismatches non-TLS definition"
+            m = re.search(r'R_X86_64_(?:TLSGD|TLSLD|GOTTPOFF|TPOFF32|TPOFF64|DTPOFF32|DTPOFF64)\s+(\S+?)(?:[-+]0x[0-9a-f]+)?$', l)
+            if m:
+                tls.add(m.group(1))
     s = ['\t.text', '\t.extern __unitseam_stub']
     data = []
     for n, sym in enumerate(sorted(names)):
@@ -169,7 +173,12 @@ def make_stubs(objs, names, path):
             data.append(sym)
     s.append('\t.bss')
     for sym in data:
-        s += ['\t.p2align 6', f'\t.weak {sym}', f'\t.type {sym},@object', f'\t.size {sym},4096', f'{sym}:', '\t.zero 4096']
+        if sym not in tls:
+            s += ['\t.p2align 6', f'\t.weak {sym}', f'\t.type {sym},@object', f'\t.size {sym},4096', f'{sym}:', '\t.zero 4096']
+    s.append('\t.section .tbss,"awT",@nobits')
+    for sym in data:
+        if sym in tls:
+            s += ['\t.p2align 6', f'\t.weak {sym}', f'\t.type {sym},@tls_object', f'\t.size {sym},4096', f'{sym}:', '\t.zero 4096']
     s.append('\t.section .note.GNU-stack,"",@progbits')
     open(path, 'w').write('\n'.join(s) + '\n')
     return len(names) - len(data), len(data)
