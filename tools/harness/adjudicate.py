@@ -173,6 +173,15 @@ def ninja_targets_for(build_dir: str, files: List[str]) -> Dict[str, List[str]]:
         out[f] = sorted(t for t in targets if t.endswith(suffix) or t.endswith('/' + os.path.basename(f) + '.o') and ('/' + os.path.dirname(f).split('/')[-1] + '/') in t)
     return out
 
+def remove_objects(build_dir: str, targets: List[str]) -> None:
+    """ninja 오브젝트 타깃 파일을 지운다 — 다음 ninja 가 mtime 판단 없이 반드시 다시 굽게."""
+    for t in targets:
+        p = t if os.path.isabs(t) else os.path.join(build_dir, t)
+        try:
+            os.remove(p)
+        except FileNotFoundError:
+            pass
+
 def self_check_ninja(repo: str, files: List[str], timeout: int = 1800) -> Dict:
     """compile_commands 가 없을 때의 컴파일 확인: 빌드 디렉터리의 ninja 로 변경 파일의 오브젝트만 굽는다.
     repo 가 빌드 디렉터리의 소스(메인 체크아웃)가 아니면 컴파일할 수 없어 ran=False."""
@@ -208,6 +217,10 @@ def self_check_ninja(repo: str, files: List[str], timeout: int = 1800) -> Dict:
         if not ts: res[f] = 'no-ninja-target'; continue
         all_targets += ts
     if all_targets:
+        # 오브젝트를 먼저 지워 반드시 굽게 한다: 이 빌드 트리의 ninja 는 출력 mtime 을 초 단위로 기록해서, 직전 컴파일과
+        # 같은 초에 소스가 바뀌면(compile_check 의 커밋 간 체크아웃) "최신" 으로 보고 굽지 않은 채 ok 를 낸다 —
+        # 그 낡은 오브젝트가 다음 goto 빌드에 그대로 링크됐다(2026-10-23 CBRD-27660, 30d7e7c27 설치본에 c4da184eb 코드).
+        remove_objects(build_dir, all_targets)
         r = subprocess.run(['ninja', '-C', build_dir, '-k', '0'] + all_targets, stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True, timeout=timeout)
         log = r.stdout + r.stderr
         for f, ts in tmap.items():

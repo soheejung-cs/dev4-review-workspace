@@ -31,9 +31,11 @@ def main():
         if dirty: sys.exit(f'워킹트리가 dirty 다 — 커밋 모드는 깨끗한 트리에서만 (git status: {dirty[:200]})')
         orig = sh('git', '-C', a.repo, 'symbolic-ref', '-q', '--short', 'HEAD').stdout.strip() or sh('git', '-C', a.repo, 'rev-parse', 'HEAD').stdout.strip()
         commits = sh('git', '-C', a.repo, 'rev-list', '--reverse', a.commits).stdout.split()
+        touched = set()
         try:
             for c in commits:
                 files = sh('git', '-C', a.repo, 'diff-tree', '--no-commit-id', '--name-only', '-r', c).stdout.split()
+                touched.update(f for f in files if f.endswith(('.c', '.cpp', '.cc')))
                 print(f'== {c[:9]} {sh("git","-C",a.repo,"log","-1","--format=%s",c).stdout.strip()[:80]}')
                 r = sh('git', '-C', a.repo, 'checkout', '-q', c)
                 if r.returncode: print(f'  checkout 실패: {r.stderr.strip()}'); ok_all = False; continue
@@ -42,6 +44,11 @@ def main():
         finally:
             sh('git', '-C', a.repo, 'checkout', '-q', orig)
             print(f'== 복귀: {orig}')
+            # 빌드 트리에는 마지막으로 구운 커밋의 오브젝트가 남는다 — 원래 ref 와 내용이 다를 수 있고, 같은 초 안의
+            # 체크아웃이면 ninja 가 그 차이를 못 본다. 지워서 다음 빌드가 지금 워킹트리를 굽게 한다(2026-10-23 CBRD-27660).
+            build_dir = os.environ.get('HARNESS_BUILD_DIR', os.path.expanduser('~/dev/build/build_x86_64_release'))
+            if touched and os.path.isfile(os.path.join(build_dir, 'build.ninja')):
+                AD.remove_objects(build_dir, [t for ts in AD.ninja_targets_for(build_dir, sorted(touched)).values() for t in ts])
     else:
         files = [f.strip() for f in a.files.split(',') if f.strip()] or sh('git', '-C', a.repo, 'diff', '--name-only', 'HEAD').stdout.split()
         res = check_files(a.repo, files); ok_all = res is not False
