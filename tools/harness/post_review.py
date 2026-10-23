@@ -13,7 +13,7 @@ LAYER = {'코드': '[코드 리뷰]', '설계': '[설계 리뷰]'}
 
 
 def sh(cmd, inp=None):
-    return subprocess.run(cmd, input=inp, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    return subprocess.run(cmd, input=inp, stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True)
 
 
 def diff_lines(pr, repo):

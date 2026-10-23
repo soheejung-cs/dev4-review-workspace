@@ -34,7 +34,7 @@ MODE_DEF = {'server': '-DSERVER_MODE', 'cs': '-DCS_MODE', 'sa': '-DSA_MODE'}
 
 
 def sh(cmd, cwd=None, check=True, timeout=1800):
-    p = subprocess.run(cmd, cwd=cwd, shell=isinstance(cmd, str), capture_output=True, text=True, timeout=timeout)
+    p = subprocess.run(cmd, cwd=cwd, shell=isinstance(cmd, str), stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True, timeout=timeout)
     if check and p.returncode:
         raise RuntimeError(f'{cmd if isinstance(cmd, str) else " ".join(cmd)}\n{p.stdout}\n{p.stderr}')
     return p
@@ -333,7 +333,8 @@ def run_suite(suite_dir, revs, out, repo=DEF_REPO, build=DEF_BUILD, timeout=300)
 
 def main():
     ap = argparse.ArgumentParser()
-    sp = ap.add_subparsers(dest='cmd', required=True)
+    sp = ap.add_subparsers(dest='cmd')
+    sp.required = True  # add_subparsers(required=) needs Python 3.7; the .51 container's python3 is 3.6
     r = sp.add_parser('run')
     r.add_argument('--rev', action='append', required=True, help='반복 가능: 보통 PR head 와 base')
     r.add_argument('--file', required=True, help='repo 기준 경로 (src/...)')

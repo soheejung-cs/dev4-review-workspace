@@ -68,7 +68,7 @@ def has_symbols(repo, rev, syms):
     """suite 의 requires(대상 심볼)가 그 리비전 src/ 에 다 있나. 없으면 그 리비전은 suite 의 대상 코드보다 앞서거나 뒤다."""
     import subprocess
     for s in syms:
-        if subprocess.run(['git', '-C', repo, 'grep', '-q', '-w', s, rev, '--', 'src/'], capture_output=True).returncode:
+        if subprocess.run(['git', '-C', repo, 'grep', '-q', '-w', s, rev, '--', 'src/'], stdout=subprocess.PIPE, stderr=subprocess.PIPE).returncode:
             return False, s
     return True, ''
 
