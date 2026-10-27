@@ -26,7 +26,6 @@
 | **review-testing** | 이 PR 에 **무엇을 돌릴지** 결정: CTP sql/medium/shell · 동시성 재현 · JOB · TPC-H, 그리고 어느 계약으로 재고 무엇으로 판정하나 | "테스트 뭐 돌려야 해?" 일 때. 검증 없이 승인하려 할 때 | `/review-testing` |
 | **review-response** | 리뷰 코멘트 대응: 스레드 수집 → 결함이면 재현·수정·재검증 → 답글 초안 → **사용자 검토 후 게시**, 봇만 resolve | 내 PR 에 코멘트가 달렸을 때. 타인 PR 에 지적을 게시할 때 | `/review-response` |
 | **sql-difftest** | 적대적 SQL 차분 테스트: 같은 세트를 develop·PR·머지 빌드에 돌려 diff 를 PR 결함 / 스펙 변경 / develop 결함 수정 / 설계 오류로 분류. 바인드 타입 회전·다중 세션 공유 플랜·쓰레기 값 퍼징·모드 on/off·실행 간 스키마 변경·수명 | 타입·도메인·플랜 캐시·실행기 PR. "develop 이랑 같아?" 일 때 | `/sql-difftest` (도구 `tools/difftest/`) |
-| **oracle-reference** | Oracle 스펙·동작 대조 — 목차(`toc.md`)로 해당 절만 찍어 읽고 CUBRID 와 비교 | **요청이 있을 때만.** 표준/Oracle 호환 여부가 쟁점일 때 | `/oracle-reference` |
 
 ### 하네스 — 도구가 컨텍스트를 고르고 판정한다
 
@@ -76,7 +75,6 @@ ls ~/.claude/skills            # 이 리포 것 11개가 들어 있어야 한다
 
 - **※1 review-board** — 보드 호스팅은 `.51` 의 `~/bin/review_board_publish.sh`·`~/bin/httpd_threaded.py` 로 도는데 **이 스크립트들은 어느 리포에도 없다.** 생성기(`tools/review_board_gen.py`)도 문서 링크 수집 경로가 `.51` 배치에 맞춰져 있다. 다른 컨테이너에서는 보드를 **읽기만** 한다(http://192.168.6.51:8827/).
 - **harness-review / harness-implement** — 판정 단계 일부가 아직 owner 의 프라이빗 문서 리포 경로를 가정한다. 없으면 그 단계만 비고, 나머지는 돈다. tree-sitter `.so` 가 없으면 ctags 폴백(호출 그래프 없음).
-- **oracle-reference** — 원문은 private `dev4-oracle-manual`(재배포 금지). 초대받지 않았으면 열 수 없다.
 - **review-testing** — JOB·TPC-H 실행 하네스는 벤치 데이터를 가진 컨테이너에만 있다(보유 컨테이너는 `claude-workspace/hosts/<끝자리>.md`). 매트릭스로 **무엇을 돌릴지 판단**하는 데까지는 어디서나 쓸 수 있다.
 
 ```
@@ -93,7 +91,6 @@ skills/
   gha-ci/            → dev4-tc-workspace 로 분리(포인터)
   record/            기록 규약 — 무엇을 어디에 어떤 형식으로 (판단표)
   review-testing/    리뷰 검증 규율 — 변경 유형별 CTP/동시성/JOB/TPC-H 선택, 컨테이너, 측정 계약
-  oracle-reference/  Oracle 스펙 비교 — 요청 시에만, toc.md 매핑 후 해당 절만 읽기
   harness-review/    **/harness-review <PR>** — 통합 하네스 슬래시 명령(run full → findings → 판정 → report)
   harness-implement/ **/harness-implement <CBRD-n>** — 구현 하네스(implement_pack → plan.json 승인 → 구현 → implement_gate → 자기 리뷰 → PR)
   design-doc/        **/design-doc <CBRD-n|증상>** — 증상 인터뷰 5라운드로 설계문서를 함께 쓴다(영역 판정·대안표·결정 Q)
@@ -113,10 +110,8 @@ skills/
 | 끝났을 때 어디에 남기나 | record | 세션을 닫을 땐 pre-clear(퍼스널) |
 
 references/
-  oracle-manual/     → private 리포 dev4-oracle-manual 포인터(Oracle 문서는 재배포 제한). 읽는 규약 skills/oracle-reference
 
   C-Cpp-성능규칙집.md        2568줄, 규칙 ID 로 인용. ~/.claude/성능규칙집.md 는 여기로의 심링크
-  cubrid-사전설계문서.md      설계 리뷰 근거 — 불변조건 5·컴포넌트 [A]~[I]·의존·동시성 도메인
   대규모Cpp-물리설계-Lakos.md  PHYS 축 배경
   저지연패턴-HFT논문.md / -서적.md, 서버사이드-성능검토.md
 members/             팀 명단(GitHub 기준)·가입 템플릿·사람별 공간(컨테이너 사실은 여기에만)

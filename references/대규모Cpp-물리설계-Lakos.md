@@ -569,7 +569,7 @@ heavy layering은 배포 방식과 무관하게 **Y를 조금이라도 쓰면 X 
 
 **(2) Protocol(순수 추상 인터페이스) 기반**: 무거운 leaf 의존성을 protocol로 교체하고, 그 protocol을 구현하는 **adapter**를 상위에 둡니다. 구상 구현은 상위 agent(예: `main`)가 생성해 주입합니다.
 
-전형 예시: Business Object Loader가 독점 DB에 직접 의존하는 대신 `Persistor` protocol에 의존 → 상위에 `ProprietaryPersistor` adapter. Oracle로 바꾸려면 `OraclePersistor` adapter만 만들고, **소스 변경은 `main`의 구상 타입 이름 하나뿐이며 `main` 외에는 재컴파일조차 필요 없습니다.**
+전형 예시: Business Object Loader가 독점 DB에 직접 의존하는 대신 `Persistor` protocol에 의존 → 상위에 `ProprietaryPersistor` adapter. 다른 DB 로 바꾸려면 그 DB 용 Persistor adapter 만 만들고, **소스 변경은 `main`의 구상 타입 이름 하나뿐이며 `main` 외에는 재컴파일조차 필요 없습니다.**
 
 Protocol 활용 4패턴: (a) 상위에 있어야 할 protocol을 구현하는 협업적 하위시스템 / (b) 기존 하위시스템을 **adapt** (adapter가 별 작은 UOR에) / (c) 전사 vocabulary가 된 저수준 재사용 protocol을 직접 구현 / (d) 비협업 기술을 그 표준 protocol에 adapt.
 표준화 후보: persistence, serialization, IPC, **메모리 할당**(저자 코드베이스에서 메모리 자원 관리 추상 인터페이스는 완전히 보편화됨).

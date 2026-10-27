@@ -10,7 +10,7 @@
     "sharing": {"type": "object", "required": ["kind"], "properties": {"kind": {"enum": ["isolated", "shared"]}, "grade": {"enum": ["S", "A", "B", "C"]}, "invariant": {"type": "string"}, "allowed_concurrency": {"type": "string"}, "relaxation": {"type": "string"}}},
     "summary": {"type": "string", "minLength": 40, "description": "무엇을 어떻게 고치나 + 비유 한 줄"},
     "alternatives": {"type": "array", "minItems": 2, "items": {"type": "object", "required": ["name", "pros", "why_not_or_chosen"], "properties": {"name": {"type": "string"}, "pros": {"type": "string"}, "why_not_or_chosen": {"type": "string"}, "chosen": {"type": "boolean"}}}},
-    "external": {"type": "string", "description": "PG/InnoDB/Oracle 은 같은 문제를 어떻게 하나"},
+    "external": {"type": "string", "description": "같은 문제의 표준 해법 — 논문·교과서 근거(다른 DB 제품 이름·구현은 쓰지 않는다)"},
     "changes": {"type": "array", "minItems": 1, "items": {"type": "object", "required": ["file", "function", "what", "why"], "properties": {"file": {"type": "string"}, "function": {"type": "string"}, "what": {"type": "string"}, "why": {"type": "string"}, "gate_contract": {"type": "string", "description": "잡는 것/놓는 곳/에러 경로 — 관문(latch·lock·log·alloc)을 건드리면 필수"}, "rule_ids": {"type": "array", "items": {"type": "string", "pattern": "^[A-Z]{2,5}-\\d{2}$"}}}}},
     "tests": {"type": "array", "minItems": 1, "items": {"type": "object", "required": ["name", "scenario", "expect"], "properties": {"name": {"type": "string"}, "scenario": {"type": "string"}, "expect": {"type": "string"}, "kind": {"enum": ["sql", "shell", "medium", "concurrency", "bench"]}}}},
     "regression_risks": {"type": "array", "items": {"type": "string"}},
