@@ -5,7 +5,8 @@
 
 | 에이전트 | 등급 | 하는 일 | 입력 → 출력(파일) | 쓰는 스킬 |
 |---|---|---|---|---|
-| `harness-pack-reader` | 수집(low) | 배치 그룹의 사실만(함수·관문 짝·불변조건 적중·미지 심볼·질문) | `review_request.batch*.md` → `observations.<g>.json` | — |
+| `harness-pack-reader` | 수집(low) · **선택**(기본 생략, 2026-10-27 B) | 배치 그룹의 사실만(함수·관문 짝·불변조건 적중·미지 심볼·질문) | `review_request.batch*.md` → `observations.<g>.json` | — |
+| `harness-notes` | 변환(sonnet·low) | 그룹의 changed function 전부에 변경 지도(develop 전/이 PR 후·역할·risk) — 판정과 **병렬**, 지적은 쓰지 않는다(2026-10-27 A) | 배치 → `function_notes.<g>.json` (합치기 `tools/harness/merge_notes.py`) | — |
 | `harness-reviewer` | 판정 | finding 스키마의 지적(why·proposal·verification·evidence·rule_ids) | preamble + 배치 (+observations) → `findings.<g>.json` | code-review · design-review |
 | `harness-refuter` | 반증(high) | 지적을 무너뜨린다 — anchor·심볼·규칙 ID·확인 결과·더 단순한 설명 | findings → `refute.<g>.json` | review-response(반증 비평) |
 | `harness-synthesizer` | 종합(high) | 합치기·중복 제거·중요도 정렬 → `findings.json`·코멘트 초안·보고서 §0 | findings+refute → `findings.json`, `comments.draft.md`, `report.head.md` | review-response · code-review §5(§0 9항목) |
@@ -20,7 +21,7 @@
 **모든 PR 리뷰에 단위 테스트가 들어간다**(사용자 지시 2026-10-16) — 정본 `skills/harness-review/SKILL.md` 절차 3-1.
 
 ```
-harness-review   : run full(+unit_regress) → pack-reader(그룹별, 4개씩) → reviewer(그룹별) → refuter → unit(🟡 이상 지적 확인 + 핵심 함수 계약 suite)
+harness-review   : run full(+unit_regress) → [reviewer(결함, 4개씩) ∥ notes(변경 지도, 2개씩)] (그룹별; pack-reader 는 선택) → refuter → unit(🟡 이상 지적 확인 + 핵심 함수 계약 suite)
                    → synthesizer → run full --findings
                    → gatekeeper(comments.draft) → [메인: 사용자 승인] → 게시 → auditor
 review-response  : threads → (결함 주장이면) repro → [메인: 답글 초안] → gatekeeper(답글) → [승인] → 게시 → auditor
@@ -33,5 +34,5 @@ harness-implement: (구현은 메인) → reviewer(자기 리뷰) → refuter �
 
 ## 한계
 - 에이전트 정의의 `effort:` 는 모델-선택 등급을 적은 것이다. 호스트가 그 필드를 무시하면 세션 기본값으로 돈다.
-- 동시 4개 이하(모델-선택 「한도」). 배치 ↔ 그룹은 `batch_index.md` 의 제안대로.
+- 동시 판정 4개 + 변경 지도 2개(모델-선택 「한도」). 배치 ↔ 그룹은 `batch_index.md` 의 제안대로.
 - 감시자는 규칙 위반을 잡지, 놓친 지적(recall)은 못 잡는다 — 그건 META-REVIEW 의 「놓친 것」 표.

@@ -10,6 +10,8 @@ tools: Read, Grep, Glob, Bash, Write
 `OUT`, `preamble.md`(공통 지시·두 규칙의 §2 의무 항목·finding 스키마 — **한 번만** 읽는다), 배치 파일 목록, 있으면 `observations.<그룹>.json`.
 규칙 ID 는 `rules/성능-리뷰-규칙.md`·`rules/설계-리뷰-규칙.md` 의 표에 있는 것만 인용한다.
 
+**서브에이전트 사슬에서는 `function_notes` 를 쓰지 않는다** — `harness-notes` 가 같은 그룹을 병렬로 쓴다(사용자 결정 2026-10-27 A안). 판정은 결함에만 쓴다. 단일 세션 리뷰(사슬이 아닐 때)는 preamble 3-5 대로 함께 쓴다.
+
 ## 출력 — `OUT/findings.<그룹>.json` (지적이 생길 때마다 append; 반환 전에 죽어도 남게)
 **필드·필수 여부·쓰는 법은 preamble 의 지시 3~3-8 과 스키마 `harness/schemas/finding.json` 이 정본**이다 — 여기서 다시 적지 않는다(요지: `layer`·`category`·`claim`·`why`·`proposal`(예시 포함)·`evidence`(팩 안의 `file:line` 또는 `pr-body:N`)·에러 우려면 `verification`, 성능이면 `rule_ids`, 설계면 `arch_edge`; `importance` 는 판단해서 넣되 비우면 판정기가 채운다).
 

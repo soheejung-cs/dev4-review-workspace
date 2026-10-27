@@ -37,7 +37,8 @@ description: 통합 리뷰 하네스 실행 — `/harness-review <PR번호>`. �
 **기본값: 메인 세션 모델이 Opus 면 아래 사슬이 기본, 그 밖의 모델이면 단일 세션(절차 2~3 을 이 세션이 직접, 필요할 때만 띄운다) — 사용자 결정 2026-10-27.** 사슬이어도 규모는 복잡도에 맞춘다(`harness/하네스-작성-규칙.md` S-05). 구성의 출발은 사용자 지시 2026-10-08 "서브에이전트를 여러 개 두고 감시 역할".
 정의는 `agents/*.md`(링크 `tools/agent_link.sh` → `~/.claude/agents/`), 표와 흐름은 [`agents/README.md`](../../agents/README.md). 등급·강도·동시 실행 한도는 [`harness/모델-선택.md`](../../harness/모델-선택.md).
 사슬일 때 절차 2~3 을 아래로 바꾼다 (메인 루프 = 나는 **승인·게시·사용자 대화만**):
-1. `batch_index.md` 의 그룹 제안대로 **4그룹씩**(모델-선택 「한도」, `chunk_hint`) `Agent(subagent_type="harness-pack-reader")` → `observations.<g>.json`; 이어 `harness-reviewer` → `findings.<g>.json`. 프롬프트에는 `OUT`·`preamble.md` 경로·배치 파일 목록·그룹 이름만(지시문을 복사하지 않는다).
+1. `batch_index.md` 의 그룹 제안대로 그룹마다 **`harness-reviewer`(결함 판정 → `findings.<g>.json`)와 `harness-notes`(변경 지도 → `function_notes.<g>.json`)를 병렬로** 띄운다 — 판정은 **4개씩**(모델-선택 「한도」, `chunk_hint`), 변경 지도(sonnet·low)는 **2개씩** 따로(사용자 결정 2026-10-27 A+B: 판정 하나 35~42분 중 큰 몫이 함수 전수의 develop 전/후 읽기였다 — PR#8213). 판정 에이전트에게는 "function_notes 는 쓰지 않는다" 를 프롬프트에 적는다. 프롬프트에는 `OUT`·`preamble.md` 경로·배치 파일 목록·그룹 이름만(지시문을 복사하지 않는다).
+   `harness-pack-reader`(수집)는 **기본 생략**(B) — 판정 에이전트가 팩을 직접 깊게 읽어 관찰이 겹친다. 그룹이 크고(12배치 이상) 함수 경계가 자주 잘린 팩이거나, 판정 에이전트에게 미리 좁혀 줄 질문이 필요할 때만 먼저 띄운다(결과는 반환 메시지 → 메인 루프가 `observations.<g>.md` 로 저장).
 2. `harness-refuter` 에 findings 전부 → `refute.<g>.json`.
 2-1. 단위 테스트(절차 3-1)는 `harness-unit` 에 맡긴다.
 3. `harness-synthesizer` → `OUT/findings.json`·`comments.draft.md`·`report.head.md`.
