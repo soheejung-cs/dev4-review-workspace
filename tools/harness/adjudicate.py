@@ -1,7 +1,8 @@
 """Adjudicator: LLM(또는 사람)이 낸 finding 을 결정론적 규칙으로 판정한다 — Metis triage 의 'obligation + deterministic gate' 미러.
 
 finding 형식(JSON): {id, layer:'설계'|'코드', file, line, claim, evidence:[file:line...], rule_ids:[...], severity}
-판정: valid | invalid | inconclusive. 과신 금지 — 의무 증거가 없으면 valid 로 올리지 않는다.
+판정: valid | invalid | inconclusive | withheld. 과신 금지 — 의무 증거가 없으면 valid 로 올리지 않는다.
+withheld = 맞을 수 있지만 게시하지 않는다(주석 제안이 comment_basis 기준 미달 — 사용자 지시 2026-10-27).
 """
 import os, re, subprocess
 from typing import Dict, List, Tuple
@@ -121,6 +122,19 @@ def adjudicate(repo: str, g: CodeGraph, changed: Dict[str, List[int]], findings:
             status = 'valid'
         elif obligations['graph_supports'] is False or not obligations['anchor_exists']:
             status = 'invalid' if not obligations['anchor_exists'] else 'inconclusive'
+        # 주석 제안은 두 경우만 게시한다(사용자 지시 2026-10-27): 지금 있는 주석이 코드·동작과 다르다(mismatch),
+        # 이 PR 이 새 API 를 만들어 쓰임을 제한하는 계약을 적어야 한다(new_api_contract). 설명 보강·의도 기록은 function_notes 로
+        if f.get('category') == '주석 제안':
+            basis = f.get('comment_basis')
+            obligations['comment_basis_ok'] = basis in COMMENT_BASES and (basis != 'mismatch' or len(ev) >= 2)
+            if basis not in COMMENT_BASES:
+                status = 'withheld'
+                reasons.append(f"주석 제안인데 comment_basis 가 {basis!r} — mismatch(지금 주석이 코드와 다름)·new_api_contract"
+                               f"(새 API 의 쓰임 제한)일 때만 게시한다 → withheld(게시 안 함)")
+            elif not obligations['comment_basis_ok']:
+                status = 'withheld'
+                reasons.append('comment_basis=mismatch 인데 evidence 가 2곳 미만 — 그 주석 줄과, 주석과 다른 사실(코드·동작)의 '
+                               'file:line 을 함께 적는다 → withheld(게시 안 함)')
         # 통과한 의무도 적는다 — valid 판정에 이유가 비면 "왜 valid 인지" 를 나중에 되짚을 수 없다 (2026-09-30)
         passed = []
         if obligations['anchor_exists']: passed.append(f"anchor {file}:{line} 존재" + (" · diff 안" if obligations['anchor_in_diff'] else " · diff 밖(설계 층)" if f.get('layer') != '코드' else ''))
@@ -307,6 +321,8 @@ def requery(bad: List[Dict], adjudicated: List[Dict], out_path: str) -> int:
 
 # ---- 중요도·헤더 ----
 IMPORTANCE_EMOJI = {'높음': '🔴', '중간': '🟡', '낮음': '🟢'}
+# 주석 제안을 게시하는 두 경우(사용자 지시 2026-10-27) — adjudicate() 가 부른다
+COMMENT_BASES = {'mismatch', 'new_api_contract'}
 LOW_CATEGORIES = {'주석 제안', '문서 제안'}
 
 def fill_importance(f: Dict) -> Dict:

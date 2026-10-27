@@ -132,7 +132,15 @@ def main():
     only = set(x for x in a.only.split(',') if x)
     if only:
         fs = [f for f in fs if f.get('id') in only]
-    fs = [f for f in fs if f.get('status') != 'invalid']
+    fs = [f for f in fs if f.get('status') not in ('invalid', 'withheld')]
+    # 주석 제안은 지금 주석이 코드와 다를 때(mismatch)·새 API 의 쓰임을 제한할 때(new_api_contract)만 게시한다
+    # (사용자 지시 2026-10-27) — 꼭 달아야 하면 --only 로 지목한다
+    held = [f['id'] for f in fs if f.get('category') == '주석 제안'
+            and f.get('comment_basis') not in ('mismatch', 'new_api_contract') and f.get('id') not in only]
+    if held:
+        print(f"· 주석 제안 기준 미달로 게시하지 않음: {held} — comment_basis 가 mismatch·new_api_contract 가 아니다"
+              f"(꼭 달려면 --only 로 지목)", file=sys.stderr)
+        fs = [f for f in fs if f['id'] not in held]
     drafts = {}
     if a.draft:
         drafts, unknown = parse_drafts(open(a.draft).read(), {f.get('id') for f in fs})

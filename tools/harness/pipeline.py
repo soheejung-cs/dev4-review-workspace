@@ -192,6 +192,7 @@ def n_review_request(c, a):
 2. 지적은 두 층으로 낸다 — **[코드 리뷰]**: 정확성·관문 짝·에러 경로·핫패스 비용(성능 규칙 ID 인용). **[설계 리뷰]**: 아래 불변조건·계층 간선(arch.json)·공유 자원 계약(설계 규칙 §4)·대안표·결정 요청 Q.
 3. 모든 지적에 **`why`(왜 문제가 되는지)** 를 쓴다 — 이대로 두면 누가/무엇이 어떻게 되는지(오답·정지·회복 불가·비결정성·발견 가능성), 근거(수치·규칙 ID·스펙 절). why 없는 지적은 판정에서 거절된다.
 3-1. 모든 지적에 **`proposal`(제안 + 예시)** 를 쓴다 — 주석 관련이면 그대로 붙일 수 있는 확정 문구(게시 시 ```suggestion 블록), 코드면 스케치, 문서면 문구, 테스트면 TC 시나리오. "고쳐 달라"만 있는 지적은 판정에서 거절된다.
+3-1-1. **`주석 제안` 은 두 경우에만 낸다**(사용자 지시 2026-10-27): ① 지금 있는 주석이 코드·동작과 **다르다** — `comment_basis: "mismatch"`, evidence 에 그 주석 줄과 다른 사실의 file:line ② 이 PR 이 **새 API**(함수·매크로·구조체 필드)를 만들어 그 **쓰임을 제한**하는 계약을 적어야 한다 — `comment_basis: "new_api_contract"`. 설명 보강·의도 기록·용어 같은 그 밖의 주석 제안은 내지 않는다(필요하면 `function_notes` 에만). 기준 미달은 판정기가 `withheld`(게시 안 함)로 뺀다.
 3-2. **에러 우려**(데드락·크래시·누수·오답·UB·경합) 지적은 `verification` 을 채운다 — 하네스/이 세션이 무엇을 어떻게 확인했나(`static`: 관련 함수를 직접 읽어 순서·초기화 등을 확정 / `dynamic`: 빌드·재현 스크립트 실행 결과). 확인 없이 우려만 있으면 severity 를 `question` 으로 내린다.
 3-3. 모든 지적에 `category`(버그 가능성 / 성능 검토 / 설계 판정 / 주석 제안 / 문서 제안 / 테스트 제안 / 측정 요청 / 확인 질문)를 붙이고 `importance`(높음 🔴 / 중간 🟡 / 낮음 🟢)를 판단한다 — 주석·문서 제안은 낮음, 확인된 버그·머지 차단은 높음. 게시 첫 줄은 `[층] [카테고리] 이모지`.
 3-5. **`function_notes` — 배정 팩의 `## changed function` 전부에 쓴다(결함이 없어도).** 항목마다 `file`·`function`·`line`(팩이 적은 함수 시작 줄 그대로)·`role`(누가 부르고 무엇을 돌려주나, 동어반복 금지)·`before`(develop 의 같은 함수를 **실제로 읽고** 쓴다; 신설이면 "develop 에 없음")·`after`·`changed`(시그니처/분기/자료구조/삭제 같은 성격 + 가능하면 ±줄 수)·`risk`(none|watch|defect). 이것이 보고서 **§2 변경 지도**와 한국어 주석 리뷰 PR 의 원천이다 — 이게 비면 보고서가 '지적 목록'이 되어 읽는 사람이 변경을 이해하지 못한다(사용자 지적 2026-10-06: PR#8022 보고서가 89파일 중 24개만 언급, 함수명 3종).
@@ -262,7 +263,8 @@ def n_report(c, a):
                 + (f"\n  - 통과: {', '.join(r.get('passed'))}" if r.get('passed') else ''))
     ORDER = {'높음': 0, '중간': 1, '낮음': 2}
     res = sorted(res, key=lambda r: ORDER.get(r.get('importance', '중간'), 1))
-    valid = [r for r in res if r['status'] == 'valid']; inc = [r for r in res if r['status'] != 'valid']
+    valid = [r for r in res if r['status'] == 'valid']; withheld = [r for r in res if r['status'] == 'withheld']
+    inc = [r for r in res if r['status'] not in ('valid', 'withheld')]
     blocking = [r for r in valid if r.get('severity') == 'blocking']
     tl = 'Blocking' if blocking else ('Non-blocking' if valid else '작성자 확인 필요')
     md = [f"# PR #{c['pr']} 리뷰 보고서 (하네스 생성 골격)", '', f"**PR:** https://github.com/CUBRID/cubrid/pull/{c['pr']}  **HEAD:** `{c['meta']['headRefOid'][:9]}`  **JIRA:** {c['meta']['jira']}", '',
@@ -270,6 +272,9 @@ def n_report(c, a):
     md += [fmt(r) for r in valid if r.get('layer') == '설계'] or ['없음']; md += ['', '### [코드 리뷰]', '']
     md += [fmt(r) for r in valid if r.get('layer') == '코드'] or ['없음']; md += ['', '### 판정 보류 (requery.json)', '']
     md += [fmt(r) for r in inc] or ['없음']
+    if withheld:   # 주석 제안 기준 미달(사용자 지시 2026-10-27) — 맞을 수 있지만 게시하지 않는다
+        md += ['', '### 게시하지 않음 (주석 제안 — 지금 주석이 코드와 다르거나 새 API 의 쓰임 제한일 때만 게시)', '']
+        md += [fmt(r) for r in withheld]
     # §2 변경 지도 — function_notes 가 있으면 파일→함수 표로 전수 수록한다.
     # 없으면 "왜 없는지"를 적는다: 비어 있으면 보고서가 지적 목록이 되어 읽는 사람이 변경을 이해 못 한다.
     notes = []
