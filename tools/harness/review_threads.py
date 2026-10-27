@@ -5,17 +5,26 @@
 2026-09-30: 3차 리뷰 25건을 GraphQL 로 손으로 가르던 일을 도구로."""
 import argparse, json, os, subprocess, sys, time
 
-Q = '''query($o:String!,$r:String!,$n:Int!){repository(owner:$o,name:$r){pullRequest(number:$n){headRefOid author{login}
- reviewThreads(first:100){nodes{id isResolved isOutdated path line originalLine comments(first:30){nodes{author{login} createdAt body url}}}}}}}'''
+# reviewThreads is paged (100 at most per page): a PR past 100 threads (PR#8196 had 198, 2026-10-27) lost the rest,
+# its newest -- the ones a reviewer had just opened -- among them
+Q = '''query($o:String!,$r:String!,$n:Int!,$c:String){repository(owner:$o,name:$r){pullRequest(number:$n){headRefOid author{login}
+ reviewThreads(first:100, after:$c){pageInfo{hasNextPage endCursor} nodes{id isResolved isOutdated path line originalLine comments(first:30){nodes{author{login} createdAt body url}}}}}}}'''
 
 def collect(pr: int, repo: str = 'CUBRID/cubrid', author: str = None):
     o, r = repo.split('/')
-    out = subprocess.run(['gh', 'api', 'graphql', '-f', f'query={Q}', '-f', f'o={o}', '-f', f'r={r}', '-F', f'n={pr}'], stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True)
-    if out.returncode: sys.exit(f'gh api 실패: {out.stderr.strip()[:300]}')
-    d = json.loads(out.stdout)['data']['repository']['pullRequest']
+    nodes, cur = [], None
+    while True:
+        args = ['gh', 'api', 'graphql', '-f', f'query={Q}', '-f', f'o={o}', '-f', f'r={r}', '-F', f'n={pr}'] + (['-f', f'c={cur}'] if cur else [])
+        out = subprocess.run(args, stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True)
+        if out.returncode: sys.exit(f'gh api 실패: {out.stderr.strip()[:300]}')
+        d = json.loads(out.stdout)['data']['repository']['pullRequest']
+        nodes += d['reviewThreads']['nodes']
+        page = d['reviewThreads']['pageInfo']
+        if not page['hasNextPage']: break
+        cur = page['endCursor']
     author = author or d['author']['login']
     threads = []
-    for i, t in enumerate(d['reviewThreads']['nodes']):
+    for i, t in enumerate(nodes):
         c = t['comments']['nodes']
         if not c: continue
         last = c[-1]['author']['login']

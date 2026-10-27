@@ -282,14 +282,16 @@ h_flush_scenario (int n, const int *rows, const int *grp, int ng, int tuple_coun
   return rc;
 }
 
-/* qexec_gby_cache_add () for n distinct one-byte...four-byte keys (key i = i), each naming value vals[i % 64] through
- * the fake mht_get (); then which of them qexec_gby_cache_find () still finds.  Returns n_cached; *found_first: key 0
- * found; *found_last: key n-1 found and its value's batch_slot is the slot it was found in; *copies / *frees: key
- * copies made / freed so far */
+/* qexec_gby_cache_add () for n distinct one-byte...four-byte keys (key i = i), each naming its own group vals[i] through
+ * the fake mht_get (), as the table's groups are one value each (batch_slot -1 when made, qdata_alloc_agg_hvalue ());
+ * then which of them qexec_gby_cache_find () still finds.  Returns n_cached; *found_first: key 0 found; *found_last:
+ * key n-1 found and its value's batch_slot is the slot it was found in; *copies / *frees: key copies made / freed so far.
+ * (Until 2026-10-27 the keys shared 64 values, eight keys to a group: from e90e0705a a group keeps one entry, so that
+ * modelled no table and left 64.) */
 int
 h_cache_add_scenario (int n, int *found_first, int *found_last, int *copies, int *frees_key)
 {
-  static AGGREGATE_HASH_VALUE vals[64];
+  static AGGREGATE_HASH_VALUE vals[1024];
   QEXEC_BATCH_GBY st;
   AGGREGATE_HASH_CONTEXT ctx;
   cubquery::aggregate_hash_key temp;
@@ -298,6 +300,10 @@ h_cache_add_scenario (int n, int *found_first, int *found_last, int *copies, int
   memset (&st, 0, sizeof (st));
   memset (&ctx, 0, sizeof (ctx));
   memset (vals, 0, sizeof (vals));
+  for (i = 0; i < 1024; i++)
+    {
+      vals[i].batch_slot = -1;
+    }
   ctx.temp_key = &temp;
   h_n_copy = h_n_free_key = 0;
   for (i = 0; i < n; i++)
@@ -306,7 +312,7 @@ h_cache_add_scenario (int n, int *found_first, int *found_last, int *copies, int
       int v = i;
 
       memcpy (key, &v, 4);
-      h_get_result = &vals[i % 64];
+      h_get_result = &vals[i];
       qexec_gby_cache_add (NULL, &st, &ctx, key, 4, qexec_gby_hash_bytes (key, 4));
     }
   n_cached = st.n_cached;
@@ -320,11 +326,47 @@ h_cache_add_scenario (int n, int *found_first, int *found_last, int *copies, int
     v = n - 1;
     memcpy (key, &v, 4);
     e = qexec_gby_cache_find (&st, key, 4, qexec_gby_hash_bytes (key, 4));
-    *found_last = (e != NULL && e->value == &vals[(n - 1) % 64] && vals[(n - 1) % 64].batch_slot == (int) (e - st.cache))
-      ? 1 : 0;
+    *found_last = (e != NULL && e->value == &vals[n - 1] && vals[n - 1].batch_slot == (int) (e - st.cache)) ? 1 : 0;
   }
   *copies = h_n_copy;
   *frees_key = h_n_free_key;	/* the releases the cache made by itself (its clear when half full) */
+  qexec_gby_cache_clear (NULL, &st);
+  free (st.cache);
+  return n_cached;
+}
+
+/* One group named by two byte strings -- the cache keys are the record's bytes (expr_batch_key_bytes ()), so an equal
+ * key that encodes otherwise ('a' and 'A' under a case-insensitive collation, 0.0 and -0.0) finds the same group:
+ * key A then key B, both naming vals.  Returns n_cached; *found_a / *found_b: each key found naming the group;
+ * *slot_is_b: the group's batch_slot is B's entry; *copies / *frees: key copies made / freed by the cache itself */
+int
+h_cache_same_group_scenario (int *found_a, int *found_b, int *slot_is_b, int *copies, int *frees_key)
+{
+  static AGGREGATE_HASH_VALUE val;
+  QEXEC_BATCH_GBY st;
+  AGGREGATE_HASH_CONTEXT ctx;
+  cubquery::aggregate_hash_key temp;
+  unsigned char a[4] = { 'a', 0, 0, 0 }, b[4] = { 'A', 0, 0, 0 };
+  QEXEC_GBY_ENTRY *ea, *eb;
+  int n_cached;
+
+  memset (&st, 0, sizeof (st));
+  memset (&ctx, 0, sizeof (ctx));
+  memset (&val, 0, sizeof (val));
+  val.batch_slot = -1;
+  ctx.temp_key = &temp;
+  h_n_copy = h_n_free_key = 0;
+  h_get_result = &val;
+  qexec_gby_cache_add (NULL, &st, &ctx, a, 4, qexec_gby_hash_bytes (a, 4));
+  qexec_gby_cache_add (NULL, &st, &ctx, b, 4, qexec_gby_hash_bytes (b, 4));
+  n_cached = st.n_cached;
+  ea = qexec_gby_cache_find (&st, a, 4, qexec_gby_hash_bytes (a, 4));
+  eb = qexec_gby_cache_find (&st, b, 4, qexec_gby_hash_bytes (b, 4));
+  *found_a = (ea != NULL && ea->value == &val) ? 1 : 0;
+  *found_b = (eb != NULL && eb->value == &val) ? 1 : 0;
+  *slot_is_b = (eb != NULL && val.batch_slot == (int) (eb - st.cache)) ? 1 : 0;
+  *copies = h_n_copy;
+  *frees_key = h_n_free_key;
   qexec_gby_cache_clear (NULL, &st);
   free (st.cache);
   return n_cached;
