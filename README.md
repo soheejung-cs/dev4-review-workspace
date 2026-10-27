@@ -125,7 +125,6 @@ tools/               roster.json(추적 GitHub ID) · review_board_gen.py(review
   harness/           review_threads.py(미해결 스레드 분류) · review_reply.py(답글 dry-run/게시) · pr_refs.py(본문 참조 PR 상태·커밋 존재) · compile_check.py(파일/커밋 단위 컴파일) · unitseam.py(리뷰용 단위 테스트: TU 단독 컴파일 + 가짜·stub, head/base 비교) — 구조도 harness/구조도.html, 나머지는 harness/ARCHITECTURE.md
 imports/xmilex-git/    송일한 워크스페이스에서 들여온 원문(PR 리뷰 스킬·영문 성능 규칙집·설계 어휘·ctp-run·PR 코퍼스) — README 에 대응표
 examples/
-  설계리뷰-덱-CBRD-27369.html   13장 덱(비유·락 전후 표·라이브락 그림·결정 요청) — 다음 덱의 틀
   리뷰답글-예시-PR7900.md      엔진 스레드 5 + TC PR 답글 2 — 문체·구조 예시
 ```
 

@@ -1,6 +1,6 @@
 # 융합 하네스 아키텍처 — Metis CodeGraph/Reachability × Azure Architecture-Review 파이프라인
 
-대상: CUBRID(및 PG 계열) C/C++ 엔진의 **설계 리뷰**와 **패치 리뷰**. 두 하네스는 initialize·context·adjudicate 를 공유하고, 설계용만 `infer` 단계를 더 갖는다. 레퍼런스(`rules/`, `references/`)는 공유. TC 변경·CI 분석은 `dev4-tc-workspace` 로 분리.
+대상: CUBRID C/C++ 엔진의 **설계 리뷰**와 **패치 리뷰**. 두 하네스는 initialize·context·adjudicate 를 공유하고, 설계용만 `infer` 단계를 더 갖는다. 레퍼런스(`rules/`, `references/`)는 공유. TC 변경·CI 분석은 `dev4-tc-workspace` 로 분리.
 
 ## 1. 한 장 그림
 
