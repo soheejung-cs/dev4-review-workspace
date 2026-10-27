@@ -11,7 +11,7 @@ description: 리뷰 검증 규율 — 이 PR 에 무엇을 돌릴지(CTP sql/med
 매트릭스는 **제안**이다. 실제로 무엇을 돌릴지는 리뷰를 요청한 사용자에게 먼저 확인받고 시작한다(벤치는 시간·호스트를 오래 점유하고, CTP 는 conf 를 바꿔 놓는다).
 확인 형식(한 번에, 닫힌 질문으로):
 > 이 PR 은 **[변경 유형]** 으로 보입니다 — 이유: [플랜이 바뀌는 근거/공유 자원/…].
-> 제안: **필수** [CTP sql 코어 / 동시성 재현 …] · **추가** [JOB 스크리닝(.51, 약 N분) / TPC-H(.50) …].
+> 제안: **필수** [CTP sql 코어 / 동시성 재현 …] · **추가** [JOB 스크리닝(<보유 컨테이너>, 약 N분) / TPC-H(<보유 컨테이너>) …].
 > 이대로 돌릴까요, 일부만 돌릴까요, 아니면 생략할까요?
 - 답이 오기 전에는 빌드·재현 스크립트 작성처럼 호스트를 점유하지 않는 준비만 한다.
 - 사용자가 "그냥 돌려"라고 한 번 정하면 그 PR 에 한해 재확인하지 않는다. 다른 PR 은 다시 묻는다.
@@ -21,7 +21,7 @@ description: 리뷰 검증 규율 — 이 PR 에 무엇을 돌릴지(CTP sql/med
 |---|---|---|---|
 | **옵티마이저**(조인 순서·선택도·히스토그램·비용 상수·플랜 비교기) | JOB 113 스크리닝(min-of-3) → **플랜 덤프 diff** → 바뀐 질의만 median-of-3 확정(2026-10-21 사용자 결정: 5회 대신 3회) | 바뀐 질의가 집계/스캔 지배면 TPC-H 해당 질의 | PG 조인 순서 일치 여부(지표) + MAD 기준 시간, 부호 쏠림 시 순서 반전 |
 | **실행기**(스캔·집계·정렬·해시조인·병렬·임시파일) | TPC-H SF10 22 (SSOT r1 계약: 8192M/par6/warmup1+median-of-3) | JOB 은 회귀 유무만(스크리닝) | median + MAD, 결과 정합(행 수·체크섬) |
-| **스토리지·트랜잭션**(락·MVCC·카탈로그·통계 수집·복구) | CTP sql + medium **코어 여부** + **동시성 재현 스크립트**(release·debug) | 관련 shell 디렉터리(`tests/shell-tc-index` 로 고른다) | 코어 0 · 시나리오 PASS · debug assert 0 |
+| **스토리지·트랜잭션**(락·MVCC·카탈로그·통계 수집·복구) | CTP sql + medium **코어 여부** + **동시성 재현 스크립트**(release·debug) | 관련 shell 디렉터리(`dev4-tc-workspace/tests/shell-tc-index` 로 고른다) | 코어 0 · 시나리오 PASS · debug assert 0 |
 | **파서·타입·함수·SQL 의미** | CTP sql (로컬은 코어만, 답안 정렬은 CI 몫) | medium | 코어 0 |
 | **카탈로그·DDL·권한** | CTP sql + shell 관련 디렉터리 | `_db_*` 뷰 답안 변경 사유 코멘트 | 코어 0, 답안 변경은 의도 기준 |
 | **리팩터링·헤더 정리** | 빌드(release+debug) + CTP sql 코어 | 빌드 시간 비교(PHYS) | 동작 무변경 |
@@ -31,12 +31,12 @@ description: 리뷰 검증 규율 — 이 PR 에 무엇을 돌릴지(CTP sql/med
 
 위 매트릭스는 무엇을 돌릴지만 정한다. **어떤 설정으로 돌릴지**는 따로 봐야 한다. 같은 코드가 설정에 따라 다른 경로를 타고, 작성자는 대개 자기가 개발한 설정 하나만 밟아 본다.
 
-**아래 신호가 diff 에 있으면 그 설정 변형을 돌릴 때까지 승인하지 않는다.**
+**아래 신호가 diff 에 있으면 그 설정 변형을 돌릴 때까지 승인하지 않는다.** 신호 열의 식별자는 diff 에서 찾을 검색어다. 왜 그런지(코드 사실)는 `dev4-ai-source/modules/src-query.md` §3(컴파일 산출물 수명·clone decache) · `staging/정소희-CBRD-27215.md`(플랜 캐시 세 모양·해제 경로, PR#7658 에서 나온 사실).
 
 | diff 신호 | 반드시 돌릴 설정 | 왜 |
 |---|---|---|
-| XASL·플랜에 **수명이 있는 상태**를 붙인다 (구조체에 포인터 필드 추가, clone 과 함께 사는 캐시) | 플랜 캐시 **세 모양 전부**: 기본 / `max_plan_cache_clones=0` / `max_plan_cache_entries=0` | 세 모양이 트리를 얻고 버리는 경로가 서로 다르다. 기본은 clone 재사용, clones=0 은 실행마다 새로 풀어 retire 에서 폐기, entries=0 은 원샷. **셋 다 해제 주체가 다르다** |
-| `XASL_DECACHE_CLONE` · `is_final` · `CLEAR_AT_CLONE_DECACHE` 를 읽거나 세운다 | 위 세 모양 + **px 병렬 on** (`parallelism>0`, 스캔 임계 낮춰 강제) | 이 플래그들은 clear 루틴이 **반대 방향으로** 읽는 자리가 있다. 한쪽만 보면 다른 쪽에서 해제가 통째로 꺼진다 |
+| XASL·플랜에 **수명이 있는 상태**를 붙인다 (구조체에 포인터 필드 추가, clone 과 함께 사는 캐시) | 플랜 캐시 **세 모양 전부**: 기본 / `max_plan_cache_clones=0` / `max_plan_cache_entries=0` | 세 모양이 트리를 얻고 버리는 경로가 다르고 **해제 주체가 다르다** |
+| `XASL_DECACHE_CLONE` · `is_final` · `CLEAR_AT_CLONE_DECACHE` 를 읽거나 세운다 | 위 세 모양 + **px 병렬 on** (`parallelism>0`, 스캔 임계 낮춰 강제) | 이 플래그들을 **반대 방향으로** 읽는 자리가 있어 한쪽만 보면 다른 쪽에서 해제가 통째로 꺼진다 |
 | `regu_init` / `stx_build_*` 같은 **초기화 짝** 중 한쪽만 고친다 | **SA 모드와 CS 모드 둘 다** | SA 는 `xasl_regu_alloc.cpp` 의 `regu_init`, CS 는 `stream_to_xasl.c` 의 `stx_build_*` 가 같은 구조체를 채운다. 한쪽에 필드를 빠뜨려도 CS 만 돌리면 안 보인다. SA 메모리는 0 으로 채워지지 않는다 |
 | 트리·컨텍스트를 **복제**한다 (px 워커, spawner, group dim, 필터 인덱스 캐시) | 복제가 실제로 일어나는 설정 (px 병렬 on, 해시 조인, 정렬 GROUP BY) | 복제본마다 같은 해제 계약을 지켜야 하는데 얕은 복사는 포인터만 물려준다 |
 | `;trace` 출력을 바꾼다 | px 병렬 on 상태로 **같은 문장 2회 이상** | 워커 덤프는 먼저 끝난 워커가 자리를 차지해 실행마다 내용이 다를 수 있다. 답안이 담을 수 없는 흔들림이 된다 |
@@ -46,26 +46,18 @@ description: 리뷰 검증 규율 — 이 PR 에 무엇을 돌릴지(CTP sql/med
 > 이 PR 은 **[변경 유형]** 이고, **[설정 신호]** 가 있어 **[설정 변형 목록]** 에서도 돌려야 할 것으로 봅니다.
 
 ## 1-2. 답안으로 안 잡히는 것 — 자원 누수 (2026-09-17 추가)
-
-**CTP 답안 비교는 메모리·자원 누수를 못 잡는다.** 결과는 맞고 메모리만 새기 때문이다. 수명 있는 상태를 추가하는 변경은 아래 셋 중 최소 둘로 잰다. 스크립트 원본은 `claude-workspace/projects/CBRD-27215/repro/` 에 있다.
-
-| 방법 | 어떻게 | 무엇이 판정 |
-|---|---|---|
-| **RSS 배치 비교** (`noclone_leak2.sh`) | 한 서버에서 같은 배치를 3회. 1회차는 워밍업이라 버리고 **2·3회차 증가분**을 본다 | 정상 상태 증가가 0 이어야 한다. 반드시 **develop 대조군**을 같은 방법으로 함께 잰다 |
-| **자체 메모리 모니터** (`memmon_check.sh`) | `enable_memory_monitoring=yes` 로 서버를 띄우고 배치 전후로 `cubrid memmon -o`. 파일:줄 단위로 나온다 | 내가 만진 파일의 줄이 배치마다 늘면 누수. 서버 총계도 함께 본다 |
-| **valgrind memcheck** (`valgrind_leak.sh`) | **SA 모드**(`csql -S`) 로 돌린다 — 서버가 한 프로세스라 캐시 retire 까지 한 번에 잡힌다. `cub_server` 를 직접 감싸는 것보다 훨씬 쉽다 | `definitely lost` 가 0 이어야 한다. 0 이 아니면 스택에서 내 함수를 찾는다 |
-
-**모니터가 못 보는 할당이 있다.** 서버 모드에서 `memory_cwrapper.h` 가 `malloc`/`calloc`/`realloc`/`free` 를 `cub_alloc`/`cub_free` 로 치환하므로(그래서 `memory_wrapper.hpp` 를 **마지막에** include 해야 하고 CI 가 강제한다) 소스의 `malloc` 은 추적된다. 그러나 **`posix_memalign` 은 치환 대상이 아니다** — 정렬 할당은 `cub_aligned_alloc ()` 을 써야 모니터에 잡힌다. `malloc` 계열이 아닌 할당을 새로 쓰면 추적되는 짝이 있는지 먼저 확인한다.
+**CTP 답안 비교는 메모리·자원 누수를 못 잡는다**(결과는 맞고 메모리만 샌다). 수명 있는 상태를 추가하는 변경은 [`harness/templates/leak/README.md`](../../harness/templates/leak/README.md) 의 셋(RSS 배치 비교 · 자체 메모리 모니터 · SA valgrind) 중 **최소 둘**로 재고, **develop 대조군**을 같은 방법으로 함께 잰다.
+`malloc` 계열이 아닌 할당(`posix_memalign` 등)이 새로 들어오면 자체 메모리 모니터가 추적하는 짝이 있는지 먼저 확인한다(사실: `dev4-ai-source/modules/src-base.md`·`staging/정소희-CBRD-27215.md`).
 
 ## 2. 어디서
 | 벤치/테스트 | 컨테이너 | 비고 |
 |---|---|---|
-| JOB (joinorder 53G, 히스토그램 300버킷) | **.51**(원본), .52 | `.51` 하네스: `setup_arm_51.sh` → `screen_min3_51.sh` → `pick_movers_51.py` → `ab_interleave_51.sh` → `job_verdict.py` |
-| TPC-H SF10 | **.50** | `.51/.52` 엔 없다. 질의 22개는 SF10 전용 |
+| JOB (joinorder, 히스토그램 300버킷) · TPC-H SF10 | 보유 컨테이너·볼륨 경로·컨테이너별 하네스 이름은 `claude-workspace/hosts/<끝자리>.md` 가 정본 | TPC-H 질의 22개는 SF10 전용 |
 | CTP sql/medium/shell | 어느 컨테이너나 — 단 **CTP 와 벤치를 동시에 돌리지 않는다**(`cub_master`·`databases.txt` 공유) | 컨테이너 격리 러너: `imports/xmilex-git/skills/ctp-run`(podman·justfile 필요, 호스트 CTP 는 `pkill cub` 로 이 사용자 cub_* 전부 죽임) |
 | 동시성 재현 | 어느 컨테이너나, **demodb 또는 버릴 DB** | 벤치 볼륨에 재현하지 않는다 |
 
 ## 3. 측정 계약 (어기면 수치 무효)
+정본(상세·근거)은 `claude-workspace` 메모리 `rules/측정-규칙.md`·`howto/벤치마크-실행.md`(비공개) — 아래는 리뷰에 필요한 요약이고, 어긋나면 정본이 이긴다.
 1. `~/bin/host_idle_guard.sh --wait 180` — 세 컨테이너가 한 물리 호스트·같은 `taskset -c 0-15` 를 쓴다. A/B 는 **팔마다** 게이트.
 2. 통계는 `UPDATE STATISTICS ON t WITH FULLSCAN, 300 BUCKETS` 표준 → **서버 재기동**(XASL 캐시가 옛 플랜을 쓴다).
 3. run 반복 median + MAD, 질의별 부호 분포 확인, 쏠리면 **순서 반전**. 1회 측정으로 판정하지 않는다.
@@ -74,17 +66,16 @@ description: 리뷰 검증 규율 — 이 PR 에 무엇을 돌릴지(CTP sql/med
 6. 빌드는 `goto <rev> release|debug`, 검증은 **release 로 성능·debug 로 assert** 둘 다.
 
 ## 4. CTP 판정 규칙
+정본은 메모리 `rules/테스트TC-규칙.md` §0·§1(비공개). CTP conf 잔재와 shell TC 단독 실행의 실측 기록은 메모리 `hosts/컨테이너-51.md` 「CTP — .51 고유」(2026-10-27 테스트TC-규칙 §6 에서 이관).
 - 로컬 CTP 는 **코어 발생 여부만** 본다. NOK 는 CI(`tc/pr-<n>` 짝)의 몫 — 단 NOK 가 수백 건이면 원인 분류(`tc-analysis`)는 한다(예: 2026-09-16 `-494` 캐스케이드는 PL 연결 잔존).
 - fault-injection 코어(`fi_handler_random_exit`)는 결함이 아니다.
-- **CTP 가 `$CUBRID/conf` 를 바꿔 놓는다** — `ha_mode=yes`·`port 1822`. 뒤에 평범 서버를 쓰려면 되돌린다.
-  `cubrid_locales.txt` 도 CTP 의 `make_locale` 이 채운다 — 그대로 두면 설치본 콜레이션 수가 DB 와 어긋나
-  `Number of collations do not match` 로 기동이 실패한다. 돌리기 전에 `conf/` 를 백업하고 끝나면 되돌린다
-  (2026-09-21 `.51` 실측: 로케일 11개가 채워져 있었다).
+- **CTP 가 `$CUBRID/conf` 를 바꿔 놓는다** — `ha_mode=yes`·`port 1822`, `cubrid_locales.txt` 도 CTP 의 `make_locale` 이 채운다(그대로 두면 설치본 콜레이션 수가 DB 와 어긋나 `Number of collations do not match` 로 기동 실패). CTP 를 돌리기 전에 `conf/` 를 백업하고 끝나면 되돌린다.
+- **SA 재현에서 파라미터를 바꿀 때는 설치본 conf 를 편집하지 않는다** — `CUBRID_CONF_FILE=<사본>` + `CUBRID_DATABASES=<스크래치 디렉터리>` 로 돌린다(`;get` 으로 확인). 설치본을 공유하는 JOB·CTP 와 부딪히지 않는다(`references/리뷰에서-배운것.md` 2026-10-22 PR#8196 16번). conf 백업·복원은 CS 서버가 꼭 필요할 때만.
 - shell TC 단독 실행: `init_path`·`result_file`·`case_name` export, 로그는 작업 디렉터리 밖으로.
 
 ## 5. 리뷰 답글에 적는 형식
-"무엇을 어디서 어떤 계약으로 돌렸고 결과가 무엇인가" 한 문단 — 시나리오 / 수정 전 / 수정 후 표. **CTP 수치는 답글에 붙이지 않는다**(사용자 지시). 재현 스크립트는 `projects/<JIRA키>/repro/` 와 JIRA 첨부.
+"무엇을 어디서 어떤 계약으로 돌렸고 결과가 무엇인가" 한 문단 — 시나리오 / 수정 전 / 수정 후 표. CTP 수치는 붙이지 않는다(`review-response` §3 문체 규약). 재현 스크립트는 `projects/<JIRA키>/repro/` 와 JIRA 첨부.
 
 ## 6. 연동 도구
-- 실패 케이스가 이 PR 과 관련 있는지: `tools/tc_relevance.py --pr <n> --failed <케이스 경로…>` (`tests/shell-tc-index/index.json` 기반, 높음/낮음 + 이유).
-- 규칙 근거: `rules/성능-리뷰-규칙.md` §6·§7.
+- 실패 케이스가 이 PR 과 관련 있는지: `~/dev/docs/dev4-tc-workspace/tools/tc_relevance.py --pr <n> --failed <케이스 경로…>` (`dev4-tc-workspace/tests/shell-tc-index/index.json` 기반, 높음/낮음 + 이유).
+- 규칙 근거: `rules/성능-리뷰-규칙.md` §6(PR 의 측정·플랜 증거를 판정하는 문장).

@@ -1,10 +1,10 @@
 ---
 name: harness-unit
-description: 리뷰 하네스 동적 검증 단계(단위). 지적 하나를 서버·DB 없이 확인한다 — 그 함수가 든 번역 단위를 PR 빌드 플래그로 단독 컴파일하고(tools/harness/unitseam.py), 의존 함수는 seam(weak 정의)으로 가짜를 끼우고, 나머지는 자동 stub 으로 막아 Catch2 테스트로 돌린다. PR head 와 base 에 같은 테스트를 돌려 결함 재현·선재·스펙 변경을 가른다. 목(mock) 허용. gha-ci 용이 아니라 리뷰 내부 증거다. 등급: 판정(effort 기본).
+description: 리뷰 하네스 단위 동적 검증 단계 — 지적 함수의 번역 단위를 PR 빌드 플래그로 단독 컴파일해(tools/harness/unitseam.py) seam·자동 stub 으로 Catch2 테스트를 head/base 에 돌려, 서버·DB 없이 결함 재현·선재를 가른다.
 tools: Read, Grep, Glob, Bash, Write
 ---
 
-당신은 리뷰 하네스의 **단위 동적 검증** 단계다. 결과는 출력 파일로 말한다.
+당신은 리뷰 하네스의 **단위 동적 검증** 단계다. 결과는 출력 파일로 말한다. 목(가짜) 허용 — gha-ci 용 테스트가 아니라 리뷰 내부 증거다.
 
 ## 입력
 지적(finding id·file:line·claim) 하나, PR head rev 와 base rev, 산출 디렉터리(`OUT/unit/<finding>/`).

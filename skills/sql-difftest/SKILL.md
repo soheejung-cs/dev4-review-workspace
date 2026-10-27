@@ -5,7 +5,9 @@ description: 적대적 SQL 차분 테스트 — 같은 SQL 세트를 develop·PR
 
 # 적대적 SQL 차분 테스트 (sql-difftest)
 
-리뷰 대상 PR 의 답이 **develop 과 같은가**를 코드가 아니라 출력으로 확인한다. 같지 않은 곳이 지적의 재료이고, 같은 곳은 "검증했다" 의 근거다. 2026-10-07 PR#8022(바인드 도메인 해석) 리뷰에서 세트 A~D14 로 자리를 잡았다(`claude-workspace/projects/CBRD-27510/도메인해석-난이도테스트-20261007.md`).
+리뷰 대상 PR 의 답이 **develop 과 같은가**를 코드가 아니라 출력으로 확인한다. 같지 않은 곳이 지적의 재료이고, 같은 곳은 "검증했다" 의 근거다. 2026-10-07 PR#8022(바인드 도메인 해석) 리뷰에서 세트 A~D14 로 자리를 잡았다(축별로 실제 걸린 사례: `claude-workspace/projects/CBRD-27510/도메인해석-난이도테스트-20261007.md`).
+
+**목표는 PR 을 뚫는 것이다**(사용자 지시 2026-10-12 .50: "적대적 테스트를 만들 때 develop 이 실패하는 케이스를 만들 필요는 없어"). 오라클 = **PR 안의 자기 일관성**(memo on/off·바인드 vs 리터럴·인덱스 vs 순차) + **develop 동일성**. develop 에서만 깨지는 모양은 "develop 선재" 한 줄 — TC·지적으로 만들지 않는다(별도 JIRA 는 사용자 결정). "실패하는 TC" 는 **PR 에서 실패하는 TC** 다(없으면 "없음").
 
 도구: **`tools/difftest/`** — `difftest.sh`(여러 설치본 SA 실행·정규화·diff), `modes.sh`(파라미터 모드 묶음), `concurrent.sh`(동시 vs 단독 vs 재기동), `lifetime.sh`(RSS·plandump), `fuzz_gen.py`(무작위 바인드 생성기).
 
@@ -13,26 +15,27 @@ description: 적대적 SQL 차분 테스트 — 같은 SQL 세트를 develop·PR
 - **기준 빌드**: PR 의 merge-base 를 품은 develop 리비전(비교 축의 파일이 그 사이에 바뀌지 않았는지 `git log <base>..<mb> -- <files>` 로 확인). **PR 빌드**: PR 헤드. 내 변경이 얹힌 **머지 빌드**가 있으면 셋째 — "내 변경이 PR 의 답을 바꾼 곳 없음" 을 함께 증명한다.
 - 설치본마다 `databases/` 가 따로다. 값 비교는 설치본별 볼륨으로 충분하지만, **비용·플랜 수치 비교는 `-v` 로 같은 볼륨**을 써야 한다(힙 페이지 수가 다르면 비용이 어긋난다).
 - SA(`csql -S`)는 떠 있는 서버와 충돌한다 → 먼저 `cubrid service stop`. **빌드가 끝나면 goto 가 그 설치본의 demodb 서버를 자동으로 띄운다**(2026-10-07 실측) — 빌드 직후엔 반드시 확인.
+- **SA 재현의 conf 변경은 설치본 conf 편집이 아니라 `CUBRID_CONF_FILE=<사본>` + `CUBRID_DATABASES=<스크래치>`** 로(`;get` 으로 확인) — 설치본을 공유하는 JOB·CTP 와 부딪히지 않는다(배운것 PR#8196 16번). `modes.sh` 는 아직 설치본 conf 를 덧붙였다 원복하므로 다른 작업이 그 설치본을 쓰는 중이면 돌리지 않는다.
 - csql 은 cwd 에 `csql.err` 를 남긴다 — 세트·출력은 스크래치패드나 `projects/<이슈>/repro/` 에서.
 
 ## 1. 공격 축 — 한 세트에 하나씩, 실행 순서를 바꿔 가며
-| 축 | 어떻게 | 2026-10-07 에 걸린 것 |
+| 축 | 어떻게 | 판정 신호(무엇이 보이면 걸린 것인가) |
 |---|---|---|
-| **바인드 타입 회전** | 같은 PREPARE 를 INT → 문자열 → DOUBLE → INT → NULL → INT 로 재실행 | develop 의 재사용 타입 잔존(PRIOR 식 반올림·UNION 바인드 열·PERCENTILE_DISC·윈도우 정렬) |
-| **같은 플랜, 다른 세션** | 같은 문장을 K 세션이 바인드 타입·키 범위만 달리 동시 실행 → 단독·재기동 단독과 diff | develop 은 "누가 먼저 컴파일했나" 로 답이 바뀜(세션 간 타입 누출) |
-| **쓰레기·중의 값** | `'1.5.5'`, `' 12 '`, `'0x1F'`, `''`, `'NaN'`, `'일이삼'`, 300자, `B'1010'`, 날짜 리터럴, bigint 경계 — `fuzz_gen.py` | 윈도우가 변환 실패 행을 조용히 떨어뜨림(develop), BETWEEN 조용히 0행 → 오류(PR 스펙 변경) |
-| **해석 근거 없는 자리** | `?` 전부 NULL, `? + ?`, `NVL(?, ?)`, 바인드만 있는 UNION 열, `SUM(?)` | 내부 센티널(-1383) 사용자 노출 여부 |
-| **안 타는 가지 / 상수와 섞기** | `CASE WHEN a > ? THEN 1/? ELSE 0 END`, `NVL(a, ?)` 에 NULL 행 없음, `(PRIOR w) * ? + w * 2 - ? + 0.5` | 행 의존 가지 안 상수식 선계산(PR 회귀), 변환은 미리 안 함 |
-| **부작용 있는 상수** | 가지 안 `시리얼.NEXT_VALUE + ?`, `RANDOM() + ?`, `SYS_GUID()`, `SYSDATE + ?` — 값 대신 **횟수·DISTINCT 수·범위** 를 본다 | 선계산되면 시리얼이 한 번만 소비됨(이번엔 정상) |
-| **구조 조합** | 뷰(식 푸시다운·세션변수 읽는 뷰·GROUP BY/UNION 뷰), 계층 뷰 위 윈도우, 윈도우 뷰 위 CONNECT BY, 3단 서브쿼리, CTE+EXISTS, MERGE(DELETE 절·GROUP BY/윈도우 소스), INSERT…SELECT, 다중 VALUES, ON DUPLICATE KEY, REPLACE | **CONNECT BY + `?` 가진 파생 테이블 → 로드 -1383**(PR 결함) |
-| **재컴파일 경로** | 같은 문장을 (a) 새 PREPARE→EXECUTE (b) `/*+ RECOMPILE */` 힌트 (c) PREPARE → 그 테이블 `ALTER ADD COLUMN`/`CREATE INDEX` → EXECUTE (d) `max_plan_cache_entries=0` 로 돌려 비교. (b)(c)는 **바인드 값을 아는 상태의 재컴파일**이라 첫 PREPARE 와 다른 스트림이 간다 | PR#8022 `UPDATE SET d = DATE'…' + ?` 가 (b)(c)에서만 -1383 (2026-10-07) |
-| **리터럴 단독** | 바인드 없는 리터럴 문장(`SUM(NULL)`, `CAST(NULL AS …)` 인자)도 세트에 넣고 **raw diff 줄수**를 본다 — 짝 분류기는 리터럴 단독 diff 를 못 잡는다 | PR#8022 `SUM(NULL)` -1383 (2026-10-07) |
-| **모드 on/off** | `modes.sh`: 기본 / oracle 호환 / concat·escape·normalization·string_max / `max_plan_cache_entries=0` / `max_plan_cache_clones=0` (+ `review-testing` §1-1 의 신호별 모드) | 캐시 0 에서 원인 오류 대신 -1383, query 인자 빈 문자열 |
-| **세션 파라미터** | `SET NAMES`, `SET SYSTEM PARAMETERS`, 세션변수 `@v` 타입 바꿈(INT→'3'→2.5→NULL), 같은 PREPARE 유지 | A5(세션변수 타입 고정) 적용 범위 |
-| **실행 사이 스키마 변경** | 같은 PREPARE 두고 `ALTER TABLE MODIFY` 타입 변경·`CREATE INDEX`·`ADD COLUMN`·`UPDATE STATISTICS` | 재실행이 새 열 타입을 따라가나 |
-| **특수 타입** | ENUM·SET·JSON·BIT VARYING·DATE/TIME/TIMESTAMP/DATETIME 교차, 날짜 산술, 인덱스 키 변환(10 / 10.0 / '10' / ' 10' / '1e1'), 바인드 IN(≤200개 — 메모리-과다-테스트-금지), `LIMIT ?, ?` | 0 diff |
-| **수명·메모리** | `lifetime.sh`: 문장 1000개 PREPARE/EXECUTE×4/DEALLOCATE + 고유 문장 200개 × 6라운드, 오류 경로 600회 × 3 | RSS 1라운드 뒤 고정, plandump churn 정상 |
-| **PL/Java** | `loadjava` + `CREATE FUNCTION` + PREPARE 로 인자 타입 확인 함수(`BigDecimal.scale()` 등) | 0 diff. `int` 원시 인자에 NULL 은 내 설계 오류(IllegalArgumentException) |
+| **바인드 타입 회전** | 같은 PREPARE 를 INT → 문자열 → DOUBLE → INT → NULL → INT 로 재실행 | 재실행 결과의 타입·값이 앞선 실행의 타입을 따라간다(재사용 타입 잔존) |
+| **같은 플랜, 다른 세션** | 같은 문장을 K 세션이 바인드 타입·키 범위만 달리 동시 실행 → 단독·재기동 단독과 diff | "누가 먼저 컴파일했나" 로 답이 바뀐다(세션 간 타입 누출) |
+| **쓰레기·중의 값** | `'1.5.5'`, `' 12 '`, `'0x1F'`, `''`, `'NaN'`, `'일이삼'`, 300자, `B'1010'`, 날짜 리터럴, bigint 경계 — `fuzz_gen.py` | 변환 실패 행이 조용히 사라지거나, 0행↔오류가 바뀐다(스펙 변경 후보) |
+| **해석 근거 없는 자리** | `?` 전부 NULL, `? + ?`, `NVL(?, ?)`, 바인드만 있는 UNION 열, `SUM(?)` | 내부 센티널 오류 코드(예: -1383)가 사용자에게 보인다 |
+| **안 타는 가지 / 상수와 섞기** | `CASE WHEN a > ? THEN 1/? ELSE 0 END`, `NVL(a, ?)` 에 NULL 행 없음, `(PRIOR w) * ? + w * 2 - ? + 0.5` | 행 의존 가지 안 상수식이 미리 계산돼 안 탈 오류가 난다(변환은 미리 안 함) |
+| **부작용 있는 상수** | 가지 안 `시리얼.NEXT_VALUE + ?`, `RANDOM() + ?`, `SYS_GUID()`, `SYSDATE + ?` — 값 대신 **횟수·DISTINCT 수·범위** 를 본다 | 시리얼 소비 횟수·DISTINCT 수가 행 수와 달라진다(선계산된 것) |
+| **구조 조합** | 뷰(식 푸시다운·세션변수 읽는 뷰·GROUP BY/UNION 뷰), 계층 뷰 위 윈도우, 윈도우 뷰 위 CONNECT BY, 3단 서브쿼리, CTE+EXISTS, MERGE(DELETE 절·GROUP BY/윈도우 소스), INSERT…SELECT, 다중 VALUES, ON DUPLICATE KEY, REPLACE | 특정 구조에서만 로드·실행 오류(예: CONNECT BY + `?` 가진 파생 테이블) |
+| **재컴파일 경로** | 같은 문장을 (a) 새 PREPARE→EXECUTE (b) `/*+ RECOMPILE */` 힌트 (c) PREPARE → 그 테이블 `ALTER ADD COLUMN`/`CREATE INDEX` → EXECUTE (d) `max_plan_cache_entries=0` 로 돌려 비교. (b)(c)는 **바인드 값을 아는 상태의 재컴파일**이라 첫 PREPARE 와 다른 스트림이 간다 | (a) 는 정상인데 (b)(c)(d) 에서만 다르다 |
+| **리터럴 단독** | 바인드 없는 리터럴 문장(`SUM(NULL)`, `CAST(NULL AS …)` 인자)도 세트에 넣고 **raw diff 줄수**를 본다 — 짝 분류기는 리터럴 단독 diff 를 못 잡는다 | 짝 분류는 0 diff 인데 raw diff 줄수가 0 이 아니다 |
+| **모드 on/off** | `modes.sh`: 기본 / oracle 호환 / concat·escape·normalization·string_max / `max_plan_cache_entries=0` / `max_plan_cache_clones=0` (+ `review-testing` §1-1 의 신호별 모드) | 모드에 따라 원인 오류 대신 내부 오류 코드, 오류 인자가 빈 문자열 |
+| **세션 파라미터** | `SET NAMES`, `SET SYSTEM PARAMETERS`, 세션변수 `@v` 타입 바꿈(INT→'3'→2.5→NULL), 같은 PREPARE 유지 | 같은 PREPARE 결과가 바뀐 세션 값·타입을 PR 본문 의도와 다르게 따른다 |
+| **실행 사이 스키마 변경** | 같은 PREPARE 두고 `ALTER TABLE MODIFY` 타입 변경·`CREATE INDEX`·`ADD COLUMN`·`UPDATE STATISTICS` | 재실행이 새 열 타입을 따라가지 않는다 |
+| **특수 타입** | ENUM·SET·JSON·BIT VARYING·DATE/TIME/TIMESTAMP/DATETIME 교차, 날짜 산술, 인덱스 키 변환(10 / 10.0 / '10' / ' 10' / '1e1'), 바인드 IN(≤200개 — 메모리-과다-테스트-금지), `LIMIT ?, ?` | develop 과 다른 값·오류 |
+| **수명·메모리** | `lifetime.sh`: 문장 1000개 PREPARE/EXECUTE×4/DEALLOCATE + 고유 문장 200개 × 6라운드, 오류 경로 600회 × 3 | RSS 가 1라운드 뒤에도 오른다, plandump churn 비정상 |
+| **PL/Java** | `loadjava` + `CREATE FUNCTION` + PREPARE 로 인자 타입 확인 함수(`BigDecimal.scale()` 등) | 받는 인자 타입이 develop 과 다르다(`int` 원시 인자 NULL 은 설계 오류) |
 
 ## 2. 절차
 1. **스키마 하나를 고정**한다(예: `t1` 8행 — INT·BIGINT·SHORT·FLOAT·DOUBLE·NUMERIC·MONETARY·CHAR·VARCHAR·BIT·DATE·TIME·TIMESTAMP·DATETIME·ENUM·JSON·SET·SEQUENCE + NULL 행 + 그룹 열). 세트 파일은 축 하나에 하나, 문장마다 `EXECUTE` 4~6회(타입 회전 + 재사용 + NULL).
@@ -40,13 +43,14 @@ description: 적대적 SQL 차분 테스트 — 같은 SQL 세트를 develop·PR
 3. **diff 를 분류**한다 — 이게 산출물이다.
    - **PR 결함**: develop 정상 / PR 오류·오답, 재현이 바인드 값과 무관하면 🔴. 소스에서 raise 지점을 찾아 조건까지 적는다(예: `domain_plan_validate()` 엄격 검사).
    - **스펙 변경**: 둘 다 설명 가능한데 답이 다름(조용히 0행 → 오류, 결과 타입 변경). 🟡 "스펙 목록에 적어 달라".
-   - **develop 결함을 PR 이 고침**: 리터럴·새 PREPARE 로 정답을 확인해 PR 이 맞음을 증명. ✅ — **게시는 사용자가 정한다**(2026-10-07: "8022 잘못인 것만 게시"). 문서에는 전부 남긴다.
+   - **develop 결함을 PR 이 고침**: 리터럴·새 PREPARE 로 정답을 확인해 PR 이 맞음을 증명. ✅ — **게시는 사용자가 정한다**(2026-10-07: "8022 잘못인 것만 게시"). 문서에는 각주로 남긴다.
+   - **develop 선재**(develop 에서만 깨지고 PR 과 무관): 위 「목표」대로 한 줄 — TC·지적으로 만들지 않는다.
    - **테스트 설계 오류**: 문법 미지원(`ROWS BETWEEN ? PRECEDING`, `SYS_CONNECT_BY_PATH(nm, ?)`, `PRIOR LEVEL`, `ORDER BY ?`, `GROUP BY ?`), csql 이 `EXECUTE … USING` 에 SET 리터럴을 못 받음, `int` 원시 인자 NULL, 같은 INSERT 반복의 유일키 위반. 고쳐서 다시 돌린다.
    - **비결정**: 난수·OID·시간 — 정규화하거나 성질(횟수·범위)로 비교.
 4. **좁힌다**: 걸린 문장 하나를 변형 8~12개로(한 요소씩 빼 보기) — "되는 모양" 목록이 원인 지목과 TC 대조군이 된다.
-   **보고·코멘트에 싣는 재현은 최소 테이블**이다(사용자 지시 2026-10-08). 테이블·조건을 하나씩 빼서 현상이 남는 가장 작은 모양을 쓰고, 별칭은 역할(`o` 바깥 / `i` inner)로, self join 은 꼭 필요할 때만, 부질의에만 나오는 표는 조인 대상이 아니라고 적는다. 이슈 원문의 세 테이블 질의를 그대로 옮기면 읽는 쪽이 조인 순서부터 헷갈린다(PR#8114).
+   **보고·코멘트에 싣는 재현은 최소 테이블**이다(사용자 지시 2026-10-08). 테이블·조건을 하나씩 빼서 현상이 남는 가장 작은 모양을 쓰고, 별칭은 역할(`o` 바깥 / `i` inner)로, self join 은 꼭 필요할 때만, 부질의에만 나오는 표는 조인 대상이 아니라고(역할을) 적는다. 이슈·TC 원문 질의는 옮기지 않고 링크만 — 원문 세 테이블을 그대로 보여 주면 조인 순서부터 헷갈린다(PR#8114).
 5. 동시성은 `concurrent.sh`, 모드는 `modes.sh`, 수명은 `lifetime.sh`. 세 가지 모두 **기준도 같은 방식으로** 돌려 develop 의 선재 결함과 가른다(동시 실행은 재기동 단독이 기준 — 캐시가 남은 단독은 이미 오염돼 있다).
-6. 기록: 세트·출력·diff 는 `projects/<이슈>/repro/`, 결과는 `도메인해석-난이도테스트-<날짜>.md` 꼴의 표(축 / 재현 / develop / PR / 판정). 게시는 `review-response` 규약(초안 → 승인 → 인라인 또는 요약 코멘트, "왜 문제가 되는지" 포함).
+6. 기록: 세트·출력·diff 는 `projects/<이슈>/repro/`, 결과는 `도메인해석-난이도테스트-<날짜>.md` 꼴의 표(축 / 재현 / PR 자기 일관성 / PR = develop / 판정 — develop 결함은 각주, 2026-10-12). 게시는 `review-response` 규약(초안 → 승인 → 인라인 또는 요약 코멘트, "왜 문제가 되는지" 포함).
 
 ## 3. 함정 (전부 실제로 데인 것, 2026-10-07)
 - `csql -i -` 미지원 → 임시 파일. "Too many prepared statements" → 문장마다 `DEALLOCATE PREPARE`.

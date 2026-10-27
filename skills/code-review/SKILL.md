@@ -7,14 +7,16 @@ description: CUBRID 엔진 C/C++ 변경의 구현 리뷰 — 정확한가, 핫�
 
 설계 리뷰(`design-review`)와 층이 다르다 — 여기서는 **이 코드가 맞게·빠르게 쓰였나**만 본다.
 "여기가 맞는 자리인가"가 한 번이라도 떠오르면 `design-review` 를 연다.
+**하네스로 할 때는 `/harness-review <PR>`** — 실행 절차·산출물의 정본은 그 스킬이고, 이 스킬은 판단 기준이다.
 
 ## 0. 먼저 구분
-- **내(soheejung-cs) PR**: 고칠 수 있다. 답글·resolve 규칙은 `review-response`.
+- **내 PR**(PR author 가 현재 `gh` 로그인 사용자): 고칠 수 있다. 답글·resolve 규칙은 `review-response`.
 - **타인 PR**: 코드 수정 금지. 코멘트는 게시하지 않고 사용자에게 보고 → 승인 후에만.
-- **`.51` 컨테이너(리뷰 전용, 팀 공유 계정 예정)에서는 내 PR 도 타인 PR 로 취급한다**(사용자 지시 2026-09-16): 코드 수정 없이 코멘트만, 앞선 리뷰가 이미 지적·수정한 것은 HEAD 반영만 확인하고 재지적하지 않는다. 미응답 스레드에는 구체안으로 답글.
+- 컨테이너 예외: `.51` 에서는 내 PR 도 타인 PR 로 취급한다(사용자 지시 2026-09-16) — 정본 `claude-workspace/hosts/51.md` 「용도」.
 
 ## 1. 곁에 둘 자료 (열지 않고 리뷰하지 않는다)
-**먼저 `rules/성능-리뷰-규칙.md`** — 레퍼런스를 요약한 한 문서(§2 의무 항목 → §3 축별 표). 표가 diff 에 안 맞을 때만 아래 원문을 편다.
+**시작할 때 `references/자가진화-규칙.md` 에서 이 PR 이 건드린 축의 규칙을 훑는다**(판단 규칙의 정본, 2026-10-23).
+그다음 **`rules/성능-리뷰-규칙.md` 의 §2 의무 항목과 diff 가 건드린 축의 §3 표만** 연다(레퍼런스를 요약한 한 문서). 표가 diff 에 안 맞을 때만 아래 원문을 편다.
 1. **소스 지식** — `~/dev/docs/dev4-ai-source/modules/<모듈>.md` §2(분석)·§3(예비 이슈)·리뷰 체크포인트, 그 디렉터리 `AGENTS.md`. **pull 먼저.**
    이미 규명된 함정을 다시 밟거나, 미수정 상태를 정상으로 가정하는 것을 막는다.
 2. **성능 규칙집** — `references/C-Cpp-성능규칙집.md` (심링크 `~/.claude/성능규칙집.md`). 2568줄이라 통째로 읽지 않는다:
@@ -23,17 +25,13 @@ description: CUBRID 엔진 C/C++ 변경의 구현 리뷰 — 정확한가, 핫�
    12 DS L1790 / 13 STR L1852 / 14 SER L1891 / 15 CC L1934 / 16 SYS L2022 / 17 안티패턴 L2070 / 19 우선순위 L2264 /
    **20 PHYS 물리설계·빌드비용 L2318**(리팩터링·모듈 분리 리뷰에서. 핫패스와 부딪히면 성능 장 우선, PHYS-05).
    L24~40 에 이 저장소에서 **반복 적발된 축**이 사례와 함께 있다 — 옵티마이저·실행기·통계 코드면 여기부터.
+   **지적에 인용하는 ID 는 `rules/성능-리뷰-규칙.md` 표에 있는 것**(하네스 판정기가 아는 ID)이다 — 규칙집은 근거 열람용이고, 거기에만 있는 ID 를 쓰면 판정기가 "모르는 규칙 ID" 로 본다.
 3. 물리 설계·저지연 배경이 필요하면 `references/대규모Cpp-물리설계-Lakos.md`, `저지연패턴-HFT*.md`, `서버사이드-성능검토.md`.
 4. **래치·락·B트리 구조**를 건드리면 `rules/설계-리뷰-규칙.md` **§9 BTL 표**로 먼저 판정한다(`BTL-03 위반` 형태로 인용).
    근거가 더 필요할 때만 `references/B트리락킹-Graefe서베이.md` 를 **§0 진입표를 통해** 연다 — 통째로 읽지 않는다.
 
-## 2. 규칙집 사용 규약 (규칙집 L10~23, 어기면 리뷰가 아니다)
-- **측정 근거 없는 최적화 제안 금지.** 데이터가 없으면 "측정 먼저".
-- **핫패스/콜드패스를 먼저 구분.** 에러 처리·초기화·종료에는 성능 규칙을 적용하지 않는다(가독성 우선).
-- 우선순위 **정확성 > 메모리 안전성 > 가독성 > 성능.** 성능을 위해 UB 를 도입하지 않는다.
-- **C 코드에 모던 C++ 관용구를 제안하지 않는다** (`.c` 가 C++17 로 컴파일돼도 C 스타일).
-- 정량으로 — "빠르다"가 아니라 "캐시 미스 N회 감소". 임계값은 기준선이며 실측으로 조정.
-- **규칙은 ID 로 인용한다** (`MEM-03 위반`). ID 가 있어야 리뷰가 검증 가능하다.
+## 2. 규칙집 사용 규약 (어기면 리뷰가 아니다)
+정본 `rules/성능-리뷰-규칙.md` §0(규칙집 L10~23 의 8항). 요지: **측정 근거 없는 최적화 제안 금지**(데이터가 없으면 "측정 먼저") · **핫패스/콜드패스 먼저**(콜드패스엔 성능 규칙을 적용하지 않는다) · 정확성 > 메모리 안전성 > 가독성 > 성능(성능을 위해 UB 금지) · **C 코드에 모던 C++ 관용구 금지** · 정량 근거 · **규칙은 ID 로 인용**(`MEM-03 위반`).
 
 ## 3. 정확성 리뷰의 순서 — 재현이 먼저
 1. 지적(내 것이든 리뷰어 것이든)이 결함 주장이면 **수정 전 빌드에서 재현**한다. 증거 없이 고치지 않는다.
@@ -73,11 +71,9 @@ description: CUBRID 엔진 C/C++ 변경의 구현 리뷰 — 정확한가, 핫�
 
 ### §2 변경 지도는 **변경 함수 전수**다 (사용자 지시 2026-10-06)
 "어디 파일의 어디 함수가 원래 무슨 기능이었고, 지금은 무슨 기능이고, 뭘 바꿨는지" 를 읽는 사람이 알아야 한다.
-`findings` 는 **결함**만 담는 그릇이라 이게 들어갈 자리가 없다 — 그래서 `function_notes`(스키마 `harness/schemas/review_output.json`)를
-따로 받아 보고서 §2 에 **파일 → 함수 표**로 전부 깐다. 결함이 없는 함수도 쓴다.
-
-> 실패 사례: PR#8022(89파일 856함수) 보고서가 **24파일만 언급하고 함수명은 3종**뿐이었다.
-> 에이전트가 `source_facts` 183 + `verified_ok` 163 을 이미 모아 놓고도 종합에서 버렸다.
+`findings` 는 **결함**만 담는 그릇이라 `function_notes`(스키마 `harness/schemas/review_output.json`, 쓰는 법은 preamble 지시 3-5)를
+따로 받아 보고서 §2 에 **파일 → 함수 표**로 전부 깐다. 결함이 없는 함수도 쓴다(계기: PR#8022 보고서가 89파일 중 24파일·함수명 3종만 언급).
+하네스 없이 리뷰할 때도 지적의 필드(why·proposal·verification·evidence·rule_ids)는 스키마 `harness/schemas/finding.json` 을 따른다.
 
 ### 한국어 주석 리뷰 PR (`annotate`)
 `function_notes` 를 PR head 소스에 `/* [리뷰] … */` 로 심어 **fork 안에** draft PR 을 연다 —
@@ -86,17 +82,12 @@ Files changed 한 화면에서 원 변경 + 한국어 설명 + 지적 번호를 
 python3 -m tools.harness.annotate --pr <N> --head <sha> --notes notes.json --push --pr-create
 ```
 base `review/pr<N>-base`(merge-base) ← head `review/pr<N>-ko`(PR head + 주석 커밋).
-**upstream 에 열지 않는다** — 팀 PR 목록·알림에 끼지 않게 fork(`soheejung-cs/cubrid`) 안에서 연다.
-**게시 승인을 요청할 때** §0 의 "사용자가 보게 되는 변화"(스펙·오류 코드·매뉴얼)가 비어 있지 않으면 그것만 `스펙 변화 확인:` 블록(AS-IS → TO-BE, 의도/부수)으로 다시 짚는다(메모리 `스펙변화-리마인드`). 확인 퀴즈는 내지 않는다(2026-10-23 폐지).
+**upstream 에 열지 않는다** — 팀 PR 목록·알림에 끼지 않게 내 fork(`<gh 로그인>/cubrid`) 안에서 연다.
+**게시 승인을 요청할 때** §0 의 "사용자가 보게 되는 변화"(스펙·오류 코드·매뉴얼)가 비어 있지 않으면 그것만 `스펙 변화 확인:` 블록(AS-IS → TO-BE, 의도/부수)으로 다시 짚는다(메모리 `스펙변화-리마인드`).
 
-**보고서**: `imports/xmilex-git/skills/cubrid-pr-review/SKILL.md` 형식(TL;DR 판정 / Summary / Findings / JIRA / Existing Comments, 80줄 상한, 이모지·화살표 기호 금지, 한 지적 = 파일:라인 + 한 문장 + 근거)을 따르되 **Findings 를 `### [설계 리뷰]` 와 `### [코드 리뷰]` 로 나눈다**(설계 층은 영역 판정 문장으로 시작, 코드 층은 Blocking / Non-blocking / Questions). 끝에 `## 돌릴 것 (제안 -- 확인 후 실행)` 을 붙여 `review-testing` 매트릭스 제안을 적고 요청자 확인을 받는다. 리뷰를 마칠 때 `skills/self-evolution` 루프를 돌려 `[회고 및 자가진화 리포트]`(RCA·사이드이펙트 도감·신규 규칙·하네스 반영)를 덧붙이고 규칙은 `references/자가진화-규칙.md` 에 등록한다(2026-10-23). 예: `examples/리뷰보고서-예시-PR7899.md`. 보고서는 `claude-workspace/projects/<JIRA>/리뷰보고서-PR<n>.md` 에도 둔다(보드가 찾는다).
-
-**보고서 형식·영문 체크리스트(들여온 것)**: `imports/xmilex-git/skills/cubrid-pr-review/SKILL.md`(한국어 리뷰 보고서 TL;DR/Findings 형식, 예 `imports/xmilex-git/review-reports/`), `imports/xmilex-git/skills/cpp-perf-rules/CHECKLIST.md`(§18 영문 체크리스트, ID 동일). 원 작성자 xmilex-git.
+**보고서 본문**: 지적(Findings)은 **`### [설계 리뷰]` 와 `### [코드 리뷰]` 로 나눈다**(설계 층은 영역 판정 문장으로 시작). **한 지적 = 파일:라인 + 한 문장 + 근거**, 중요도는 `review-response` 「게시 형식」 의 🔴/🟡/🟢. 끝에 `## 돌릴 것 (제안 -- 확인 후 실행)` 을 붙여 `review-testing` 매트릭스 제안을 적고 요청자 확인을 받는다. 리뷰를 마칠 때 `skills/self-evolution` 루프를 돌려 `[회고 및 자가진화 리포트]`(RCA·사이드이펙트 도감·신규 규칙·하네스 반영)를 덧붙이고 규칙은 `references/자가진화-규칙.md` 에 등록한다(2026-10-23). 예: `examples/리뷰보고서-예시-PR7899.md`. 보고서는 `claude-workspace/projects/<JIRA>/리뷰보고서-PR<n>.md` 에 둔다(보드가 찾는다).
 - 답글: `review-response` 스킬 형식으로 **사용자 검토 후** 게시.
-- 새로 확인한 코드 사실 → `dev4-ai-source/staging/환류대기.md` (`record` 스킬).
-
-## 하네스로 시작하기 (2026-09-16)
-리뷰 전에 `python3 -m tools.harness.run full --pr <n>` 을 돌려 `out/<pr>/<sha>/` 의 **`preamble.md`**(지시·의무 항목·자동 MEAS·arch 요약·스키마)를 한 번 읽고 **`review_request.batch<N>.md`**(팩)를 번호 순으로 읽는다(배치가 하나면 `review_request.md` 하나로 자립). 배치가 많으면 `batch_index.md` 의 배치별 파일·그룹 제안을 먼저 본다. 지적은 `findings.json`(스키마 `harness/schemas/finding.json`, `layer` 로 코드/설계 구분) 으로 쓰고 `run full --pr <n> --findings <파일>` 로 판정·report.md·episodic 까지 이어간 뒤 보고서를 다듬는다. 설계: `arch.json`/`arch.mmd` 의 계층 간선과 리스크를 인용한다. 상세 `harness/ARCHITECTURE.md`.
+- 새로 확인한 코드 사실 → `dev4-ai-source/staging/<이름>-<이슈>.md` (`record` 스킬, 규약 `staging/README.md`).
 
 ## 단위 테스트 (모든 리뷰, 사용자 지시 2026-10-16)
-하네스 없이 리뷰할 때도 같다 — 버그 가능성 🟡 이상은 `tools/harness/unitseam.py` 로 head/base 를 돌려 확인하고, 핵심 신설·변경 함수의 `[contract]` suite 를 `unit/<module>/<suite>/` 에 쌓는다. 절차는 `agents/harness-unit.md`, 규칙은 `unit/README.md`.
+하네스 없이 리뷰할 때도 같다 — 절차 정본은 `harness-review` 절차 3-1(버그 가능성 🟡 이상은 `tools/harness/unitseam.py` 로 head/base 확인, 핵심 신설·변경 함수의 `[contract]` suite 를 `unit/` 에 쌓기).

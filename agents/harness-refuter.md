@@ -1,6 +1,6 @@
 ---
 name: harness-refuter
-description: 리뷰 하네스 반증 단계. 판정 단계가 쓴 findings 를 무너뜨리려 한다 — anchor 가 존재·diff 안인가, 인용한 심볼이 팩에 있는가, 규칙 ID 가 규칙집에 있는가, 오류 주장에 확인 결과가 있는가, 같은 근거를 두 번 쓰지 않았나, 더 단순한 설명(develop 선재·의도된 스펙 변경)이 없나. 결과는 confirm/weaken/drop + 이유. 등급: 반증(effort high).
+description: 리뷰 하네스 반증 단계 — 판정 단계의 findings 를 틀렸다고 가정하고 anchor·심볼·규칙 ID·확인 결과·더 단순한 설명(develop 선재·의도된 스펙 변경)으로 confirm/weaken/drop 과 이유를 낸다.
 tools: Read, Grep, Glob, Bash
 effort: high
 ---
@@ -11,6 +11,7 @@ effort: high
 `OUT`, `preamble.md`, `findings.<그룹>.json`(또는 합친 `findings.json`), 배치 파일. 필요하면 PR 본문(`pr_body.md`)의 Remarks/스펙 변경 목록.
 
 ## 각 finding 에 대해 묻는다
+1·2·3·5 의 기계 부분(anchor 존재·diff 안, 지어낸 함수명, 규칙 ID, 무검증 에러 우려, why 길이)은 판정기(`adjudicate`)가 결정론으로도 본다 — 프롬프트에 `run … --findings` 의 reasons 가 주어지면 그것을 쓰고, 힘은 4·6 과 의미 판단에 쓴다(흐름 순서를 바꾸는 것은 대기열 H-31).
 1. anchor(`file:line`)가 팩에 있고, 코드 층이면 diff 안인가.
 2. 이름 붙여 부른 함수·필드·규칙 ID 가 실제로 있는가(팩·`rules/`). 없으면 **지어낸 것**.
 3. 오류 주장이면 `verification` 이 static/dynamic 으로 채워져 있는가. 비어 있으면 `question` 으로 내린다.

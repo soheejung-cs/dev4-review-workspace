@@ -2,6 +2,8 @@
 
 대상: CUBRID C/C++ 엔진의 **설계 리뷰**와 **패치 리뷰**. 두 하네스는 initialize·context·adjudicate 를 공유하고, 설계용만 `infer` 단계를 더 갖는다. 레퍼런스(`rules/`, `references/`)는 공유. TC 변경·CI 분석은 `dev4-tc-workspace` 로 분리.
 
+목차: §1 한 장 그림 · §2 Metis 에서 가져온 것 · §3 Azure 에서 가져온 것 · §4 코드 패턴 · §5 통합 실행(full)과 두 층의 경계(서브에이전트 분해, 하네스가 `references/` 를 읽지 않는 이유) · §6 v2 모듈 · §7 알려진 한계 · §8 정직한 신호와 부가 검사
+
 ## 1. 한 장 그림
 
 ```
@@ -81,12 +83,11 @@ with Worktree(repo, sha, base) as wt:      # git worktree add --detach; __exit__
 DB 서버·CTP 는 이 CLI 가 띄우지 않는다(`review-testing` 스킬의 요청자 확인 절차). 띄우게 되면 같은 패턴의 `ServerSession` 컨텍스트 매니저로 기동/정지·`databases.txt` 복원·conf 복원을 묶는다(META-REVIEW §3 의 리팩토링 항목).
 
 ## 5. 통합 실행(full) 과 두 층의 경계
-\* `self_check` 는 `HARNESS_COMPILE_COMMANDS`(기본: 빌드트리의 `compile_commands.json`)가 없으면 **조용히 건너뛴다**
-  — `ran=False`. 그 상태에서는 "게이트 OK" 가 컴파일 확인을 뜻하지 않는다. 만드는 법은 README 의 `ninja -t compdb` 한 줄.
+\* `self_check` 는 `HARNESS_COMPILE_COMMANDS`(기본: 빌드트리의 `compile_commands.json`)가 있으면 그 명령으로 `-fsyntax-only`, 없거나 비어 있으면(goto 빌드 디렉터리) **ninja 오브젝트 타깃으로 실제 컴파일**한다(`adjudicate.self_check_ninja` — 빌드 디렉터리가 가리키는 메인 체크아웃 소스만). 건너뛴 검사가 있으면 `GATE OK*` 로 찍힌다. `compile_commands.json` 만드는 법은 리포 README 의 `ninja -t compdb` 한 줄.
 
-`run full --pr N` 은 리뷰용·설계용을 **한 번**에 돈다: initialize → context(성능 규칙 행 + 설계 불변조건 + episodic) → infer(arch) → **review_request**(LLM 입력: 공통 지시·두 규칙의 의무 항목·자동 MEAS finding·arch 요약·finding 스키마는 `preamble.md` 에 **한 번**, 컨텍스트 팩은 `review_request.batch<N>.md` 에 배치별 — 배치가 하나면 둘을 합친 `review_request.md`. 배치 지도·그룹 제안은 `batch_index.{md,json}`. **배치 번호 N 은 `context_pack.batch<N>.md` 의 N 과 같다** — 2026-10-02 이전 산출물은 파일명 문자열 정렬 때문에 10번부터 어긋나 있다) → [LLM 이 findings.json 작성] → `--findings` 로 verify(validate→gate→self_check→report.md) → memory(episodic). 층 구분은 finding 의 `layer` 필드와 게시 코멘트 첫 줄 태그로만 남는다. review/design/adjudicate yaml 은 이 그래프의 부분집합이다(디버그용).
+`run full --pr N` 은 리뷰용·설계용을 **한 번**에 돈다: initialize → context(성능 규칙 행 + 설계 불변조건 + episodic) → infer(arch) → **review_request**(LLM 입력: 공통 지시·두 규칙의 의무 항목·자동 MEAS finding·arch 요약·finding 스키마는 `preamble.md` 에 **한 번**, 컨텍스트 팩은 `review_request.batch<N>.md` 에 배치별 — 배치가 하나면 둘을 합친 `review_request.md`. 배치 지도·그룹 제안은 `batch_index.{md,json}`. **배치 번호 N 은 `context_pack.batch<N>.md` 의 N 과 같다**) → [LLM 이 findings.json 작성] → `--findings` 로 verify(validate→gate→self_check→report.md) → memory(episodic). 층 구분은 finding 의 `layer` 필드와 게시 코멘트 첫 줄 태그로만 남는다. review/design/adjudicate yaml 은 이 그래프의 부분집합이다(디버그용).
 
-> **단위 테스트는 리뷰의 표준 단계다**(사용자 지시 2026-10-16): `run full` 의 context 단계 `unit_regress` 가 `unit/` suite 를 head/base 에 자동으로 돌리고(결과는 preamble·report), LLM 구간에서는 `harness-unit` 이 🟡 이상 지적을 동적으로 확인하고 핵심 함수의 `[contract]` suite 를 쌓는다. 리뷰할수록 `unit/` 이 커지고 다음 PR 의 회귀 신호가 된다.
+> **단위 테스트는 리뷰의 표준 단계다**(사용자 지시 2026-10-16) — 결정론 구간은 `run full` 의 context 단계 `unit_regress`(결과는 preamble·report), LLM 구간은 `skills/harness-review/SKILL.md` 절차 3-1(정본).
 
 ### 두 층의 경계(finding 단위)
 | | 리뷰용(review) | 설계용(design) |
@@ -126,15 +127,10 @@ DB 서버·CTP 는 이 CLI 가 띄우지 않는다(`review-testing` 스킬의 �
 - 매크로(`NET_SERVER_REQUEST_ITEM`)가 함수로 잡힌다; 함수 포인터·가상 호출 미해석; `changed+1` 범위 밖 호출은 `root(no caller resolved)`.
 - `gate-imbalance`(카운트)는 여전히 오탐 가능; 팩에는 변수 단위 짝(`pairing by variable`)이 함께 실려 LLM 이 대조할 수 있다. CFG 경로별 검사는 미구현.
 
-## 2026-09-30 추가 — 정직한 신호
-- codegraph 는 파일별 **파서가 잃은 줄 비율**(`parse_quality`, ERROR 노드 안이면서 어떤 function_definition 도 덮지 않는 줄)을 manifest 에 적고, 한 파일이라도 10% 를 넘으면 `codegraph_complete=false`. C 문법이 잃으면 C++ 문법으로 재시도(.c 도 C++ 로 컴파일되는 저장소). 세미콜론 없는 최상위 매크로 호출 줄은 파싱 전에 지운다. 남은 한계: list_file.c·page_buffer.c·file_io.c 는 15~21% 를 잃는다(C++ 구문 혼재) — 그 파일의 팩·관문 판정은 불완전할 수 있다.
-- implement_gate 는 건너뛴 검사가 있으면 `GATE OK*`. compile_commands 가 없으면 ninja 오브젝트 타깃으로 컴파일한다(`adjudicate.self_check_ninja`).
-- 새 도구: `review_threads`(스레드 분류) · `pr_refs`(본문 참조 확인) · `compile_check`(커밋 단위 컴파일) · `tools/ab/`(A/B 표준).
-
-## 2026-09-30 라운드 3
-- 파서 품질 지표 = 잃은 함수 정의 수(휴리스틱 정의 시작, static_assert·attribute·프로토타입·연속줄 제외). `#if/#else/#endif` 로 헤더가 갈린 debug/release 쌍은 첫 헤더만 남겨 파싱. 10% 초과 **그리고** 3개 이상 잃을 때만 incomplete. 핫 파일은 0 lost(expr_compile·page_buffer·btree·heap_file·system_parameter).
-- adjudicate: `passed`(통과 의무) 기록, `mentions_resolve`(지적이 `name ()` 로 부르는 함수가 그래프에 있나).
-- pipeline: `pr_refs` 노드(context 단계), `--sha/--base` 로컬 head 리뷰, arch 의 `include_edges`(diff 의 새 `#include` → 계층 간선) + `new-include` 리스크(바닥으로 내려가면 무해, 바닥이 위를 include 하면 high).
-- self_check: 워크트리는 `ninja -t commands` 의 컴파일 명령을 빌려 `-fsyntax-only`. implement_gate `--commits` 로 커밋 단위 컴파일.
-- episodic: 로컬 판정도 적재(`source=local`), 팩의 episodic 절이 `[local valid/non-blocking]` 로 표시.
-- 라운드 3 후속: adjudicate 가 `verification.artifact` 경로 존재를 확인(static 인데 file:line 인용이 없으면 표시), arch 가 diff 의 모드 가드(`#if … SERVER_MODE|CS_MODE|SA_MODE`) 추가·삭제를 INV-3 신호로 낸다, `review_reply.py`(답글 초안 ↔ 스레드 dry-run/게시), `tools/ab/ab_pair.sh`, 작은 episodic 절은 팩 예산에서 잘리지 않음. 구조도: `harness/구조도.html`.
+## 8. 정직한 신호와 부가 검사 (현재 동작 — 도입 경위는 git log)
+- **파서 품질**: codegraph 는 파일별 `parse_quality`(잃은 함수 정의 수 — 휴리스틱 정의 시작, static_assert·attribute·프로토타입·연속줄 제외)를 manifest 에 적고, 10% 초과 **그리고** 3개 이상 잃은 파일이 있으면 `codegraph_complete=false`. C 문법이 잃으면 C++ 문법으로 재시도(.c 도 C++ 로 컴파일되는 저장소), 세미콜론 없는 최상위 매크로 호출 줄은 파싱 전에 지우고, `#if/#else/#endif` 로 헤더가 갈린 debug/release 쌍은 첫 헤더만 남겨 파싱한다. 핫 파일(expr_compile·page_buffer·btree·heap_file·system_parameter)은 0 lost. C++ 구문이 섞인 파일(list_file.c·file_io.c 등)은 줄을 잃을 수 있다 — `codegraph_parse_quality` 에 뜬 파일은 팩·관문 판정이 불완전할 수 있다.
+- **컴파일 확인**: implement_gate 는 건너뛴 검사가 있으면 `GATE OK*`. compile_commands 가 없으면 ninja 오브젝트 타깃으로 컴파일(`adjudicate.self_check_ninja`), 워크트리는 `ninja -t commands` 의 컴파일 명령을 빌려 `-fsyntax-only`. `--commits` 로 커밋 단위 컴파일(`compile_check`).
+- **adjudicate**: `passed`(통과 의무) 기록, `mentions_resolve`(지적이 `name ()` 로 부르는 함수가 그래프에 있나), `verification.artifact` 경로 존재 확인(static 인데 file:line 인용이 없으면 표시).
+- **pipeline**: `pr_refs` 노드(context 단계), `--sha/--base` 로컬 head 리뷰, arch 의 `include_edges`(diff 의 새 `#include` → 계층 간선) + `new-include` 리스크(바닥으로 내려가면 무해, 바닥이 위를 include 하면 high), diff 의 모드 가드(`#if … SERVER_MODE|CS_MODE|SA_MODE`) 추가·삭제를 INV-3 신호로.
+- **episodic**: 로컬 판정도 적재(`source=local`), 팩의 episodic 절이 `[local valid/non-blocking]` 로 표시, 작은 episodic 절은 팩 예산에서 잘리지 않음.
+- **도구**: `review_threads`(스레드 분류) · `pr_refs`(본문 참조 확인) · `compile_check`(커밋 단위 컴파일) · `review_reply.py`(답글 초안 ↔ 스레드 dry-run/게시) · `tools/ab/`(A/B 표준, `ab_pair.sh`). 구조도: `harness/구조도.html`.

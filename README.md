@@ -77,7 +77,7 @@ ls ~/.claude/skills            # 이 리포 것 11개가 들어 있어야 한다
 - **※1 review-board** — 보드 호스팅은 `.51` 의 `~/bin/review_board_publish.sh`·`~/bin/httpd_threaded.py` 로 도는데 **이 스크립트들은 어느 리포에도 없다.** 생성기(`tools/review_board_gen.py`)도 문서 링크 수집 경로가 `.51` 배치에 맞춰져 있다. 다른 컨테이너에서는 보드를 **읽기만** 한다(http://192.168.6.51:8827/).
 - **harness-review / harness-implement** — 판정 단계 일부가 아직 owner 의 프라이빗 문서 리포 경로를 가정한다. 없으면 그 단계만 비고, 나머지는 돈다. tree-sitter `.so` 가 없으면 ctags 폴백(호출 그래프 없음).
 - **oracle-reference** — 원문은 private `dev4-oracle-manual`(재배포 금지). 초대받지 않았으면 열 수 없다.
-- **review-testing** — JOB·TPC-H 실행 하네스는 벤치 데이터를 가진 컨테이너에만 있다(JOB `.51`, TPC-H `.50`). 매트릭스로 **무엇을 돌릴지 판단**하는 데까지는 어디서나 쓸 수 있다.
+- **review-testing** — JOB·TPC-H 실행 하네스는 벤치 데이터를 가진 컨테이너에만 있다(보유 컨테이너는 `claude-workspace/hosts/<끝자리>.md`). 매트릭스로 **무엇을 돌릴지 판단**하는 데까지는 어디서나 쓸 수 있다.
 
 ```
 harness/             설계용·리뷰용 하네스(pipelines/*.yaml, schemas/finding.json, ARCHITECTURE.md, META-REVIEW.md); 구현 tools/harness/
@@ -123,7 +123,7 @@ members/             팀 명단(GitHub 기준)·가입 템플릿·사람별 공�
 tools/               roster.json(추적 GitHub ID) · review_board_gen.py(review-to-do 보드)
   ab/                A/B 표준 스크립트 — pick_ref.sh(REF 후보) · ab_sa.sh(정합 byte) · ab_time.sh + ab_summarize.py(교대·median·MAD) · mkbench_numeric.sql(합성 벤치)
   harness/           review_threads.py(미해결 스레드 분류) · review_reply.py(답글 dry-run/게시) · pr_refs.py(본문 참조 PR 상태·커밋 존재) · compile_check.py(파일/커밋 단위 컴파일) · unitseam.py(리뷰용 단위 테스트: TU 단독 컴파일 + 가짜·stub, head/base 비교) — 구조도 harness/구조도.html, 나머지는 harness/ARCHITECTURE.md
-imports/xmilex-git/    송일한 워크스페이스에서 들여온 원문(PR 리뷰 스킬·영문 성능 규칙집·설계 어휘·ctp-run·PR 코퍼스) — README 에 대응표
+imports/xmilex-git/    송일한 워크스페이스에서 들여온 원문(PR 리뷰 스킬·설계 어휘·ctp-run 등) — README 에 대응표
 examples/
   리뷰답글-예시-PR7900.md      엔진 스레드 5 + TC PR 답글 2 — 문체·구조 예시
 ```
@@ -134,8 +134,8 @@ examples/
 - 각 컨테이너: `git clone https://github.com/soheejung-cs/dev4-review-workspace ~/dev/docs/dev4-review-workspace`
   후 `ln -sfn ~/dev/docs/dev4-review-workspace/references/C-Cpp-성능규칙집.md ~/.claude/성능규칙집.md`.
 - Claude Code 스킬로 등록하려면 `~/.claude/skills/<name>` → `skills/<name>` 심링크(선택).
-- **`compile_commands.json` 을 만들어 둔다(권장).** 없으면 하네스의 `-fsyntax-only` 게이트가 **조용히 건너뛴다**
-  (`self_check: ran=False`, `implement_gate` 의 `syntax: skipped`). 즉 "게이트 OK" 가 컴파일을 확인했다는 뜻이 아니게 된다.
+- **`compile_commands.json` 을 만들어 둔다(권장).** 없으면 하네스는 ninja 오브젝트 타깃으로 실제 컴파일하는 폴백을 쓰는데(`adjudicate.self_check_ninja`),
+  그 폴백은 빌드 디렉터리가 가리키는 메인 체크아웃 소스만 굽는다 — 건너뛴 검사가 있으면 `GATE OK*` 로 찍히니 `*` 를 본다.
   CMake 가 Ninja 제너레이터면 **재빌드 없이 0.1초**에 만들 수 있다(2026-09-21 실측: 1,233 엔트리 3.7MB, 0.066초):
   ```bash
   cd <빌드트리>   # 예: ~/dev/build/build_x86_64_release

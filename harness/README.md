@@ -21,11 +21,11 @@ dev4-tc-workspace/            TC 변경·CI 실패 분석(tc-analysis, gha-ci, s
 ```
 
 ## 슬래시 명령
-Claude Code 에서 **`/harness-review <PR번호>`** — `skills/harness-review/SKILL.md` 가 아래 3단계를 이 세션(LLM)이 수행하게 한다. 컨테이너에 `ln -sfn ~/dev/docs/dev4-review-workspace/skills/harness-review ~/.claude/skills/harness-review` 한 번.
+Claude Code 에서 **`/harness-review <PR번호>`** — `skills/harness-review/SKILL.md` 가 아래 3단계를 이 세션(LLM)이 수행하게 한다. 스킬 등록(`~/.claude/skills/<이름>` 심링크 일괄)은 리포 루트 `README.md` 「등록」.
 
 ## 실행 — 통합(권장)
 
-> **Python ≥ 3.7** (`dataclasses`). 기본 `python3` 이 3.6 인 컨테이너(.52)는 아래 명령의 `python3` 을 `python3.11` 로 바꿔 돌린다 — 의존성도 그 인터프리터에 (`python3.11 -m ensurepip --user && python3.11 -m pip install --user jsonschema pyyaml "tree_sitter<0.21"`). 정소희(.52) 2026-09-17
+> **Python ≥ 3.7** (`dataclasses`). 기본 `python3` 이 3.6 인 컨테이너에서도 아래 명령을 그대로 쓴다 — `tools/harness` 패키지가 3.7 미만으로 불리면 PATH 의 `python3.13`~`python3.7` 중 가장 새 것으로 같은 명령을 다시 실행한다(`94c1f78`). 의존성은 그 인터프리터에 넣는다(예: `python3.11 -m ensurepip --user && python3.11 -m pip install --user jsonschema pyyaml "tree_sitter<0.21"`).
 ```
 cd ~/dev/docs/dev4-review-workspace
 python3 -m tools.harness.run full --pr 7937                        # 1) 코드+설계+성능 입력: preamble.md(지시·스키마 1회) + review_request.batch<N>.md(팩) + batch_index.md, arch.json, findings.auto.json
@@ -45,5 +45,5 @@ python3 -m tools.harness.run adjudicate --pr 7937 --findings findings.json   # �
 재배포 금지라 이 공개 리포에는 없다 → private `soheejung-cs/dev4-oracle-manual` / 내부망 http://192.168.6.51:8827/docs/dev4-oracle-manual/ (`references/oracle-manual/README.md`).
 
 ## LLM 이 하는 일 / 하지 않는 일
-- 한다: `context_pack.md`(+ `arch.json`)만 읽고 `finding.json` 스키마로 지적을 낸다. 규칙은 ID 로 인용한다.
+- 한다: `preamble.md`(지시·의무 항목·arch 요약·스키마, 한 번) + `review_request.batch<N>.md`(팩, 번호 순 전부)만 읽고 `finding.json` 스키마로 지적을 낸다. 규칙은 ID 로 인용한다. 절차 정본은 `skills/harness-review/SKILL.md`.
 - 하지 않는다: 저장소 전체 검색, 줄 번호 추측, 판정. 판정은 `adjudicate` 가 결정론적으로 한다(anchor·evidence·rule·graph 의무).
