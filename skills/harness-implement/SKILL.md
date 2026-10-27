@@ -57,6 +57,7 @@ python3 -m tools.harness.implement_gate --plan <out>/plan.json [--base HEAD|upst
 
 ## S5. 자기 리뷰 → PR
 1. 커밋(브랜치 확인 — detached 면 `git checkout -B CBRD-n HEAD` 먼저) → `git push origin CBRD-n` → **draft PR**(PR브랜치-규칙 §3: 본문 한국어, Purpose/Implementation/Remarks, 리뷰어 지정 안 함, `gh api PATCH` 로 본문).
+   성능 PR 에 다른 DB 대비 측정이 있으면 그 수치는 **PR 본문의 절 하나**(`(머지 메시지에 넣지 않음)` 표시)에만 쓴다 — 코드 주석·커밋 메시지·머지 메시지·코멘트·답글에는 쓰지 않는다(사용자 지시 2026-10-27, 정본 claude-workspace `memory/rules/참조DB-표기.md`, guard 규칙 9·10 이 막는다).
 2. **`/harness-review <내 PR>`** 을 그대로 돈다. 🟡 이상이 나오면 게시하지 말고 고쳐 S4 부터(상한 2회). 자기 리뷰의 finding 은 PR 본문 Remarks 에 "자기 리뷰에서 걸러낸 것" 으로 한 줄 남긴다(무엇을 고쳤나). push 전엔 `python3 -m tools.harness.run full --pr <PR> --sha <로컬 rev> --base <머지 커밋>` 으로 **미push 커밋만의 팩**을 만들어 자기 리뷰한다(2026-09-30). 게이트는 `--commits base..head` 로 커밋마다 컴파일까지.
    기존 PR 이면 draft 전환·리뷰어 지정을 건드리지 않는다. 답글 초안(스레드별)·PR 본문 갱신분·resolve 요청은 `projects/CBRD-n/리뷰대응-YYYYMMDD/` 에 두고 **게시는 사용자 승인 후**(`review-response`).
 3. 사용자 승인 후 draft 해제. TC PR(`tc/pr-<n>`) 은 Merge Gate 순서(TC 먼저).
