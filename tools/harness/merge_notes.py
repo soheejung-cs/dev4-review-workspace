@@ -12,6 +12,13 @@ import argparse
 import glob
 import json
 import os
+import re
+
+
+def first_line(v):
+    """줄 번호 — 노트 에이전트가 '6622-6658' 같은 범위나 문자열로 쓰기도 해서 첫 정수를 쓴다."""
+    m = re.search(r'\d+', str(v or ''))
+    return int(m.group()) if m else 0
 
 
 def load_list(path, key):
@@ -28,7 +35,7 @@ def main():
     notes, seen, groups = [], set(), sorted(glob.glob(os.path.join(a.out, 'function_notes.*.json')))
     for p in groups:
         for n in load_list(p, 'function_notes'):
-            k = (n.get('file'), n.get('function'), int(n.get('line') or 0))
+            k = (n.get('file'), n.get('function'), first_line(n.get('line')))
             if k in seen:
                 continue
             seen.add(k)
@@ -42,12 +49,12 @@ def main():
         for n in notes:
             by_file.setdefault(n.get('file'), []).append(n)
         for f in load_list(fpath, 'findings'):
-            line = int(f.get('line') or 0)
-            cands = [n for n in by_file.get(f.get('file'), []) if int(n.get('line') or 0) <= line]
+            line = first_line(f.get('line'))
+            cands = [n for n in by_file.get(f.get('file'), []) if first_line(n.get('line')) <= line]
             if not cands:
                 unplaced.append(f.get('id'))
                 continue
-            n = max(cands, key=lambda x: int(x.get('line') or 0))
+            n = max(cands, key=lambda x: first_line(x.get('line')))
             if f.get('id') not in n['finding_ids']:
                 n['finding_ids'].append(f.get('id'))
                 attached += 1
