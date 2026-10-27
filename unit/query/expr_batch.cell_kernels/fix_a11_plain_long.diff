@@ -1,0 +1,35 @@
+--- a/src/query/expr_batch.c
++++ b/src/query/expr_batch.c
+@@ -1170,7 +1170,7 @@
+   int net, clen, dlen;
+   char *slot;
+ 
+-  if (col->max_bytes == 0 || avail < 1 + 2 * OR_INT_SIZE)
++  if (avail < 1 + 2 * OR_INT_SIZE)
+     {
+       return -1;
+     }
+@@ -1180,16 +1180,22 @@
+   dlen = OR_GET_INT (&net);
+   d += 1 + 2 * OR_INT_SIZE;
+   avail -= 1 + 2 * OR_INT_SIZE;
+-  if (clen < 0 || dlen < 0 || dlen > col->max_bytes || (clen == 0 ? dlen : clen) > avail)
++  if (clen < 0 || dlen < 0 || (clen == 0 ? dlen : clen) > avail)
+     {
+       return -1;
+     }
+   if (clen == 0)
+     {
++      /* stored as it is: the record's bytes, whatever the column's scratch */
+       *str = (const char *) d;
+       *len = dlen;
+       return 1;
+     }
++  if (col->max_bytes == 0 || dlen > col->max_bytes)
++    {
++      /* compressed, and no slot of the column's scratch holds it */
++      return -1;
++    }
+   slot = col->scratch + (size_t) col->max_bytes * (size_t) r;
+   if (!col->scratch_set[r])
+     {

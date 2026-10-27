@@ -1,0 +1,11 @@
+--- a/src/query/string_opfunc.c
++++ b/src/query/string_opfunc.c
+@@ -6062,7 +6062,7 @@
+   switch (lang_coll->byte_lockstep_kind)
+     {
+     case LANG_LOCKSTEP_UTF8:
+-      if (codeset == INTL_CODESET_UTF8)
++      if (codeset == INTL_CODESET_UTF8 || codeset == INTL_CODESET_ISO88591)
+ 	{
+ 	  return qstr_like_match_utf8;
+ 	}

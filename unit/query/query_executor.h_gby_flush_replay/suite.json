@@ -1,0 +1,25 @@
+{
+ "name": "page batch hash GROUP BY -- qexec_batch_gby_flush () replays the row path for the pending rows of cached groups (per-group row order, LRU touch by last row, the selectivity check at the row path's tuple counts) and qexec_gby_cache_add () keeps at most 512 entries with one key copy each",
+ "file": "src/query/query_executor.c",
+ "mode": "server",
+ "seams": [],
+ "appendix": "hooks.cpp",
+ "test": "test.cpp",
+ "watch": [
+  "src/query/query_aggregate.hpp",
+  "src/query/expr_batch.h"
+ ],
+ "fakes": "No seam. hooks.cpp builds a QEXEC_BATCH_GBY, an AGGREGATE_HASH_CONTEXT and a zeroed XASL_NODE by hand (cache entries at chosen slots, pend_row/pend_ent as qexec_batch_gby_consume () leaves them before a flush) and calls the real qexec_batch_gby_flush (), qexec_gby_cache_add (), qexec_gby_cache_find (), qexec_gby_cache_clear () and, through the abandon, the real qexec_hash_gby_selectivity_abandons () / qexec_hash_gby_abandon (). Fakes of other TUs: qdata_evaluate_aggregate_batch () records batch->sel/n_sel and alt_acc_list (the group); qdata_get_agg_hvalue_size () returns 0 (the batch's aggregates are fixed-width: their accumulators never change size, so the real function's delta is 0 too); mht_get () records the key pointer (the LRU touch) and returns a preset value (what cache_add looks up); qdata_save_agg_htable_to_list () counts the dump; qdata_copy_agg_hkey () callocs and counts, qdata_free_agg_hkey () counts only (the flush scenario names static keys); db_private_*_release () are malloc/realloc/free.",
+ "origin": {
+  "pr": 8196,
+  "jira": "CBRD-27361",
+  "finding": "group H function_notes (qexec_batch_gby_flush, qexec_gby_cache_add) -- contracts, no defect",
+  "reviewed_head": "2381ce437",
+  "date": "2026-10-27"
+ },
+ "requires": [
+  "qexec_batch_gby_flush",
+  "qexec_gby_cache_add"
+ ],
+ "note": "Sensitivity (2026-10-27, head 2381ce437): mutations/m1_lru_first_row.diff (the flush touches the LRU in first-row order) fails only the LRU case; mutations/m2_cap_plus1.diff (cache_add starts over at 513) fails only the cache_add case; all six PASS unmutated."
+}

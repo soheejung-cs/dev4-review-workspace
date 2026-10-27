@@ -1,0 +1,32 @@
+{
+ "name": "PR#8196 qstr_like_match_resolve () -- the page batch's LIKE matcher, chosen once per (codeset, collation), answers as qstr_like_match () (the row path), is a lockstep instance exactly where qstr_eval_like () dispatches to one, and the lockstep instances answer as the generic loop (group F contract)",
+ "file": "src/query/string_opfunc.c",
+ "mode": "server",
+ "seams": [],
+ "test": "test.cpp",
+ "extra": [
+  "src/base/language_support.c",
+  "src/base/intl_support.c"
+ ],
+ "requires": [
+  "qstr_like_match_resolve",
+  "qstr_like_match"
+ ],
+ "watch": [
+  "src/query/string_opfunc.h",
+  "src/query/like_match_lockstep.i",
+  "src/base/language_support.c",
+  "src/base/language_support.h",
+  "src/base/intl_support.c",
+  "src/query/expr_batch.c"
+ ],
+ "fakes": "envvar_get (C linkage, environment_variable.h): NULL -- no CUBRID_* variable, as lang_init_builtin () -> set_msg_lang_from_env () reads it; envvar_trim_char: the environment_variable.c body; er_set/er_errid/er_clear: the last error id. The built-in collations, their weights, strmatch functions and the byte-lockstep kinds are the real ones (language_support.c lang_init_builtin () -> lang_set_byte_lockstep_like ()); intl_support.c is real (intl_Len_utf8_char, intl_pad_char, INTL_NEXT_CHAR helpers). The generic-loop reference clears the collation's byte_lockstep_kind for the reference call only (qstr_eval_like () then takes its generic loop) and restores it.",
+ "note": "Ran 2026-10-27 on 2381ce437: 3/3 PASS (10 built-in collations x 4 codesets for the dispatch; 10 x 4,028 target/pattern pairs for resolve == qstr_like_match; 3+ lockstep collations x 4,028 pairs for lockstep == generic loop, 0 differences). Mutations (git apply via unitseam --patch): mut_resolve_codeset.diff (UTF8 instance also for an ISO88591 codeset) -> case 1 FAIL; mut_abort_true.diff (ABORT read as TRUE in qstr_like_match_utf8) -> cases 2 and 3 FAIL. base 89722cf4e has no qstr_like_match_resolve (requires).",
+ "origin": {
+  "pr": 8196,
+  "jira": "CBRD-27361",
+  "finding": "group F contract for the resolved LIKE matcher (F-04 proposes a pattern-shape kernel in front of it: this suite is the reference such a kernel must also pass)",
+  "reviewed_head": "2381ce437",
+  "date": "2026-10-27"
+ }
+}

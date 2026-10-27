@@ -1,0 +1,29 @@
+{
+ "name": "PR#8196 927a44c04 -- scan_batch_collect_chunk (): the representation-learning loop (gave_up, learn with nothing collected walks on, learn refused hands the page to the row path) + C-07 the learn runs while a chunk's peeked rows are held",
+ "file": "src/query/scan_manager.c",
+ "mode": "server",
+ "seams": [],
+ "test": "test.cpp",
+ "extra": [
+  "src/base/mem_block.cpp"
+ ],
+ "requires": [
+  "scan_batch_collect_chunk",
+  "expr_batch_plan_learn_repr"
+ ],
+ "watch": [
+  "src/storage/heap_file.c",
+  "src/query/expr_batch.c",
+  "src/query/expr_batch.h",
+  "src/query/scan_manager.h"
+ ],
+ "fakes": "heap_page_collect_visible: the head walk (heap_file.c:8215-8358) restricted to representations -- records after *slot in slot order, a repid not among repids (n_repids > 0) ends the chunk (S_SUCCESS with rows / S_DOESNT_FIT without, *slot = the slot before it, *unknown_repid set once), cap rows end a chunk, the page end is S_END; *n_rows written at return as there. expr_batch_plan_gave_up / expr_batch_fallback_why / expr_batch_plan_repids: test globals. expr_batch_plan_learn_repr: records batch->n_rows at the call (the rows the chunk holds -- peeked page pointers in the engine), accepts a learnable repid (NO_ERROR, added to the repids, as expr_batch.c:5519-5639 adds it to plan->repids) or refuses (ER_FAILED). SCAN_ID is calloc'd and never constructed; EXPR_BATCH_PLAN is a token pointer.",
+ "note": "Ran 2026-10-27 on 2381ce437: 4 [contract] PASS, [defect] C-07 PASS (learn called once with 3 rows held). With --patch fix_c07_learn_empty.diff (learn only when nothing was collected; the next call meets the record first): 4 [contract] PASS, [defect] FAIL (learn not called on the first call, 0 == 1) -- the test points at that condition only. 462e6739d: learn ran after the whole chunk (exception list) -- different loop, not targeted; base 89722cf4e: no scan_batch_collect_chunk.",
+ "origin": {
+  "pr": 8196,
+  "jira": "CBRD-27361",
+  "finding": "C-07 revised on 2381ce437 (group Z) -- learn while rows are held; contract of 927a44c04's learning loop",
+  "reviewed_head": "2381ce437",
+  "date": "2026-10-27"
+ }
+}

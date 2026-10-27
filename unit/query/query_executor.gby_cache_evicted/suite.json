@@ -19,5 +19,6 @@
  },
  "requires": [
   "qexec_gby_cache_evicted"
- ]
+ ],
+ "defects_fixed_in": "064186af8"
 }

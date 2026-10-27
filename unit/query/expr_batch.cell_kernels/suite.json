@@ -1,0 +1,34 @@
+{
+ "name": "PR#8196 페이지 배치 — 셀 판독·문자열 등가 커널(eb_str_eq_class/eb_str_eq_binary 를 collation 비교 모델과 전수 대조, eb_num_from_disk 를 numeric_agg_expr_from_disk 와 2만 건 차분, eb_cell_str_long 비압축 긴 값) 계약 + A-11 scratch 없는 열의 비압축 긴 값 거절",
+ "file": "src/query/expr_batch.c",
+ "mode": "server",
+ "seams": [],
+ "appendix": "hooks.cpp",
+ "test": "test.cpp",
+ "extra": [
+  "src/query/numeric_opfunc.c"
+ ],
+ "requires": [
+  "eb_str_eq_class",
+  "eb_str_eq_binary",
+  "eb_cell_str_long",
+  "eb_num_from_disk",
+  "numeric_agg_expr_from_disk"
+ ],
+ "watch": [
+  "src/query/expr_batch.h",
+  "src/query/numeric_opfunc.h",
+  "src/base/language_support.c",
+  "src/object/object_primitive.c",
+  "src/base/object_representation.h"
+ ],
+ "fakes": "없음 — 커널은 TU 안 static 이라 appendix 로 부른다. 문자열 등가의 기준은 lang_fastcmp_byte (language_support.c:5535-5590) 를 항등 가중치로 읽은 모델(안쪽 SPACE→ZERO, ti 없으면 길이 차이 = 불일치, ti 면 꼬리 weights_ti = 0 ↔ {0x20,0x00}) — lockstep 판정(lang_set_byte_lockstep_like: 항등 가중치·확장/축약 없음)을 받은 collation 의 경우. NUMERIC 기준은 실제 numeric_agg_expr_from_disk (extra TU). 압축 값(LZ4 stub 에 닿음)은 쓰지 않는다.",
+ "note": "head 462e6739d: [contract] 3건 PASS, [defect] A-11 1건 PASS(= 결함 재현). 변이: fix_a11_plain_long.diff(clen == 0 을 max_bytes 검사 앞으로) 적용 시 A-11 FAIL·계약 3건 PASS — 테스트가 그 조건만 가리킨다. 계약 1 은 리뷰 A-07 의 길이 먼저 순서(a07_eq_class)도 같은 모델로 대조(4글자 이하 {a,b,0x20,0x00} 전 쌍 × ti). base 89722cf4e: 대상 파일 없음(신설).",
+ "origin": {
+  "pr": 8196,
+  "jira": "CBRD-27361",
+  "finding": "A-11 (긴 비압축 문자열 거절) · A-07 (길이 먼저 순서의 동치) · 계약(셀 판독 커널)",
+  "comment": "https://github.com/CUBRID/cubrid/pull/8196",
+  "date": "2026-10-23"
+ }
+}

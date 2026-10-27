@@ -1,0 +1,33 @@
+{
+ "name": "PR#8196 그룹 E — NUMERIC 스텝 결과의 원소별 scale 바이트(eb_run_steps → eb_num_put/eb_num_get/eb_pack_dbv)를 워드 도메인 연산 결과와 대조: 0 이상 scale 계약 + E-02 음수 scale(CBRD-26006 의 NUMERIC(p, -s) 열) 의 unsigned char 랩",
+ "file": "src/query/expr_batch.c",
+ "mode": "server",
+ "seams": [],
+ "appendix": "hooks.cpp",
+ "test": "test.cpp",
+ "extra": [
+  "src/query/numeric_opfunc.c",
+  "src/compat/db_macro.c"
+ ],
+ "requires": [
+  "eb_run_steps",
+  "eb_num_get",
+  "eb_pack_dbv",
+  "numeric_agg_expr_mul",
+  "numeric_agg_expr_add"
+ ],
+ "watch": [
+  "src/query/expr_batch.h",
+  "src/query/numeric_opfunc.h",
+  "src/compat/dbtype_def.h"
+ ],
+ "fakes": "없음 — 스텝·판독·포장은 TU 안 static 이라 appendix 로 부르고, 기준은 실제 numeric_agg_expr_mul/_add·numeric_agg_expr_to_dbv·numeric_db_value_compare (extra TU). 플랜은 열 벡터(EB_VK_COL EB_N64) × 스칼라(EB_NUM) → 슬롯(EB_VK_SLOT EB_NUM, scales 배열) 스텝 하나 — eb_fused_tree ()/eb_build_program () 이 내는 모양. er_set 은 test.cpp 의 강한 정의(호출 수·마지막 오류 번호만 기록).",
+ "note": "head 2381ce437: [contract] PASS(열 scale 0/2/5 × 상수 scale 0/1/3 × add/mul 18 조합, 원소 판독·포장 = 연산 결과, er_set 0회), [defect] E-02 PASS(= 결함 재현: NUMERIC(10,-2) 열 × 25 의 결과 scale -2 가 254 로 읽히고, 포장은 db_make_numeric 이 scale 254 를 거절해 ER_INVALID_SCALE(-1373) 경고를 남기고 도메인을 (40, 0) 으로 되돌린다 — 15회). test.cpp 가 er_set 을 세는 강한 정의로 둔다(스텁 abort 대신). 변이: fix_e02_short_scales.diff(EB_VEC.scales 를 short 로, expr_batch_init 의 행당 바이트·할당 맞춤) 적용 시 [defect] FAIL(차이 0)·[contract] PASS. hooks.cpp 는 scales 배열을 decltype 으로 넣어 두 원소형 모두에서 컴파일된다. base 89722cf4e: 대상 파일 없음(신설).",
+ "origin": {
+  "pr": 8196,
+  "jira": "CBRD-27361",
+  "finding": "E-02 (음수 scale 의 NUMERIC 스텝 결과가 unsigned char scale 바이트에서 256+s 로 읽힘) · 계약(0 이상 scale 의 스텝 결과 판독·포장)",
+  "comment": "https://github.com/CUBRID/cubrid/pull/8196",
+  "date": "2026-10-27"
+ }
+}

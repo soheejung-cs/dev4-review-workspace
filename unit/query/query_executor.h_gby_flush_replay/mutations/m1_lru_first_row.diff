@@ -1,0 +1,11 @@
+--- a/src/query/query_executor.c	2026-10-27 13:47:45.437105051 +0900
++++ b/src/query/query_executor.c	2026-10-27 13:47:45.461105050 +0900
+@@ -12753,7 +12753,7 @@
+     {
+       int v = st->order[k], m = k - 1;
+ 
+-      while (m >= 0 && st->cache[st->order[m]].last > st->cache[v].last)
++      while (0 && m >= 0 && st->cache[st->order[m]].last > st->cache[v].last)
+ 	{
+ 	  st->order[m + 1] = st->order[m];
+ 	  m--;

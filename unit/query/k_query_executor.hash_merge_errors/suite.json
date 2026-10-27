@@ -1,0 +1,26 @@
+{
+ "name": "PR#8196 GROUP BY leftovers' hash merge error paths -- qexec_gby_hash_merge () frees the job's two sort lists only after every partition went through (K-01: an interrupted split or a failing partition leaves them, m_qlist_count one up each), qexec_gby_merge_sample_groups () takes a read error for the list's end (K-02); contracts: open_parts/free_parts give back every list, a run without error leaves only ctx->part_list_id",
+ "file": "src/query/query_executor.c",
+ "mode": "server",
+ "seams": [],
+ "appendix": "hooks.cpp",
+ "test": "test.cpp",
+ "watch": [
+  "src/query/query_aggregate.hpp",
+  "src/query/list_file.h",
+  "src/query/query_list.h"
+ ],
+ "fakes": "test.cpp: qfile_open_list () callocs a list id and counts it live, qfile_free_list_id () takes a live one back (one it did not hand out -- the caller's own list_id / part_list_id -- is only noted), qfile_destroy_list () / qfile_close_list () no-ops (the real destroy clears the id; the free that follows returns it), qfile_open_list_scan () / qfile_scan_list_next () walk a list's tuple_cnt fake 16-byte tuples (k_scan_limit cuts the walk, then k_scan_end: S_END or S_ERROR), qfile_add_tuple_to_list () counts a tuple into the list and fails at call k_add_fail_at with ER_INTERRUPTED (what qfile_allocate_new_page () sets for an interrupted query), fetch_val_list () NO_ERROR, qdata_hash_agg_hkey () = a hash of the fake tuple's running number modulo k_groups, qdata_agg_hkey_eq () true (one key per hash), qdata_key_sketch_estimate () = k_groups, mht_count () 0, parallel_query::compute_parallel_degree () 1, qdata_evaluate_aggregate_list () / qdata_save_agg_hentry_to_list () NO_ERROR, qfile_copy_list_id () a struct copy, db_*_ostk_heap / db_ostk_alloc a malloc'd block list, db_private_*_release () malloc/free, er_set/er_errid/er_clear record the code, prm_Def agg_hash_respect_order = yes (the default) and max_agg_hash_size = 32 KB. hooks.cpp builds GROUPBY_STATE / AGGREGATE_HASH_CONTEXT / XASL_NODE (BUILDLIST, Q_ALL, one key, no aggregate) and a zeroed thread entry. Real: the merge's code in query_executor.c (sample, hash_merge, part_of, open/free list and parts, split, partition, fold, rows, partials, mtable_*, collapse, arena wrappers, qexec_build_agg_hkey).",
+ "origin": {
+  "pr": 8196,
+  "jira": "CBRD-27361",
+  "finding": "K-01 (job.to_sort_rows/partials not freed on the merge's error paths), K-02 (sample takes S_ERROR for the list's end)",
+  "reviewed_head": "2381ce437",
+  "date": "2026-10-27"
+ },
+ "requires": [
+  "qexec_gby_hash_merge",
+  "qexec_gby_merge_sample_groups"
+ ],
+ "note": "fix_k01_k02.diff is the fix the review proposes (job zeroed at the top, the sort lists handed over explicitly and freed at end:; the sample's S_ERROR made ER_FAILED). With --patch the [defect] cases fail and the [contract] cases pass."
+}

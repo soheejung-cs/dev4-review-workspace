@@ -1,0 +1,11 @@
+--- a/src/query/query_executor.c	2026-10-27 13:47:45.437105051 +0900
++++ b/src/query/query_executor.c	2026-10-27 13:47:45.495105049 +0900
+@@ -12530,7 +12530,7 @@
+ 	}
+       st->n_cached = 0;
+     }
+-  if (st->n_cached >= QEXEC_GBY_CACHE_SIZE / 2)
++  if (st->n_cached >= QEXEC_GBY_CACHE_SIZE / 2 + 1)
+     {
+       /* full: start over with the groups to come (a stream of new groups keeps its recent ones) */
+       qexec_gby_cache_clear (thread_p, st);

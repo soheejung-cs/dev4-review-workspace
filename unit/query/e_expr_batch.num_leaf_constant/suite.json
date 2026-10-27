@@ -1,0 +1,33 @@
+{
+ "name": "PR#8196 그룹 E — NUMERIC raw leaf 의 상수 적재(eb_num_leaf_constant)와 leaf 커널(eb_raw_kid EB_NUM 가지)을 행 경로 비교(numeric_db_value_compare)와 대조: 127비트 안 상수 계약 + E-01 39자리 상수(계수 ≥ 2^127)의 부호 랩",
+ "file": "src/query/expr_batch.c",
+ "mode": "server",
+ "seams": [],
+ "appendix": "hooks.cpp",
+ "test": "test.cpp",
+ "extra": [
+  "src/query/numeric_opfunc.c",
+  "src/compat/db_macro.c"
+ ],
+ "requires": [
+  "eb_num_leaf_constant",
+  "eb_raw_kid",
+  "numeric_agg_expr_from_dbv",
+  "numeric_db_value_compare"
+ ],
+ "watch": [
+  "src/query/expr_batch.h",
+  "src/query/expr_compile.c",
+  "src/query/numeric_opfunc.h",
+  "src/compat/dbtype_def.h"
+ ],
+ "fakes": "expr_numeric_cmp_const_ok (expr_compile.c:4351) 를 test.cpp 에 그 함수 그대로(SHORT·INTEGER·NUMERIC 참, BIGINT 는 ±10^15 안, 그 밖 거짓) 둔다 — expr_compile.c TU 를 링크하지 않으려고. 기준(행 경로 비교)은 실제 numeric_db_value_compare (extra TU). 열은 디코드된 EB_VK_COL int128 벡터 한 개, leaf 는 eb_load_leaf_constants () 가 하듯 eb_num_leaf_constant (leaf, k, vsrc[vec].scale) 뒤 eb_raw_kid () — 레이아웃·포인티드 경로는 쓰지 않는다.",
+ "note": "head 2381ce437: [contract] PASS(342 개 (상수, 열 scale, 연산자) — 127비트 안 상수는 leaf 가 행 경로 비교와 같다), [defect] E-01 PASS(= 결함 재현: 상수 5개 × 연산자 6 × 열 값 18 중 264 행이 다름, 'c < 2E38' 은 k_all=EB_ALL_FALSE 로 전부 버림). 변이: fix_e01_uint128_constant.diff(계수를 uint128 로 둔 채 k_all·나눗셈을 정하고, 10^38 미만일 때만 부호 붙여 int128 로) 적용 시 [defect] FAIL(차이 0)·[contract] PASS — 테스트가 그 조건만 가리킨다. 링크: extra numeric_opfunc.c + db_macro.c(db_value_domain_init). base 89722cf4e: 대상 파일 없음(신설).",
+ "origin": {
+  "pr": 8196,
+  "jira": "CBRD-27361",
+  "finding": "E-01 (NUMERIC 상수 계수 ≥ 2^127 의 부호 랩 → leaf 오답) · 계약(127비트 안 상수의 leaf 판정 = 행 경로 비교)",
+  "comment": "https://github.com/CUBRID/cubrid/pull/8196",
+  "date": "2026-10-27"
+ }
+}

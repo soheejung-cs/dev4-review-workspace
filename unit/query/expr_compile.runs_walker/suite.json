@@ -1,0 +1,31 @@
+{
+ "name": "PR#8196 페이지 배치 — 필터 항 walker(expr_regu_runs/expr_pred_runs: 부작용·질의 실행 두 질문) 계약 + F1 CASE/IF/DECODE/T_PREDICATE 의 arith->pred 미탐색",
+ "file": "src/query/expr_compile.c",
+ "mode": "server",
+ "seams": [],
+ "appendix": "hooks.cpp",
+ "test": "test.cpp",
+ "extra": [],
+ "requires": [
+  "expr_regu_runs",
+  "expr_pred_runs",
+  "EXPR_RUNS_QUERY"
+ ],
+ "watch": [
+  "src/query/expr_compile.h",
+  "src/query/regu_var.hpp",
+  "src/xasl/xasl_predicate.hpp",
+  "src/query/xasl.h",
+  "src/query/fetch_arith_ops.c",
+  "src/query/expr_batch.c"
+ ],
+ "fakes": "없음 — 트리는 메모리에 만들고 walker 만 돌린다(실행 없음). XASL_NODE 는 0 으로 채운 4 KiB 에 status·precomp_owner_regu 만 쓴다(walker 가 읽는 것은 포인터 하나뿐). 외부 심볼은 전부 weak stub(walker 경로에서 불리지 않는다).",
+ "note": "head 462e6739d: 계약 4건 PASS, [defect] F1 4건 PASS(= 결함 재현). 변이: fix_f1_walk_pred.diff(arith 분기에 expr_pred_runs (arith->pred, what) 추가) 적용 시 F1 4건 FAIL·계약 4건 PASS — 테스트가 그 조건만 가리킨다. 'current:' 케이스는 현재 판정(사전 계산된 스칼라 부질의도 질의 실행으로 봄)을 적어 둔 것 — 좁히는 수정이 들어오면 FAIL 로 보고된다(의도된 변경이면 갱신). base 89722cf4e: 대상 함수 없음(신설).",
+ "origin": {
+  "pr": 8196,
+  "jira": "CBRD-27361",
+  "finding": "D-01 (walker 가 arith->pred 를 보지 않는다) · D-02 (질의 질문이 실제 위험보다 넓다 — current 케이스)",
+  "comment": "https://github.com/CUBRID/cubrid/pull/8196",
+  "date": "2026-10-23"
+ }
+}
