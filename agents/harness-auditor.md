@@ -12,7 +12,7 @@ tools: Read, Grep, Glob, Bash
 ## 점검표 — 스킬의 단계 목록을 그 자리에서 읽어 만든다
 | 스킬 | 확인할 파일/상태 |
 |---|---|
-| harness-review 절차 6·7 | 비공개 `projects/<JIRA>/리뷰보고서-PR<n>.md` 존재(공개 `examples/` 에는 새 사본을 두지 않는다 — 2026-10-27), findings.adjudicated.json·report.md, requery 처리 여부, 리뷰 전용 PR 링크 |
+| harness-review 절차 6·7 | 비공개 `projects/<JIRA>/리뷰보고서-PR<n>.md` 존재(공개 `examples/` 에는 새 사본을 두지 않는다 — 2026-10-27), findings.adjudicated.json·report.md, requery 처리 여부, 리뷰 전용 PR 링크(**사용자가 요청한 경우에만** — 2026-10-28 부터 기본 단계가 아니다; 요청이 없는데 없다고 빠짐으로 보고하지 않는다) |
 | review-response §2.4·§6·§7 | `repro/` 에 스크립트+출력, 세션기록 갱신, **`references/리뷰에서-배운것.md` 에 이 PR 항목**, 보드 카드 코멘트·worklog, 사람 스레드 미resolve·봇 스레드 resolve |
 | sql-difftest §2.6 | 세트·출력·diff 가 `repro/` 에, 결과 표 문서, 메모리 규칙 준수(`memory.usage` 기록) |
 | record | 세션기록 형식(한 일/검증/리뷰 대응/결정 상태/남은 일), 현황.md 행 |
