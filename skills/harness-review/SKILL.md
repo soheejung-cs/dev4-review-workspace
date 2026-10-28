@@ -14,10 +14,10 @@ description: 통합 리뷰 하네스 실행 — `/harness-review <PR번호>`. �
 1. **시작할 때 `references/자가진화-규칙.md` 에서 이 PR 이 건드린 축의 규칙을 먼저 훑는다**(2026-10-23). 그다음 `cd ~/dev/docs/dev4-review-workspace && python3 -m tools.harness.run full --pr <PR>` → 마지막 줄이 산출 디렉터리 `OUT`.
    **미push 커밋을 자기 리뷰**할 때는 `--sha <로컬 rev> --base <기준>`(기준 생략 시 upstream/develop; 머지 커밋을 주면 그 뒤 커밋만) — PR head 대신 로컬 리비전으로 팩을 만든다(2026-09-30). manifest 의 `local_head: true`.
 2. `OUT/preamble.md`(공통 지시·의무 항목·finding 스키마)를 **한 번** 읽고, `OUT/review_request.batch<N>.md`(팩)를 **번호 순으로 전부** 읽는다(다른 파일은 열지 않는다 — 팩에 없는 코드는 "없음"). 배치가 하나면 자립 파일 `review_request.md` 하나다.
-   **예외**: 손댄 모듈의 `dev4-ai-source/modules/<모듈>.md` §3(이미 규명된 함정)은 팩에 들어오지 않으므로 읽는다(주입 도구화 H-29 전까지).
+   손댄 모듈의 `dev4-ai-source/modules/<모듈>.md` §3(이미 규명된 함정)은 팩의 **`known pitfalls`** 절에 실린다(그 모듈 함수가 든 배치에만, 해소됨 항목은 첫 줄만). **예외**: 그 절이 상한으로 잘렸다고 적혀 있으면 그 노트의 §3 을 연다.
    배치가 많으면 **`OUT/batch_index.md` 를 먼저** 본다 — 배치별 파일·변경 함수 수와 **그룹 제안**(연속 배치를 주 파일로 묶은 것)이 있다. 어느 배치에 무엇이 들었는지 번호로 짐작하지 않는다. `manifest.json` 의 `codegraph_complete` 가 false 면 보고서에 적고 `codegraph_parse_quality`(파일별 파서가 잃은 함수 정의 수/전체)의 파일은 팩이 불완전할 수 있다고 본다.
    본문이 기대는 외부 사실은 `python3 -m tools.harness.pr_refs --pr <PR>` 로 한 번 확인한다 — 참조 PR 의 상태(미머지로 닫힌 것을 "포트했다" 고 적었나), 언급한 커밋 해시가 head 에 있나. 어긋나면 그 자체가 지적(`문서 제안` 또는 `설계 판정`)이다.
-3. 지적을 `OUT/findings.json` 으로 쓴다 — **필드·필수 여부·쓰는 법의 정본은 preamble 의 지시 3~3-8 과 스키마 `harness/schemas/finding.json`** 이다(모든 지적에 `why`·`proposal`, 에러 우려는 확인(static/dynamic) 없이는 `question` — 사용자 지시 2026-09-17: 지적만 있고 결과가 없는 코멘트는 작성자가 우선순위를 판단할 수 없다). preamble 에 아직 없는 두 가지도 지킨다: **재현·예시 SQL 은 최소 테이블로**(사용자 지시 2026-10-08, `sql-difftest` §2-4), ```suggestion **울타리는 줄 맨 앞에서 열고 닫는다**(`review-response` 「게시 형식」). `findings.auto.json`(MEAS) 은 건드리지 않는다(러너가 합친다).
+3. 지적을 `OUT/findings.json` 으로 쓴다 — **필드·필수 여부·쓰는 법의 정본은 preamble 의 지시 3~3-8 과 스키마 `harness/schemas/finding.json`** 이다(모든 지적에 `why`·`proposal`, 에러 우려는 확인(static/dynamic) 없이는 `question` — 사용자 지시 2026-09-17: 지적만 있고 결과가 없는 코멘트는 작성자가 우선순위를 판단할 수 없다. 재현 SQL 최소 테이블·suggestion 울타리 줄 맨 앞도 preamble 지시 3-1·3-2-1 에 있다). `findings.auto.json`(MEAS) 은 건드리지 않는다(러너가 합친다).
 3-1. **단위 테스트 — 모든 PR 리뷰에 붙인다**(사용자 지시 2026-10-16 — "PR 을 리뷰할 때마다 단위 테스트를 진행") — `harness-unit` / `tools/harness/unitseam.py`, 목 허용, gha-ci 용 아님.
    - **(a) 회귀**: `run full` 의 `unit_regress` 가 `unit/` 에 쌓인 suite 중 이 PR 이 건드린 파일 것을 head/base 에 자동으로 돌린다. `[contract]` 회귀 후보·`[defect]` 재현 안 됨은 지적 후보로 본다.
    - **(b) 지적 확인**: 버그 가능성 🟡 이상은 게시 전에 동적으로 확인한다 — SQL 로 닿으면 `harness-repro`(SA), 함수 단위면 `harness-unit`. 결과는 finding `verification.method=dynamic`, `artifact=OUT/unit/<id>/`.
@@ -39,7 +39,7 @@ description: 통합 리뷰 하네스 실행 — `/harness-review <PR번호>`. �
 사슬일 때 절차 2~3 을 아래로 바꾼다 (메인 루프 = 나는 **승인·게시·사용자 대화만**):
 1. `batch_index.md` 의 그룹 제안대로 그룹마다 **`harness-reviewer`(결함 판정 → `findings.<g>.json`)와 `harness-notes`(변경 지도 → `function_notes.<g>.json`)를 병렬로** 띄운다 — 판정은 **4개씩**(모델-선택 「한도」, `chunk_hint`), 변경 지도(sonnet·low)는 **2개씩** 따로(사용자 결정 2026-10-27 A+B: 판정 하나 35~42분 중 큰 몫이 함수 전수의 develop 전/후 읽기였다 — PR#8213). 판정 에이전트에게는 "function_notes 는 쓰지 않는다" 를 프롬프트에 적는다. 프롬프트에는 `OUT`·`preamble.md` 경로·배치 파일 목록·그룹 이름만(지시문을 복사하지 않는다).
    `harness-pack-reader`(수집)는 **기본 생략**(B) — 판정 에이전트가 팩을 직접 깊게 읽어 관찰이 겹친다. 그룹이 크고(12배치 이상) 함수 경계가 자주 잘린 팩이거나, 판정 에이전트에게 미리 좁혀 줄 질문이 필요할 때만 먼저 띄운다(결과는 반환 메시지 → 메인 루프가 `observations.<g>.md` 로 저장).
-2. `harness-refuter` 에 findings 전부 → `refute.<g>.json`.
+2. 그룹마다 먼저 `python3 -m tools.harness.precheck --out OUT --findings OUT/findings.<g>.json` → `precheck.<g>.json`(판정기의 결정론 검사만, 1초 미만 — H-31), 그다음 `harness-refuter` 에 findings 와 precheck 경로 → `refute.<g>.json`. refuter 는 기계 검사를 다시 하지 않고 의미 판단(더 단순한 설명 등)만 한다.
 2-1. 단위 테스트(절차 3-1)는 `harness-unit` 에 맡긴다.
 3. `harness-synthesizer` → `OUT/findings.json`·`comments.draft.md`·`report.head.md`.
 4. 절차 4~5(`--findings` 판정·requery) 는 그대로.

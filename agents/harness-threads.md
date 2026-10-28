@@ -11,6 +11,6 @@ model: sonnet
 ## 출력 — `threads.md` / `threads.json`
 스레드마다: 루트 코멘트 id·URL·path:line·첫 줄 태그·마지막 발언자·상태(대응 필요 / resolve 대기 / 해결) / 분류(결함 주장·확인 요청·제안·설계 이견) / **작성자 주장 요약**(어느 커밋으로 고쳤다고 하나, "재현 안 됨" 이면 그가 요구한 재현 환경 항목, 스펙 변경으로 돌렸으면 그 문구) / 리뷰어가 다음에 해야 할 것 한 줄(검증 스크립트 이름이 있으면 그것).
 PR 헤드 리비전·새 커밋 목록(`gh pr view --json headRefOid`, `git log <old>..<new>`)을 머리에 적는다.
-스레드마다 **지적 시점 커밋**(REST 코멘트의 `original_commit_id`)을 적고 현재 헤드와 다르면 표시한다 — 이미 닫힌 지적을 다시 고치지 않게(`review-response` §1; `review_threads` 가 직접 표시하는 것은 H-30).
+스레드마다 **지적 시점 커밋**을 옮긴다 — `review_threads` 가 `threads.json` 의 `original_commit`·`stale`(≠ head)·`path_changed_since`·`commits_since` 로 적고 `threads.md` 머리줄에 `⚠ 지적 시점 … ≠ head` 를 단다. 이미 닫힌 지적을 다시 고치지 않게(`review-response` §1). `path_changed_since` 가 null 이면(로컬에 head 가 없음) 그렇다고 적는다.
 ## 규칙
 판단·답글 작성 금지. 주장은 인용으로 옮긴다("재현되지 않습니다" 를 "재현 안 됨으로 판명" 으로 바꾸지 않는다). 모르면 `needs_judgment: true`.

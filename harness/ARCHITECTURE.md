@@ -8,7 +8,7 @@
 
 ```
                  ┌──────────────── 결정론 구간 (LLM 없음) ────────────────┐
-PR/diff ──▶ Worktree(RAII) ──▶ CodeGraph(tree-sitter→SQLite) ──▶ diff→함수 매핑 ──▶ Reachability(관문·진입점 경로, 짝 검사)
+PR/diff ──▶ Worktree(RAII) ──▶ CodeGraph(tree-sitter→sqlite3) ──▶ diff→함수 매핑 ──▶ Reachability(관문·진입점 경로, 짝 검사)
                                         │                                                      │
                                         ▼                                                      ▼
                           [design] arch_infer: 계층 컴포넌트·계층 간 호출 ──▶ 규칙 리스크 ──▶ arch.json / .mmd / .excalidraw
@@ -104,10 +104,15 @@ DB 서버·CTP 는 이 CLI 가 띄우지 않는다(`review-testing` 스킬의 �
 > 수집은 낮추고 판정·종합·반증은 유지, 애매하면 올려보낸다(사용자 결정 2026-09-21).
 
 > **하네스는 `references/` 를 읽지 않는다.** `context_pack._rule_rows()` 와 `_invariants()` 가 긁는 것은 `rules/*.md` 의
-> `| PREFIX-nn` 행뿐이다(정규식 `[A-Z]{2,5}`, 6글자 접두사는 조용히 누락된다). 따라서 **인용 가능한 판정 행은 `rules/` 에 두고**
-> `references/` 에는 근거·해설만 둔다. 같은 표를 양쪽에 두면 갈라진다.
+> 판정 행(`| <규칙 ID> | …`)뿐이다. ID 꼴은 `tools/harness/rule_ids.py` 한 곳 — `MEM-03`·`MEAS-R-26`·`APX-A-01`·`PRIO-04.5`·`INV-1`·`A01`,
+> ID 칸이 둘인 행(`BR-04/A59`)은 둘 다 그 행의 ID 다. 같은 꼴을 finding 스키마의 rule_ids pattern 과 판정기의 '아는 ID' 가 쓴다(H-28).
+> 따라서 **인용 가능한 판정 행은 `rules/` 에 두고** `references/` 에는 근거·해설만 둔다. 같은 표를 양쪽에 두면 갈라진다.
+> `_rule_rows()` 는 ID 당 1행(처음 나온 행), 축은 ID 의 번호 앞 부분(+ 문장의 'X 위반' 이 가리키는 축 — 17장 안티패턴 행), 상한 60행(넘으면 뺀 수를 적는다).
+> 관문 사실로 안 잡히는 축은 디렉터리로 더한다(`AXIS_BY_DIR`: `src/optimizer` → MEAS-R).
 > `_invariants()` 는 항상 주입(잘리지 않음), `_rule_rows()` 는 우선순위 5 라 예산이 모자라면 통째로 잘린다 —
 > 잘리면 안 되는 축은 `_invariants()` 로 승격한다(현재 INV-* 전부 + BTL-*는 `src/storage`·`src/transaction` 을 건드릴 때만).
+> 손댄 모듈의 소스 지식 `dev4-ai-source/modules/<모듈>.md` §3(이미 규명된 함정)은 `known pitfalls` 절로 항상 주입한다(우선순위 2, 그 모듈의 함수가
+> 든 배치에만, 해소됨 항목은 첫 줄만, 모듈당 3,000 tok 상한 — H-29). 노트 리포 위치는 `DEV4_SOURCE_NOTES`, 읽은 판은 manifest `source_notes_git`.
 
 ## 6. v2 에서 추가된 모듈
 | 모듈 | 역할 |
@@ -119,9 +124,16 @@ DB 서버·CTP 는 이 CLI 가 띄우지 않는다(`review-testing` 스킬의 �
 | `unit_regress.py` + `unit/` | 리뷰용 단위 suite 라이브러리(`unit/<module>/<suite>/suite.json`). `run full` 의 context 단계 `unit_regress` 가 PR 이 건드린 파일(`file`·`watch`)에 걸린 suite 를 head/base 에 돌려 `[contract]` 회귀 후보·`[defect]` 재현 여부를 `unit_regress.md` 로 preamble·report 에 싣는다(`HARNESS_NO_UNIT=1` 로 끔) |
 | `session.py` | `ServerSession` RAII(conf·databases.txt 복원, 종료 보장), `cleanup_leftovers()` |
 | `harness/templates/repro.sh` | trap 정리·격리 포트·산출물 판정 템플릿 |
-| `context_pack.batches()` / `_invariants()` / `_episodic()` | 배치 분할 · 불변조건 상시 주입 · 과거 지적 주입 |
+| `context_pack.batches()` / `_invariants()` / `_known_pitfalls()` / `_episodic()` | 배치 분할 · 불변조건 상시 주입 · 손댄 모듈 노트 §3 주입(그 모듈 배치에만, H-29) · 과거 지적 주입 |
+| `rule_ids.py` | 규칙 ID 꼴·축·판정 행 파싱의 한 곳(H-28) — `_rule_rows`·finding 스키마 pattern·판정기의 '아는 ID' 가 같이 쓴다 |
+| `precheck.py` | 그룹 findings 에 판정기의 결정론 검사만(OUT 의 codegraph·pr.diff 를 읽기 전용으로, head 파일은 `git show`) → `precheck.<g>.json`. 반증(`harness-refuter`)의 입력 — refuter 는 기계 검사를 다시 하지 않는다(H-31). 최종 판정 산출물은 쓰지 않는다 |
 | `reachability.latch_pairing_by_var()` | 변수 단위 관문 짝 |
 | `adjudicate.validate_findings/dedup/repro_obligation/requery` | 스키마 검증 → 재질의 파일, 중복 제거, repro 의무. repro 의무의 산출물 경로는 `adjudicate.records_root()` 가 `DEV4_RECORDS_ROOT` → `roster.json:records_root` → 기본값 순으로 해석하고, **그 경로가 없으면 강등하지 않고 blocking 을 유지**한다(평가 불가 ≠ 재현 없음) |
+| `static_lint.py` | 결정론 린트 노드 `static_lint`(context 단계, or_buf 뒤 — findings.auto.json 에 append, 집계·건너뛴 수 `static_lint.json`): 실수 인자 바깥 꼴 범위 검사(`fp-range-outside`, 손댄 파일에서 고친 꼴이 남은 자리는 `-siblings` 한 건으로), encode/coerce 상태 버림(`discarded-status`), er_set 뒤 NULL 자원 사용·continue(`error-path-continues`), 추적 안 되는 정렬 할당(`untracked-aligned-alloc`), 추정 모델 변경 시 조인 형상 체크리스트(`join-shape-checklist`). CLI 는 rev 전체 훑기(오탐률·전후 비교) — H-15·H-33 |
+| `md_lint.py` | 게시 본문 교정·검사의 한 곳(문장 뒤 울타리 분리·울타리 홀수 거부·절/열거 복원·길이 경고) — `review_reply`·`post_review` 가 같이 쓴다(H-32) |
+| `repro_check.py` | 코멘트 초안의 `sql` 울타리 블록만 절마다 버릴 DB·새 SA 프로세스로 develop·PR 에 돌려 `repro_check.{json,md}`, `--verify` 는 게이트키퍼용(초안 sha1·전부 돌았나) — H-27 |
+| `source_facts_check.py` | 소스 지식 문서(dev4-ai-source staging·modules, skills)의 file:line·심볼 인용을 항목의 기준 rev 와 develop HEAD 에서 확인(ok·moved·changed·norev·error) — K-05, H-18 |
+| `implement_gate` (6) | 수명 있는 상태(구조체 포인터 필드·plan.lifetime_state)를 더하면 그래프가 뽑은 해제 경로 후보 하나하나가 plan.release_sites 에 판정돼 있어야 통과 — H-33 |
 
 ## 7. 알려진 한계 (META-REVIEW v2 참조)
 - 매크로(`NET_SERVER_REQUEST_ITEM`)가 함수로 잡힌다; 함수 포인터·가상 호출 미해석; `changed+1` 범위 밖 호출은 `root(no caller resolved)`.

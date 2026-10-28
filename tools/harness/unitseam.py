@@ -21,8 +21,13 @@
 산출(DIR/<rev9>/): tu.o test.o stubs.s unit.bin build.log result.xml result.json, DIR/summary.json
 한계: 데이터처럼 쓰인(주소만 취한) 함수 심볼은 0 데이터로 stub 된다 — 호출되면 죽는다. 생성 헤더(문법·메시지)는 빌드 트리 것을 쓰므로
 PR 이 그것을 바꾸면 결과가 PR 을 반영하지 않는다(build.log 에 경고).
+
+병렬 실행(H-13): 같은 rev 를 여러 실행이 동시에 돌려도 된다. 리비전별 공유 worktree(`harness-out/wt-unit-<rev9>`)는
+rev 별 flock(`wt-unit-<rev9>.lock`) 아래에서 한 번만 만들고, 다 만든 뒤 남기는 완성 표지(그 worktree 의 git admin
+디렉터리 안 `unitseam-ready`)가 있어야 쓴다 — 표지가 없으면(처음이거나 이전 생성이 중간에 죽었으면) 지우고 다시 만든다.
+같은 산출 디렉터리(DIR/<rev9>)를 두 실행이 함께 쓰면 뒤 실행이 앞 실행이 끝날 때까지 기다린다(산출물이 섞이지 않게).
 """
-import argparse, json, os, re, shlex, subprocess, sys, xml.etree.ElementTree as ET
+import argparse, fcntl, json, os, re, shlex, shutil, subprocess, sys, xml.etree.ElementTree as ET
 
 HOME = os.path.expanduser('~')
 DEF_REPO = f'{HOME}/dev/sources/cubrid'
@@ -52,7 +57,10 @@ def compdb(build):
         if os.path.exists(p):
             rules |= {l.split()[1] for l in open(p) if l.startswith('rule ') and re.match(r'rule (C|CXX)_COMPILER', l)}
     out = sh(['ninja', '-t', 'compdb', *sorted(rules)], cwd=build).stdout
-    open(cache, 'w').write(out)
+    # 임시 이름에 쓰고 rename — 병렬 실행이 반쯤 쓴 캐시를 읽어 JSON 오류로 죽지 않게(H-13)
+    tmp = f'{cache}.{os.getpid()}'
+    open(tmp, 'w').write(out)
+    os.replace(tmp, cache)
     return json.loads(out)
 
 
@@ -63,13 +71,53 @@ def source_root(build):
     return DEF_REPO
 
 
+READY = 'unitseam-ready'   # 완성 표지 — worktree 의 git admin 디렉터리(.git/worktrees/<이름>/)에 둔다
+
+
+def _admin_dir(path):
+    """연결된 worktree 의 git admin 디렉터리 — `<path>/.git` 파일의 `gitdir:` 줄. 없으면 None(만들다 만 디렉터리)."""
+    try:
+        with open(os.path.join(path, '.git')) as f:
+            line = f.readline().strip()
+    except OSError:
+        return None
+    return line[len('gitdir:'):].strip() if line.startswith('gitdir:') else None
+
+
+def _ready(repo, path):
+    """다 만든 worktree 인가. 표지가 있으면 예. 표지 이전(H-13 전)에 만든 것은 추적 파일이 그대로면(status 깨끗) 완성으로 보고
+    표지를 붙인다 — 생성이 체크아웃 도중 죽었으면 인덱스·파일이 빠져 status 가 깨끗하지 않다. unitseam 이 worktree 에 남기는
+    TU 사본은 추적 밖이라(-uno) 판정에 끼지 않는다."""
+    adm = _admin_dir(path)
+    if not adm or not os.path.isdir(adm):
+        return False
+    if os.path.exists(os.path.join(adm, READY)):
+        return True
+    st = sh(['git', '-C', path, 'status', '--porcelain', '--untracked-files=no'], check=False)
+    if st.returncode == 0 and not st.stdout.strip():
+        open(os.path.join(adm, READY), 'w').write('adopted\n')
+        return True
+    return False
+
+
 def worktree(repo, rev):
+    """리비전별 공유 worktree(wt-unit-<rev9>). rev 별 flock 아래에서 만들고 완성 표지를 단 뒤에야 돌려준다 —
+    같은 rev 를 병렬로 돌리면 한쪽이 체크아웃 중인 디렉터리를 보고 `no-file` 을 내던 경합(H-13)."""
     sha = sh(['git', '-C', repo, 'rev-parse', rev]).stdout.strip()
     path = os.path.join(WT_ROOT, f'wt-unit-{sha[:9]}')
-    if not os.path.isdir(path):
-        r = sh(['git', '-C', repo, 'worktree', 'add', '--detach', path, sha], check=False)
-        if r.returncode:
-            raise RuntimeError(r.stderr)
+    os.makedirs(WT_ROOT, exist_ok=True)
+    with open(path + '.lock', 'a') as lk:
+        fcntl.flock(lk, fcntl.LOCK_EX)   # 같은 rev 의 다른 실행은 만들기가 끝날 때까지 여기서 기다린다(체크아웃 수십 초)
+        if not _ready(repo, path):
+            if os.path.lexists(path):    # 만들다 만 잔재 — 지우고 다시 만든다
+                sh(['git', '-C', repo, 'worktree', 'remove', '--force', path], check=False)
+                if os.path.lexists(path):
+                    shutil.rmtree(path, ignore_errors=True)
+            sh(['git', '-C', repo, 'worktree', 'prune'], check=False)   # 디렉터리 없이 등록만 남은 항목
+            r = sh(['git', '-C', repo, 'worktree', 'add', '--detach', path, sha], check=False)
+            if r.returncode:
+                raise RuntimeError(r.stderr)
+            open(os.path.join(_admin_dir(path), READY), 'w').write(sha + '\n')
     return sha, path
 
 
@@ -187,9 +235,17 @@ def make_stubs(objs, names, path):
 def catch_main(cc):
     o = os.path.join(CATCH_DIR, 'catch_main.o')
     if not os.path.exists(o):
-        src = os.path.join(CATCH_DIR, 'catch_main.cpp')
+        # 실행마다 다른 이름으로 굽고 rename — 처음 두 실행이 동시에 구우면 한쪽이 반쯤 쓴 .o 를 링크하던 경합(H-13)
+        src = os.path.join(CATCH_DIR, f'catch_main.{os.getpid()}.cpp')
+        tmp = f'{o}.{os.getpid()}'
         open(src, 'w').write('#define CATCH_CONFIG_MAIN\n#include "catch.hpp"\n')
-        sh([cc, '-std=c++17', '-O1', '-c', src, '-I', CATCH_DIR, '-o', o])
+        try:
+            sh([cc, '-std=c++17', '-O1', '-c', src, '-I', CATCH_DIR, '-o', tmp])
+            os.replace(tmp, o)
+        finally:
+            for p in (src, tmp):
+                if os.path.exists(p):
+                    os.remove(p)
     return o
 
 
@@ -209,8 +265,13 @@ def build_and_run(a, rev, db, srcroot):
     mut = None
     if getattr(a, 'patch', ''):
         mut = wt = mutation_worktree(a.repo, sha, a.patch)
+    out = os.path.join(a.out, sha[:9])
+    os.makedirs(out, exist_ok=True)
     try:
-        return _build_and_run(a, sha, wt, db, srcroot)
+        # 같은 산출 디렉터리를 쓰는 다른 실행(같은 --out·같은 rev)이 끝날 때까지 기다린다 — tu.o·unit.bin 이 섞이지 않게(H-13)
+        with open(os.path.join(out, '.unitseam.lock'), 'a') as lk:
+            fcntl.flock(lk, fcntl.LOCK_EX)
+            return _build_and_run(a, sha, wt, db, srcroot)
     finally:
         if mut:
             sh(['git', '-C', a.repo, 'worktree', 'remove', '--force', mut], check=False)

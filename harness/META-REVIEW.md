@@ -32,8 +32,8 @@
 
 | 놓친 것 | 원인 | 하네스에 내릴 것 |
 |---|---|---|
-| 자식 2·부모 1 이 한 스텝에서 연결되면 FK 바닥이 1/N² (card 10000→1, 🔴) | 작성자 프레임(self-ref 두 제약) 만 감사, `else` 분기의 "eqclass 에 다른 누가 있나" 를 안 물음, `question` 으로 두고 재현 생략 | 카디널리티·선택도 모델 변경(`planner_visit_node`, `qo_*_selectivity*`) 이 diff 에 있으면 **조인 형상 체크리스트**(자식1·부모1 / 자식2·부모1 같은 스텝 / 자식1·부모2 / 체인 / self-ref / semi·anti / outer) 를 불변조건 절에 주입하고, "과소·과대 추정" finding 은 severity 가 question 이어도 **repro 의무** 대상으로 — **미구현, H-33** |
-| `er_set(ER_OUT_OF_VIRTUAL_MEMORY)` 뒤 `continue` (🟡) | 에러 경로를 콜드패스로 후순위 — 성능 규약을 정확성 축까지 확대 적용 | diff 한정 린트: `er_set(` 다음 문장이 `return`/`goto` 가 아니면 `error-path-continues` 리스크. `gate-imbalance` 와 나란히 — **미구현, H-33** |
+| 자식 2·부모 1 이 한 스텝에서 연결되면 FK 바닥이 1/N² (card 10000→1, 🔴) | 작성자 프레임(self-ref 두 제약) 만 감사, `else` 분기의 "eqclass 에 다른 누가 있나" 를 안 물음, `question` 으로 두고 재현 생략 | → H-33 (`tools/harness/static_lint.py` `join-shape-checklist`) |
+| `er_set(ER_OUT_OF_VIRTUAL_MEMORY)` 뒤 `continue` (🟡) | 에러 경로를 콜드패스로 후순위 — 성능 규약을 정확성 축까지 확대 적용 | → H-33 (`tools/harness/static_lint.py` `error-path-continues`) |
 
 교훈 한 줄: **외부 규칙을 인용했으면 CUBRID 코드의 어느 줄에서 그 규칙이 깨지는지 대응시켜라** — N2 는 punt 규칙을 정확히 알고도 self-ref 에만 붙였다.
 
@@ -45,9 +45,9 @@
 
 | 놓친 것 | 원인 | 하네스에 내릴 것 |
 |---|---|---|
-| 플랜 캐시 세 모양 중 `max_plan_cache_clones=0` 에서 프로그램이 실행마다 누수. 작성자도 리뷰도 기본(clone 재사용)과 원샷 둘만 보았다 | 검증 규율에 **설정 축이 없었다** — 매트릭스가 전부 기본 설정 전제. 팩도 리뷰어가 본 두 경로만 담았고 `xcache_retire_clone ()` 은 들어오지 않았다 | ① `review-testing` §1-1 설정 변형 매트릭스(**됨**) ② 팩 확장: 변경이 **구조체에 수명 있는 필드**를 더하면 그 필드를 읽는 **모든** 함수를 팩에 강제 포함(상태 미확인) ③ `plan.json` 에 "이 상태를 놓는 자리 전수" 를 요구하는 칸(**미구현, H-33**) |
-| 슬롯 배열만 `posix_memalign` 직접 호출 → 자체 메모리 모니터 사각. 앞선 리뷰 라운드가 **틀린 전제**("wrapper 는 operator new/delete 만 감쌈")로 지적 없음 판정 | 래퍼의 실제 범위를 확인하지 않고 기억으로 판정 | diff 한정 린트: `posix_memalign|aligned_alloc|mmap|valloc` 이 새로 들어오면 **추적되는 짝(`cub_aligned_alloc`)이 있는지 확인** 을 강제. `er_set` 린트와 나란히 — **미구현, H-33** |
-| 프로그램 해제용 플래그 한 줄이 **값 해제를 반대로 뒤집음**(px 비클론 워커). 원샷 경로는 이미 2패스로 피하고 있었는데 병렬 워커만 1패스 | 같은 플래그를 반대 방향으로 읽는 자리가 있다는 것을 아무도 대조하지 않음. 전수 훑기는 사람이 따로 탐색 에이전트를 띄워서야 돌았다 | **해제 경로 전수 훑기를 절차에 넣는다**: 수명 있는 상태를 추가하면 `free_*`/`*_decache`/`*_retire` 호출부를 전수로 뽑아 각각 "해제되는가 / 붙을 수 없는가" 판정. 구현 하네스 게이트 후보 — **미구현, H-33** |
+| 플랜 캐시 세 모양 중 `max_plan_cache_clones=0` 에서 프로그램이 실행마다 누수. 작성자도 리뷰도 기본(clone 재사용)과 원샷 둘만 보았다 | 검증 규율에 **설정 축이 없었다** — 매트릭스가 전부 기본 설정 전제. 팩도 리뷰어가 본 두 경로만 담았고 `xcache_retire_clone ()` 은 들어오지 않았다 | ① `review-testing` §1-1 설정 변형 매트릭스(**됨**) ② 팩 확장: 변경이 **구조체에 수명 있는 필드**를 더하면 그 필드를 읽는 **모든** 함수를 팩에 강제 포함(상태 미확인) ③ → H-33 (`plan.json` `lifetime_state`·`release_sites` + `implement_gate` (6)) |
+| 슬롯 배열만 `posix_memalign` 직접 호출 → 자체 메모리 모니터 사각. 앞선 리뷰 라운드가 **틀린 전제**("wrapper 는 operator new/delete 만 감쌈")로 지적 없음 판정 | 래퍼의 실제 범위를 확인하지 않고 기억으로 판정 | → H-33 (`tools/harness/static_lint.py` `untracked-aligned-alloc`) |
+| 프로그램 해제용 플래그 한 줄이 **값 해제를 반대로 뒤집음**(px 비클론 워커). 원샷 경로는 이미 2패스로 피하고 있었는데 병렬 워커만 1패스 | 같은 플래그를 반대 방향으로 읽는 자리가 있다는 것을 아무도 대조하지 않음. 전수 훑기는 사람이 따로 탐색 에이전트를 띄워서야 돌았다 | → H-33 (`implement_gate` (6) 해제 경로 전수) |
 
 교훈 한 줄: **"이 상태를 만드는 곳" 이 아니라 "이 상태를 놓는 곳" 을 전수로 세라.** 만드는 곳은 하나지만 놓는 곳은 여러 개다.
 

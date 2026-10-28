@@ -3,6 +3,53 @@
    출력: <out_dir>/index.html (자립 HTML, charset utf-8) + <out_dir>/board.json
    사용: review_board_gen.py [out_dir]   (기본 ~/dev/utils/review-board/site)
    의존: gh CLI(인증됨). 이 컨테이너의 리뷰 문서(claude-workspace/projects/CBRD-*, dev4-review-workspace/examples|reviews)를 링크한다.
+   사이드이펙트: gh 로 읽기만 하고 out_dir 의 두 파일만 쓴다. 갱신·호스팅·보드 읽는 법은 skills/review-board/SKILL.md.
+
+UI 명세 — 이 docstring 이 정본이다(2026-10-28 스킬에서 옮김, H-40). 생성기를 고치면 여기도 고친다.
+
+[추적 대상] (list_prs)
+  assignee 에 tracked_github 가 있는 open·non-draft PR. assignee 에 추적 ID 가 없으면 작성자로도 잡고(사용자 지시 2026-10-14 —
+  assignee 를 비운 PR 이 빠지던 것) 그 행에는 `작성자 기준(assignee 없음)`, board.json `tracked_via: author`. 머지된 것·draft 는
+  싣지 않는다 — 기준은 JIRA 가 아니라 GitHub(사용자 지시 2026-09-16).
+
+[PR 행] (details·agent_reviewed·local_docs·tc_prs)
+  - 미해결 리뷰 스레드 수 / 전체 스레드 수, 미해결 스레드를 연 사람별 개수.
+  - 리뷰어 필: 최신 리뷰 상태(✓ APPROVED · ✗ CHANGES_REQUESTED · … COMMENTED · – DISMISSED, 봇 제외)와 두 갈래의 남은 일 —
+    `미착수`(요청됐고 리뷰 이력 0) / `승인 전`(리뷰했으나 APPROVED 아님). GitHub 은 리뷰를 제출하는 순간 그 사람을 reviewRequests 에서
+    빼므로, 요청 목록만 보면 코멘트 한 번 남기고 승인하지 않은 리뷰어가 사라진다(2026-09-21). 재요청되면 다시 `미착수`.
+    그 아래 reviewDecision.
+  - CI 는 싣지 않는다(머리말 "CI 는 보지 않음(사용자 지시)") — ci_summary() 는 남아 있지만 render 가 쓰지 않는다.
+  - 연동된 TC PR: JIRA 키(또는 제목의 `cubrid#<n>`)가 같은 cubrid-testcases / -private-ex PR 을 엔진 PR 하위에 — 미해결 수·미착수 리뷰어.
+  - 갱신·생성일.
+
+[머리 통계·사람별 표] (사용자 지시 2026-10-06)
+  머리 통계는 '미완료 PR' 하나 — 미완료 = 머지 가능이 아닌 것 = 미해결 스레드가 남았거나 승인자가 0. `18 / 전체 21` 꼴.
+  사람별 표는 사람마다 `내 PR`(assignee — 작성자가 움직일 차례) / `내가 리뷰어`(미착수·승인 전 — 내 차례) / `머지 대기`(승인 끝·미해결 0, 회색).
+
+[툴바] (사용자 지시 2026-10-06, 클라이언트 JS — 재생성 없이 즉시 바뀐다)
+  - 「사람으로 모아 보기 — 담당자 + 리뷰어」 버튼 줄: 사람을 누르면 그 사람이 리뷰어(미착수·승인 전·승인자)이거나 담당자(assignee)인
+    행만 남기고 빈 섹션은 접는다. 담당자 포함은 이현욱(hyunuk.lee) 요청 2026-10-07 — 리뷰어만 걸면 자기가 담당인 PR 이 사라졌다.
+    판정은 행의 `data-rev`(리뷰어 전원)·`data-pend`(미착수·승인 전)·`data-own`(담당자) 속성.
+  - `승인 전·미착수만`: 아직 응답이 남은 PR 만(`data-pend` 가 비지 않은 행).
+  - 오른쪽 `내 전용 열 보기` 체크: 아래 내 전용 열을 켠다. 선택은 localStorage `showAgent` 에 남는다.
+  - `붉은색 = …` 문구(#redHint)가 지금의 붉은 행 기준을 말한다.
+
+[붉은 행 = 고른 사람이 움직일 차례] (사용자 지시 2026-10-07, paint())
+  왼쪽 테두리 3px + 옅은 배경 + PR 번호를 붉게(`tr.unres`). 기준은 툴바에서 고른 사람과의 관계로 바뀐다(행의 data-own/data-rev/data-appr/data-unres):
+    고른 사람이 담당자(assignee)         → 머지 전이면 붉다(이 보드는 open PR 만 싣으므로 사실상 늘 붉다)
+    고른 사람이 리뷰어                   → 그 사람이 아직 승인하지 않았으면 붉다(남이 승인했어도)
+    아무도 안 고름(전체)                 → 중립 기준: resolve 안 한 코멘트가 남았으면 붉다
+    승인 끝·미해결 0 인데 머지 안 됨     → 회색(`tr.ready`) — 사라지지 않고 남아 "머지만 남았다" 를 보인다(사람별 표의 `머지 대기`)
+
+[내 전용 열 — 기본 숨김] (`.col-mine`, 사용자 지시 2026-10-06 "헷갈린다" + 2026-10-07 "리뷰 문서는 나만 보게")
+  - `에이전트 리뷰`: roster.json agent_github 로그인(또는 본문이 agent_marker 정규식에 맞는 것)이 남긴 리뷰·인라인·이슈 코멘트 건수와
+    마지막 날짜(본문 없는 빈 리뷰 껍데기는 세지 않는다). 팀 공유 계정으로 돌리면 agent_github 만 그 계정으로 바꾼다 — 지금은 사용자 본인
+    계정이라 본인 코멘트도 함께 세어진다(공유 계정 전환 전 한계).
+  - `리뷰 문서(내부망)`: 이 컨테이너의 DOCS 에서 JIRA 키·PR 번호로 찾은 것, DOCS_HTTP_BASE(`site/docs → ~/dev/docs` 심링크) 링크.
+  - 헤드리스 리뷰 실행 표(render_headless, <out>/headless/cost.jsonl)도 같은 토글 뒤에 숨는다.
+
+[연동 대상 없는 TC PR 절]
+  엔진 PR 에 붙지 못한 TC PR. 본문 행과 같은 data-* 속성을 붙여 툴바의 사람 필터가 여기에도 걸린다(사용자 지시 2026-10-13).
 """
 import sys, json, os, re, subprocess, datetime, html
 from urllib.parse import quote

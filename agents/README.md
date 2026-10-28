@@ -8,7 +8,7 @@
 | `harness-pack-reader` | 수집(low) · **선택**(기본 생략, 2026-10-27 B) | 배치 그룹의 사실만(함수·관문 짝·불변조건 적중·미지 심볼·질문) | `review_request.batch*.md` → `observations.<g>.json` | — |
 | `harness-notes` | 변환(sonnet·low) | 그룹의 changed function 전부에 변경 지도(develop 전/이 PR 후·역할·risk) — 판정과 **병렬**, 지적은 쓰지 않는다(2026-10-27 A) | 배치 → `function_notes.<g>.json` (합치기 `tools/harness/merge_notes.py`) | — |
 | `harness-reviewer` | 판정 | finding 스키마의 지적(why·proposal·verification·evidence·rule_ids) | preamble + 배치 (+observations) → `findings.<g>.json` | code-review · design-review |
-| `harness-refuter` | 반증(high) | 지적을 무너뜨린다 — anchor·심볼·규칙 ID·확인 결과·더 단순한 설명 | findings → `refute.<g>.json` | review-response(반증 비평) |
+| `harness-refuter` | 반증(high) | 지적을 무너뜨린다 — 더 단순한 설명·주장과 코드의 대조(기계 검사는 `precheck` 결과를 쓴다, H-31) | findings + `precheck.<g>.json` → `refute.<g>.json` | review-response(반증 비평) |
 | `harness-synthesizer` | 종합(high) | 합치기·중복 제거·중요도 정렬 → `findings.json`·코멘트 초안·보고서 §0 | findings+refute → `findings.json`, `comments.draft.md`, `report.head.md` | review-response · code-review §5(§0 9항목) |
 | `harness-repro` | 판정 | 재현 스크립트를 develop/PR 빌드에 SA 로 돌려 회귀·스펙 변경·develop 결함 수정을 가른다 | SQL/모양 → `result.md` + 세트·출력 | sql-difftest · review-testing |
 | `harness-unit` | 판정 | 지적 함수의 번역 단위를 PR 빌드 플래그로 단독 컴파일해 seam(가짜)·자동 stub 으로 Catch2 단위 테스트를 head/base 에 돌린다 — 서버·DB 없이 결함 재현·선재를 가른다 | finding → `OUT/unit/<id>/result.md` + 테스트·결과 | `tools/harness/unitseam.py` |
@@ -21,7 +21,7 @@
 **모든 PR 리뷰에 단위 테스트가 들어간다**(사용자 지시 2026-10-16) — 정본 `skills/harness-review/SKILL.md` 절차 3-1.
 
 ```
-harness-review   : run full(+unit_regress) → [reviewer(결함, 4개씩) ∥ notes(변경 지도, 2개씩)] (그룹별; pack-reader 는 선택) → refuter → unit(🟡 이상 지적 확인 + 핵심 함수 계약 suite)
+harness-review   : run full(+unit_regress) → [reviewer(결함, 4개씩) ∥ notes(변경 지도, 2개씩)] (그룹별; pack-reader 는 선택) → precheck(결정론) → refuter → unit(🟡 이상 지적 확인 + 핵심 함수 계약 suite)
                    → synthesizer → run full --findings
                    → gatekeeper(comments.draft) → [메인: 사용자 승인] → 게시 → auditor
 review-response  : threads → (결함 주장이면) repro → [메인: 답글 초안] → gatekeeper(답글) → [승인] → 게시 → auditor

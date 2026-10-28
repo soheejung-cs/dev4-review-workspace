@@ -15,7 +15,7 @@ description: 적대적 SQL 차분 테스트 — 같은 SQL 세트를 develop·PR
 - **기준 빌드**: PR 의 merge-base 를 품은 develop 리비전(비교 축의 파일이 그 사이에 바뀌지 않았는지 `git log <base>..<mb> -- <files>` 로 확인). **PR 빌드**: PR 헤드. 내 변경이 얹힌 **머지 빌드**가 있으면 셋째 — "내 변경이 PR 의 답을 바꾼 곳 없음" 을 함께 증명한다.
 - 설치본마다 `databases/` 가 따로다. 값 비교는 설치본별 볼륨으로 충분하지만, **비용·플랜 수치 비교는 `-v` 로 같은 볼륨**을 써야 한다(힙 페이지 수가 다르면 비용이 어긋난다).
 - SA(`csql -S`)는 떠 있는 서버와 충돌한다 → 먼저 `cubrid service stop`. **빌드가 끝나면 goto 가 그 설치본의 demodb 서버를 자동으로 띄운다**(2026-10-07 실측) — 빌드 직후엔 반드시 확인.
-- **SA 재현의 conf 변경은 설치본 conf 편집이 아니라 `CUBRID_CONF_FILE=<사본>` + `CUBRID_DATABASES=<스크래치>`** 로(`;get` 으로 확인) — 설치본을 공유하는 JOB·CTP 와 부딪히지 않는다(배운것 PR#8196 16번). `modes.sh` 는 아직 설치본 conf 를 덧붙였다 원복하므로 다른 작업이 그 설치본을 쓰는 중이면 돌리지 않는다.
+- **SA 재현의 conf 변경은 설치본 conf 편집이 아니라 `CUBRID_CONF_FILE=<사본>` + `CUBRID_DATABASES=<스크래치>`** 로(`;get` 으로 확인) — 설치본을 공유하는 JOB·CTP 와 부딪히지 않는다(배운것 PR#8196 16번). `modes.sh` 도 이 방식이다 — 모드마다 conf 사본을 `CUBRID_CONF_FILE` 로 넘기고 `;get` 으로 적용을 확인한다(설치본 conf 무편집, H-39). `difftest.sh -D <스크래치 databases>` 면 떠 있는 서버(다른 DB)와도 부딪히지 않는다.
 - csql 은 cwd 에 `csql.err` 를 남긴다 — 세트·출력은 스크래치패드나 `projects/<이슈>/repro/` 에서.
 
 ## 1. 공격 축 — 한 세트에 하나씩, 실행 순서를 바꿔 가며

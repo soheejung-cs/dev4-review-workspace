@@ -34,7 +34,7 @@ python3 -m tools.harness.implement_pack --key CBRD-n --pr <PR>      # 리뷰 대
 
 ## S2. plan.json (LLM) → 사용자 승인
 **plan 을 쓰기 전에 `references/자가진화-규칙.md` 에서 해당 축의 규칙을 훑는다**(예: 수치 경계를 바꾸면 #003 동작표, 이슈 본문에 수정 스케치가 있으면 #007 — 2026-10-23).
-스키마 `harness/schemas/plan.json`. 필수: 영역 판정 문장 · INV-1~5 각각 touched 여부와 이유 · Tier · 공유/격리(공유면 계약 3요소) · **대안 ≥ 2**(채택 표시) · `changes[]`(팩의 candidate 중에서만; 관문을 건드리면 `gate_contract` 필수; 성능 경로면 `rule_ids`) · `tests[]`(재현→기대) · `regression_risks` · `needs_more_context`(비어 있지 않으면 S1 로 돌아가 팩을 넓힌다) · `questions`(닫힌 질문) · 성능 작업이면 `perf: true`(+ `structure` 경로).
+스키마 `harness/schemas/plan.json`. 필수: 영역 판정 문장 · INV-1~5 각각 touched 여부와 이유 · Tier · 공유/격리(공유면 계약 3요소) · **대안 ≥ 2**(채택 표시) · `changes[]`(팩의 candidate 중에서만; 관문을 건드리면 `gate_contract` 필수; 성능 경로면 `rule_ids`) · `tests[]`(재현→기대) · `regression_risks` · `needs_more_context`(비어 있지 않으면 S1 로 돌아가 팩을 넓힌다) · `questions`(닫힌 질문) · 성능 작업이면 `perf: true`(+ `structure` 경로) · **수명 있는 상태**(구조체 포인터 필드·캐시 항목·슬롯)를 더하면 `lifetime_state` 와 그 상태를 **놓는 자리 전수** `release_sites`(free·decache·retire·clear·destroy 호출부마다 released/cannot-attach/not-applicable — META-REVIEW PR#7658, H-33).
 `python3 -c "import json,jsonschema;jsonschema.validate(json.load(open('<out>/plan.json')),json.load(open('harness/schemas/plan.json')))"` 로 스키마 통과 후, **plan 을 표로 요약해 사용자에게 보이고 승인·수정을 받는다.** 설계문서가 있으면 「아이디어」·「대안표」와 어긋나는 점을 명시. 승인 전엔 코드를 고치지 않는다.
 
 ## S3. 구현
@@ -47,7 +47,7 @@ python3 -m tools.harness.implement_pack --key CBRD-n --pr <PR>      # 리뷰 대
 ```bash
 python3 -m tools.harness.implement_gate --plan <out>/plan.json [--base HEAD|upstream/develop]
 ```
-① 범위 — 바뀐 파일·함수 ⊆ plan.changes ② `codestyle.sh` 로 포맷 차이 0 ③ 컴파일 — `compile_commands.json` 이 있으면 `-fsyntax-only`, 없으면(goto 빌드 디렉터리는 비어 있다) **ninja 오브젝트 타깃으로 실제 컴파일** ④ 바뀐 함수의 **관문 카운트 불균형**이 있는데 `gate_contract` 가 없으면 실패 ⑤ **성능 작업이면 `structure.json`**(`structure_check --stage gate`: 도착 증거·미시 벤치 결과까지 채워져 있어야). 건너뛴 검사가 있으면 `GATE OK*` 로 찍힌다 — `*` 가 있으면 컴파일을 확인한 것이 아니다.
+① 범위 — 바뀐 파일·함수 ⊆ plan.changes ② `codestyle.sh` 로 포맷 차이 0 ③ 컴파일 — `compile_commands.json` 이 있으면 `-fsyntax-only`, 없으면(goto 빌드 디렉터리는 비어 있다) **ninja 오브젝트 타깃으로 실제 컴파일** ④ 바뀐 함수의 **관문 카운트 불균형**이 있는데 `gate_contract` 가 없으면 실패 ⑤ **성능 작업이면 `structure.json`**(`structure_check --stage gate`: 도착 증거·미시 벤치 결과까지 채워져 있어야) ⑥ **수명 있는 상태 — 해제 경로 전수**: diff 가 구조체에 원시 포인터 필드를 더했거나 `lifetime_state` 가 있으면, 그래프가 뽑은 해제 경로 후보(놓는 이름 + 그 구조체를 쓰거나 새 필드를 만지는 함수) 하나하나가 `release_sites` 에 있어야 통과(`gate.json` `lifetime_candidates`). 건너뛴 검사가 있으면 `GATE OK*` 로 찍힌다 — `*` 가 있으면 컴파일을 확인한 것이 아니다.
 커밋을 나눴으면 **커밋마다** 컴파일: `python3 -m tools.harness.compile_check --commits <base>..<head>`(깨끗한 트리에서 커밋을 차례로 체크아웃해 그 커밋이 바꾼 파일만 굽고 원래 ref 로 돌아온다). 파일만 보려면 `--files a.c,b.cpp`. 실패 → 고치고 재실행(**재질의 상한 1회**; 두 번째도 실패면 사용자에게 상태 보고). 그다음 사용자 허락 하에 `goto CBRD-n` 빌드 → 재현 스크립트(`harness/templates/repro.sh`, `ServerSession`) → TC. **CTP 는 요청자 확인 후**(`review-testing`).
 - 빌드는 `cubrid-build` 스킬대로 — 백그라운드면 `nohup bash ~/bin/goto.sh <br> release > log 2>&1 &`(`goto` 는 alias 라 nohup 이 못 찾는다, H-24). 실패해 `cubrid` 가 사라지면 고친 rev 로 다시 goto 하면 복구(H-01). 빌드 중엔 엔진 소스를 고치지 않는다.
 - `cubrid server start` 를 **파이프로 받지 않는다**(데몬이 stdout 을 물어 안 끝난다 — `> file` 로, H-23).

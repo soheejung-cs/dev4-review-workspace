@@ -3,6 +3,8 @@
 우선순위(예산이 모자라면 뒤에서부터 잘린다):
  1. diff 의 변경 함수 본문(줄 번호 포함)          — 항상
  2. 그 함수의 도메인 사실(관문 호출)·짝 검사·경로   — 항상(작다)
+    + 불변조건(설계 §2 INV·BTL, 손댄 디렉터리 AGENTS.md 의 latch/lock 줄) — 항상, 배치마다
+    + 이미 규명된 함정(dev4-ai-source `modules/<모듈>.md` §3, 손댄 모듈만) — 항상, 그 모듈의 함수가 든 배치에만(H-29)
  3. 변경 함수가 만지는 struct 정의(1 hop)          — 예산 내
  4. 직접 caller/callee 서명(본문 아님)            — 예산 내
  5. rules/ 에서 diff 가 건드린 축의 규칙 행만        — 예산 내
@@ -13,6 +15,7 @@ from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Set, Tuple
 from .codegraph import CodeGraph, FunctionNode
 from . import reachability as R
+from . import rule_ids as RI
 
 def est_tokens(s: str) -> int: return int(len(s) / 3.2) + 1
 
@@ -54,18 +57,42 @@ def _slice(repo: str, file: str, a: int, b: int) -> str:
     except OSError: return ''
     return '\n'.join(f'{i:6d}  {lines[i-1]}' for i in range(max(1, a), min(len(lines), b) + 1))
 
-def _rule_rows(rules_dir: str, axes: Set[str]) -> str:
-    """rules/*.md 의 표 행 중 ID 접두어가 axes 에 있는 것만."""
-    rows = []
+# 규칙 행 상한 — 행 평균 56 tok(2026-10-28 rules/ 213행 실측)이라 60행 ≈ 3.4k tok, 팩 예산(12k)의 1/3 이하
+RULE_ROWS_CAP = 60
+
+def _rule_rows(rules_dir: str, axes: Set[str], cap: int = RULE_ROWS_CAP) -> str:
+    """rules/*.md 의 판정 행 중 축이 axes 에 드는 것만 — **ID 당 1행**(H-28).
+    ID 꼴·축은 rule_ids.py 가 정한다(MEAS-R-26 → MEAS-R, A01 → A, PRIO-04.5 → PRIO). 행의 축 = ID 칸의 ID 들의 축 +
+    문장이 'X 위반' 으로 가리키는 규칙의 축(17장 안티패턴 `A01 … ALLOC-01 위반` 은 ALLOC 축과 함께 들어온다).
+    한 ID 는 처음 나온 행 하나만 싣는다 — 같은 ID 를 가진 뒤 행이 상한을 먹지 않게. ID 칸이 둘인 행(`BR-04/A59`)은 새 ID 가
+    하나라도 있으면 싣는다. 상한을 넘겨 뺀 행이 있으면 마지막 줄에 수와 열 곳을 적는다(LLM 이 '없는 것' 을 알게)."""
+    rows, seen, cut = [], set(), {}
     for fn in sorted(os.listdir(rules_dir)) if os.path.isdir(rules_dir) else []:
         if not fn.endswith('.md'): continue
-        for l in open(os.path.join(rules_dir, fn), encoding='utf-8'):
-            m = re.match(r'\|\s*([A-Z]{2,5})-\d+', l)
-            if m and m.group(1) in axes: rows.append(l.rstrip())
-    return '\n'.join(rows[:60])
+        with open(os.path.join(rules_dir, fn), encoding='utf-8') as fp: lines = fp.readlines()
+        for l in lines:
+            ids = RI.row_ids(l)
+            if not ids or all(i in seen for i in ids): continue
+            if not (({RI.axis(i) for i in ids} | RI.violated_axes(l)) & axes): continue
+            if len(rows) >= cap:
+                cut[fn] = cut.get(fn, 0) + 1; continue
+            seen.update(ids); rows.append(l.rstrip())
+    if cut:
+        rows.append(f'- (상한 {cap}행을 넘어 ' + ', '.join(f'rules/{fn} {n}행' for fn, n in sorted(cut.items()))
+                    + f' 을 뺐다 — 필요하면 그 문서에서 축 {sorted(axes)} 의 표를 연다)')
+    return '\n'.join(rows)
 
 AXIS_BY_FACT = {'latch_fix': {'PAR', 'COH', 'MEM', 'BTL'}, 'lock_acquire': {'PAR', 'CC', 'BTL'},
                 'log_append': {'SER', 'SYS'}, 'alloc': {'ALLOC', 'MEM'}, 'sysop_start': {'CC'}}
+# 관문 사실로는 안 잡히는 축 — 손댄 디렉터리로 더한다. 옵티마이저(조인 순서·선택도·비용)는 성능 §6 의 플랜 증거 판정(MEAS-R)
+AXIS_BY_DIR = {'src/optimizer': {'MEAS-R'}}
+
+def _dir_axes(touched_dirs: Set[str]) -> Set[str]:
+    out: Set[str] = set()
+    for d in touched_dirs:
+        for pre, ax in AXIS_BY_DIR.items():
+            if d == pre or d.startswith(pre + '/'): out |= ax
+    return out
 
 def _invariants(rules_dir: str, repo: str, touched_dirs: Set[str]) -> str:
     """항상 들어가는 불변조건: 설계-리뷰-규칙 §2 INV 표 + 손대는 디렉터리 AGENTS.md 의 latch/lock 규칙 줄."""
@@ -85,6 +112,74 @@ def _invariants(rules_dir: str, repo: str, touched_dirs: Set[str]) -> str:
             rows += [f'- ({d}/AGENTS.md) {h[:200]}' for h in hits[:8]]
     return '\n'.join(rows)
 
+PITFALLS_TITLE = 'known pitfalls'
+# 모듈 하나의 §3 상한 — 2026-10-28 가장 긴 src-storage §3(76줄)을 해소됨 접기 뒤 다 싣는 크기. 넘으면 줄 단위로 자르고 끝에 적는다
+PITFALLS_CAP_TOKENS = 3000
+
+def source_notes_root() -> str:
+    """소스 분석 지식 리포(dev4-ai-source) 위치 — DEV4_SOURCE_NOTES, 없으면 각 컨테이너의 clone 자리(그 리포 README)."""
+    return os.path.expanduser(os.environ.get('DEV4_SOURCE_NOTES') or '~/dev/docs/dev4-ai-source')
+
+def _module_of(d: str) -> Tuple[str, str]:
+    """손댄 디렉터리 → (모듈 뿌리, 노트 파일). src/query/parallel → (src/query, src-query.md), pl_engine/x → (pl_engine, pl_engine.md)."""
+    parts = [p for p in d.split('/') if p]
+    if not parts: return '', ''
+    if parts[0] == 'src' and len(parts) > 1: return 'src/' + parts[1], f'src-{parts[1]}.md'
+    return parts[0], f'{parts[0]}.md'
+
+def _note_section3(text: str) -> List[str]:
+    """노트의 `## 3.` 절 본문(다음 `## ` 머리 전까지). 절 머리 아래 안내 인용문(`> …`)은 뺀다."""
+    out, on = [], False
+    for l in text.split('\n'):
+        if l.startswith('## '):
+            if on: break
+            on = l.startswith('## 3.')
+            continue
+        if on and not l.startswith('>'): out.append(l)
+    while out and not out[0].strip(): out.pop(0)
+    while out and not out[-1].strip(): out.pop()
+    return out
+
+def _fold_resolved(lines: List[str]) -> List[str]:
+    """`- **[해소됨 …]**` 항목은 첫 줄(200자)만 — 회귀 대조에는 무엇이었나만 있으면 되고, 전문은 미해결 항목에 예산을 쓴다."""
+    out, skip = [], False
+    for l in lines:
+        if l.startswith('- '):
+            skip = l.startswith('- **[해소됨')
+            out.append(l[:200] + (' …' if skip and len(l) > 200 else '')); continue
+        if skip and (l.startswith(' ') or l.startswith('\t')): continue   # 해소됨 항목의 이어지는 줄
+        skip = False
+        out.append(l)
+    return out
+
+def _known_pitfalls(touched_dirs: Set[str], notes_root: str = '', cap: int = PITFALLS_CAP_TOKENS) -> List['Section']:
+    """손댄 디렉터리의 모듈 노트 §3(예비 이슈 — 미수정 버그·의심·구조적 한계)을 모듈마다 절 하나로(H-29).
+    리뷰가 이미 규명된 함정을 다시 밟거나 미수정 상태를 정상으로 가정하지 않게 — 예전에는 LLM 이 노트를 열어야 했다.
+    노트는 읽기만 한다(pull 하지 않는다 — 어느 판을 읽었는지는 manifest 의 source_notes_git)."""
+    root = notes_root or source_notes_root()
+    mods: Dict[str, Set[str]] = {}
+    for d in touched_dirs:
+        mroot, fn = _module_of(d)
+        if fn: mods.setdefault(fn, set()).add(mroot)
+    out = []
+    for fn in sorted(mods):
+        p = os.path.join(root, 'modules', fn)
+        if not os.path.isfile(p): continue
+        with open(p, encoding='utf-8', errors='replace') as fp: body = _fold_resolved(_note_section3(fp.read()))
+        if not body: continue
+        kept, tok = [], 0
+        for i, l in enumerate(body):
+            if tok + est_tokens(l) > cap:
+                kept.append(f'… ({len(body) - i}줄 더 — 상한 {cap} tok. modules/{fn} §3 을 연다)'); break
+            kept.append(l); tok += est_tokens(l)
+        mroot = sorted(mods[fn])[0]
+        out.append(Section(f'{PITFALLS_TITLE} {mroot} (dev4-ai-source modules/{fn} §3)', '\n'.join(kept), 2))
+    return out
+
+def _pitfall_root(title: str) -> str:
+    """known pitfalls 절 제목의 모듈 뿌리(src/query 등)."""
+    return title[len(PITFALLS_TITLE):].split()[0] if title.startswith(PITFALLS_TITLE) else ''
+
 def _episodic(examples_dir: str, files: Set[str]) -> str:
     """과거 리뷰 결과(episodic memory): examples/episodic/PR-*.json 중 같은 파일을 건드린 항목."""
     d = os.path.join(examples_dir, 'episodic'); rows = []
@@ -99,8 +194,9 @@ def _episodic(examples_dir: str, files: Set[str]) -> str:
     return '\n'.join(rows[:20])
 
 def build(repo: str, g: CodeGraph, diff_text: str, rules_dir: str, budget: int = 12000, examples_dir: str = '',
-          changed: Dict[str, List[int]] = None, label: str = 'changed function') -> ContextPack:
-    """changed: 미리 계산한 {file: [lines]} (구현 팩처럼 diff 가 없을 때). 없으면 diff_text 를 파싱한다."""
+          changed: Dict[str, List[int]] = None, label: str = 'changed function', notes_root: Optional[str] = '') -> ContextPack:
+    """changed: 미리 계산한 {file: [lines]} (구현 팩처럼 diff 가 없을 때). 없으면 diff_text 를 파싱한다.
+    notes_root: 모듈 노트 리포(빈 문자열 = source_notes_root(), None = 함정 절을 싣지 않음)."""
     changed = changed if changed is not None else parse_unified_diff(diff_text)
     pack = ContextPack(budget=budget)
     seen_text: Set[str] = set()
@@ -108,6 +204,8 @@ def build(repo: str, g: CodeGraph, diff_text: str, rules_dir: str, budget: int =
     touched_dirs = {os.path.dirname(f) for f in changed}
     inv = _invariants(rules_dir, repo, touched_dirs)
     if inv: pack.sections.append(Section('invariants (always included)', inv, 2))
+    if notes_root is not None:
+        pack.sections += _known_pitfalls(touched_dirs, notes_root)
     for file in sorted(changed):
         if not file.endswith(('.c', '.cpp', '.h', '.hpp', '.cc')): continue
         for fn in g.functions_in(file, changed[file]):
@@ -138,7 +236,8 @@ def build(repo: str, g: CodeGraph, diff_text: str, rules_dir: str, budget: int =
             if b - a > 120: b = a + 120
             pack.sections.append(Section(f'struct {sname} [{sfile}:{a}-{b}]', '```c\n' + _slice(repo, sfile, a, b) + '\n```', 3))
     if sigs: pack.sections.append(Section('direct callers/callees (signatures)', '\n'.join('- ' + s for s in sorted(set(sigs))), 4))
-    rows = _rule_rows(rules_dir, axes or {'MEAS'})
+    axes = (axes or {'MEAS'}) | _dir_axes(touched_dirs)
+    rows = _rule_rows(rules_dir, axes)
     if rows: pack.sections.append(Section(f'rules for touched axes {sorted(axes)}', rows, 5))
     epi = _episodic(examples_dir, set(changed)) if examples_dir else ''
     if epi:
@@ -157,36 +256,47 @@ def build(repo: str, g: CodeGraph, diff_text: str, rules_dir: str, budget: int =
 
 
 def batches(pack: ContextPack, budget: int) -> List[ContextPack]:
-    """예산 초과 팩을 파일 단위 배치로 나눈다(Metis same-file batch split). 공유 절(invariants·rules·episodic)은 배치마다 들어간다.
+    """예산 초과 팩을 파일 단위 배치로 나눈다(Metis same-file batch split). 공유 절(invariants, 우선순위 5 이상 — rules·큰 episodic)은 배치마다 들어간다.
+    모듈 함정 절(known pitfalls, H-29)은 그 모듈의 함수가 든 배치에만 들어간다(배치마다 모든 모듈의 §3 을 싣지 않게).
     한 파일의 함수 묶음이 그 자체로 예산을 넘으면 함수 단위로 더 쪼갠다. 결정론: 파일명·함수 시작 순."""
     total = sum(s.tokens for s in pack.sections)
     if total <= budget: return [pack]
-    shared = [s for s in pack.sections if s.priority >= 5 or s.title.startswith('invariants')]
+    scoped = [s for s in pack.sections if s.title.startswith(PITFALLS_TITLE)]
+    shared = [s for s in pack.sections if (s.priority >= 5 or s.title.startswith('invariants')) and s not in scoped]
     per_fn: Dict[str, List[Section]] = {}
     order: List[str] = []
     for s in pack.sections:
-        if s in shared: continue
+        if s in shared or s in scoped: continue
         m = re.match(r'(?:changed function|graph evidence) (\S+?)(?: \[|$)', s.title)   # 함수(fid) 단위 키
         key = m.group(1) if m else '_other'
         if key not in per_fn: per_fn[key] = []; order.append(key)
         per_fn[key].append(s)
+    def scoped_for(secs) -> List[Section]:   # 이 절들이 든 배치에 붙을 함정 절 — 함수 절 제목의 파일로 모듈을 정한다
+        roots = {_module_of(os.path.dirname(m.group(1)))[0]
+                 for s in secs for m in [re.match(r'(?:changed function|candidate function|graph evidence) ([^:\s]+):', s.title)] if m}
+        return [s for s in scoped if _pitfall_root(s.title) in roots]
+    def need(secs, have_secs) -> int:   # secs 를 이 배치에 넣으면 새로 붙는 함정 절의 토큰
+        have = {id(s) for s in scoped_for(have_secs)}
+        return sum(s.tokens for s in scoped_for(list(have_secs) + list(secs)) if id(s) not in have)
     shared_tok = sum(s.tokens for s in shared)
     out: List[ContextPack] = []; cur: List[Section] = []; cur_tok = shared_tok; cur_files: Set[str] = set()
     def flush():
         if cur:
-            b = ContextPack(budget=budget); b.sections = list(shared) + list(cur); out.append(b)
+            b = ContextPack(budget=budget); b.sections = list(shared) + scoped_for(cur) + list(cur); out.append(b)
     for key in order:
         secs = per_fn[key]; tok = sum(s.tokens for s in secs)
-        if tok + shared_tok > budget:
+        if tok + shared_tok + need(secs, []) > budget:
             for sec in secs:   # 한 함수가 혼자 예산을 넘는다: 본문을 앞뒤 절반씩 잘라 표시하고 LLM 에 알린다
                 if sec.title.startswith('changed function') and sec.tokens > budget // 2:
                     keep = int(len(sec.body) * (budget // 2) / sec.tokens)
                     sec.body = sec.body[:keep] + f'\n      ... (truncated to fit batch budget: {sec.tokens} tok; ask for the rest by line range)\n```'
                     sec.tokens = est_tokens(sec.body)
             tok = sum(s.tokens for s in secs)
-        if cur and (cur_tok + tok > budget or (cur_files and key not in cur_files and len(cur_files) >= 1 and cur_tok + tok > budget * 0.7)):
+        add = need(secs, cur)
+        if cur and (cur_tok + tok + add > budget or (cur_files and key not in cur_files and len(cur_files) >= 1 and cur_tok + tok + add > budget * 0.7)):
             flush(); cur = []; cur_tok = shared_tok; cur_files = set()
-        cur += secs; cur_tok += tok; cur_files.add(key)
+            add = need(secs, cur)
+        cur += secs; cur_tok += tok + add; cur_files.add(key)
     flush()
     for i, b in enumerate(out): b.sections.insert(0, Section(f'batch {i+1}/{len(out)}', f'이 배치는 전체 diff 의 일부다. 다른 배치의 함수는 여기 없다 — 없는 것을 추측하지 말고 "다른 배치 참조" 로 적는다.', 0))
     return out

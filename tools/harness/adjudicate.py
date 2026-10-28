@@ -7,6 +7,7 @@ withheld = 맞을 수 있지만 게시하지 않는다(주석 제안이 comment_
 import os, re, subprocess
 from typing import Dict, List, Tuple
 from .codegraph import CodeGraph
+from . import rule_ids as RI
 
 
 def _ref_ok(e, check):
@@ -40,10 +41,14 @@ REACH_WORDS = r'닿는|닿을|도달|보이는 경로|사용자에게 보이|사
 def _in_diff(changed: Dict[str, List[int]], file: str, line: int, slack: int = 3) -> bool:
     return any(abs(l - line) <= slack for l in changed.get(file, []))
 
-def adjudicate(repo: str, g: CodeGraph, changed: Dict[str, List[int]], findings: List[Dict], rules_text: str) -> List[Dict]:
+def adjudicate(repo: str, g: CodeGraph, changed: Dict[str, List[int]], findings: List[Dict], rules_text: str,
+               git_repo: str = '', base_rev: str = None) -> List[Dict]:
+    """repo: head 의 파일을 읽는 디렉터리(worktree). git_repo: git 명령을 돌릴 리포(기본 repo) — precheck 처럼 repo 가 git 체크아웃이
+    아닌 임시 디렉터리일 때 엔진 리포를 준다. base_rev: 기준 rev(merge-base) 를 이미 알면 준다(없으면 git_repo 의 HEAD 로 구한다)."""
     out = []
-    rule_ids = set(re.findall(r'\b([A-Z]{2,5}-\d{2})\b', rules_text))
-    base_rev = _base_rev(repo)
+    git_repo = git_repo or repo
+    rule_ids = RI.known_ids(rules_text)   # 판정 행의 ID 전부(MEAS-R-26·A01·PRIO-04.5 꼴 포함) + 문장 속 인용 — H-28
+    base_rev = _base_rev(git_repo) if base_rev is None else base_rev
     for f in findings:
         obligations = {'anchor_exists': False, 'anchor_in_diff': False, 'evidence_resolves': False, 'rule_known': False, 'graph_supports': None, 'why_present': False, 'proposal_present': False, 'verified_if_error': True}
         status = 'inconclusive'; reasons = []
@@ -86,7 +91,7 @@ def adjudicate(repo: str, g: CodeGraph, changed: Dict[str, List[int]], findings:
         if re.search(BASELINE_WORDS, text, re.I):
             b = f.get('baseline') or {}
             bev = b.get('evidence') or []
-            bok = [e for e in bev if _ref_ok(e, lambda m: _line_exists_at(repo, base_rev, m.group(1), int(m.group(2))))]
+            bok = [e for e in bev if _ref_ok(e, lambda m: _line_exists_at(git_repo, base_rev, m.group(1), int(m.group(2))))]
             obligations['baseline_ok'] = b.get('claim') in ('same', 'differs', 'new') and bool(bev) and len(bok) == len(bev)
             if not obligations['baseline_ok']:
                 reasons.append(f'develop 과의 관계를 주장했는데 baseline(기준 rev {base_rev[:9] or "?"} 의 file:line, claim same/differs/new) 이 없거나 해석 안 됨 {len(bok)}/{len(bev)} — 기준 소스의 같은 함수를 읽고 적어야 한다')
@@ -105,7 +110,7 @@ def adjudicate(repo: str, g: CodeGraph, changed: Dict[str, List[int]], findings:
             obligations['reach_ok'] = len(rok) >= 2 and len(rok) == len(rt)
             if not obligations['reach_ok']:
                 reasons.append(f'도달 가능성을 주장했는데 reach_trace(실패 조건의 생산자까지 file:line 2곳 이상) 가 없거나 해석 안 됨 {len(rok)}/{len(rt)} — 분기 하나만 보고 "사용자에게 보인다" 고 쓰지 않는다')
-        rids = set(f.get('rule_ids') or [])
+        rids = set(RI.normalize(f.get('rule_ids')))
         obligations['rule_known'] = bool(rids) and rids <= rule_ids
         if rids and not obligations['rule_known']: reasons.append(f'모르는 규칙 ID {sorted(rids - rule_ids)}')
         # 그래프 검증: 짝 불균형/경로 주장을 사실과 대조
@@ -247,11 +252,14 @@ def self_check_ninja(repo: str, files: List[str], timeout: int = 1800) -> Dict:
 import json, hashlib, glob
 
 def validate_findings(findings: List[Dict], schema_path: str) -> Tuple[List[Dict], List[Dict]]:
-    """finding.json 스키마 검증. 통과/실패로 나누고 실패 이유를 붙인다(재질의 입력)."""
+    """finding.json 스키마 검증. 통과/실패로 나누고 실패 이유를 붙인다(재질의 입력).
+    검증 전에 rule_ids 를 정리한다 — 판정 행의 ID 칸을 그대로 옮긴 `BR-04/A59` 는 두 ID 로 나눈다(rule_ids.normalize, H-28)."""
     import jsonschema
     schema = json.load(open(schema_path, encoding='utf-8'))
     ok, bad = [], []
     for f in findings:
+        if f.get('rule_ids'):
+            f['rule_ids'] = RI.normalize(f['rule_ids'])
         errs = sorted(jsonschema.Draft7Validator(schema).iter_errors(f), key=lambda e: list(e.path))
         if errs: bad.append(dict(f, schema_errors=[f'{"/".join(map(str, e.path)) or "<root>"}: {e.message}' for e in errs]))
         else: ok.append(f)

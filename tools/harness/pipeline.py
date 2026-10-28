@@ -6,6 +6,7 @@
 import hashlib, json, os, re, subprocess, sys, time
 import yaml
 from . import codegraph as CG, context_pack as CP, arch_infer as AI, adjudicate as AD, perf_claims as PC, episodic as EP, or_buf as OB, pr_refs as PR, unit_regress as UR
+from . import static_lint as SL   # 정적 린트 노드 static_lint (H-15·H-33) — 노드 함수는 static_lint.node
 from .run_support import Worktree, sh
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -110,9 +111,11 @@ def n_pr_refs(c, a):
 
 
 def _mandatory(rules_dir):
-    """두 규칙 문서의 '의무 항목' 절(성능 §2, 설계 §1·§2)만 뽑는다 — LLM 이 매 리뷰에서 반드시 확인할 것."""
+    """두 규칙 문서의 '의무 항목' 절만 뽑는다 — LLM 이 매 리뷰에서 반드시 확인할 것.
+    성능 §0(사용 규약: 측정 먼저·핫/콜드·우선순위·C 에 C++ 관용구 금지·ID 인용)·§2(체크리스트), 설계 §0·§1·§2.
+    성능 §0 은 2026-10-28 부터 넣는다(H-38) — 그 전에는 harness-reviewer 본문 한 줄이 하네스 경로의 유일한 전달 경로였다."""
     out = []
-    for fn, secs in (('성능-리뷰-규칙.md', ('## 2.',)), ('설계-리뷰-규칙.md', ('## 0.', '## 1.', '## 2.'))):
+    for fn, secs in (('성능-리뷰-규칙.md', ('## 0.', '## 2.')), ('설계-리뷰-규칙.md', ('## 0.', '## 1.', '## 2.'))):
         p = os.path.join(rules_dir, fn)
         if not os.path.isfile(p): continue
         txt = open(p, encoding='utf-8').read(); parts = txt.split('\n## ')
@@ -191,9 +194,10 @@ def n_review_request(c, a):
 1. 아래 컨텍스트 팩만 읽는다. 팩에 없는 코드는 "없음"으로 적고 추측하지 않는다(다른 배치 참조 가능).
 2. 지적은 두 층으로 낸다 — **[코드 리뷰]**: 정확성·관문 짝·에러 경로·핫패스 비용(성능 규칙 ID 인용). **[설계 리뷰]**: 아래 불변조건·계층 간선(arch.json)·공유 자원 계약(설계 규칙 §4)·대안표·결정 요청 Q.
 3. 모든 지적에 **`why`(왜 문제가 되는지)** 를 쓴다 — 이대로 두면 누가/무엇이 어떻게 되는지(오답·정지·회복 불가·비결정성·발견 가능성), 근거(수치·규칙 ID·스펙 절). why 없는 지적은 판정에서 거절된다.
-3-1. 모든 지적에 **`proposal`(제안 + 예시)** 를 쓴다 — 주석 관련이면 그대로 붙일 수 있는 확정 문구(게시 시 ```suggestion 블록), 코드면 스케치, 문서면 문구, 테스트면 TC 시나리오. "고쳐 달라"만 있는 지적은 판정에서 거절된다.
+3-1. 모든 지적에 **`proposal`(제안 + 예시)** 를 쓴다 — 주석 관련이면 그대로 붙일 수 있는 확정 문구(게시 시 ```suggestion 블록), 코드면 스케치, 문서면 문구, 테스트면 TC 시나리오. "고쳐 달라"만 있는 지적은 판정에서 거절된다. **```suggestion 울타리는 줄 맨 앞에서 열고 닫는다** — `제안:` 같은 문장·목록 뒤에 붙이면 블록이 열리지 않아 본문이 마크다운으로 렌더된다(2026-10-06 실측, 정본 `skills/review-response/SKILL.md` 「게시 형식」).
 3-1-1. **`주석 제안` 은 두 경우에만 낸다**(사용자 지시 2026-10-27): ① 지금 있는 주석이 코드·동작과 **다르다** — `comment_basis: "mismatch"`, evidence 에 그 주석 줄과 다른 사실의 file:line ② 이 PR 이 **새 API**(함수·매크로·구조체 필드)를 만들어 그 **쓰임을 제한**하는 계약을 적어야 한다 — `comment_basis: "new_api_contract"`. 설명 보강·의도 기록·용어 같은 그 밖의 주석 제안은 내지 않는다(필요하면 `function_notes` 에만). 기준 미달은 판정기가 `withheld`(게시 안 함)로 뺀다.
 3-2. **에러 우려**(데드락·크래시·누수·오답·UB·경합) 지적은 `verification` 을 채운다 — 하네스/이 세션이 무엇을 어떻게 확인했나(`static`: 관련 함수를 직접 읽어 순서·초기화 등을 확정 / `dynamic`: 빌드·재현 스크립트 실행 결과). 확인 없이 우려만 있으면 severity 를 `question` 으로 내린다.
+3-2-1. **재현·예시 SQL 은 최소 테이블로**(사용자 지시 2026-10-08) — 테이블·조건을 하나씩 빼도 현상이 남으면 뺀다, 별칭은 역할(`o` 바깥 / `i` 안쪽), 부질의에만 나오는 표는 조인 대상이 아니라고 적는다, 이슈·TC 원문 질의는 옮기지 않고 링크만(정본 `skills/sql-difftest/SKILL.md` §2-4).
 3-3. 모든 지적에 `category`(버그 가능성 / 성능 검토 / 설계 판정 / 주석 제안 / 문서 제안 / 테스트 제안 / 측정 요청 / 확인 질문)를 붙이고 `importance`(높음 🔴 / 중간 🟡 / 낮음 🟢)를 판단한다 — 주석·문서 제안은 낮음, 확인된 버그·머지 차단은 높음. 게시 첫 줄은 `[층] [카테고리] 이모지`.
 3-5. **`function_notes` — 배정 팩의 `## changed function` 전부에 쓴다(결함이 없어도).** (서브에이전트 사슬에서는 판정이 아니라 `harness-notes` 가 병렬로 쓴다 — 2026-10-27 A안; 단일 세션 리뷰면 판정이 함께 쓴다.) 항목마다 `file`·`function`·`line`(팩이 적은 함수 시작 줄 그대로)·`role`(누가 부르고 무엇을 돌려주나, 동어반복 금지)·`before`(develop 의 같은 함수를 **실제로 읽고** 쓴다; 신설이면 "develop 에 없음")·`after`·`changed`(시그니처/분기/자료구조/삭제 같은 성격 + 가능하면 ±줄 수)·`risk`(none|watch|defect). 이것이 보고서 **§2 변경 지도**와 한국어 주석 리뷰 PR 의 원천이다 — 이게 비면 보고서가 '지적 목록'이 되어 읽는 사람이 변경을 이해하지 못한다(사용자 지적 2026-10-06: PR#8022 보고서가 89파일 중 24개만 언급, 함수명 3종).
 3-6. **develop 과의 관계를 말하는 지적은 `baseline` 을 채운다** — "develop 은 X 였다 / 이 PR 이 바꿨다 / 하나만 고쳤다 / 회귀" 는 전부 기준 rev(merge-base) 의 **같은 함수를 실제로 읽은** `file:line` 과 `claim`(same·differs·new) 이 있어야 valid 다. `same` 이면 선재 결함 — 첫 줄에 "(develop 동일 — 별도 이슈 후보)" 가 붙고 blocking 으로 올라가지 않는다. (PR#8022 2026-10-06: 추출된 셀 함수의 비대칭·날짜 오류 코드·IMPLICIT JSON 검사 — 기준 코드를 읽지 않은 지적 3건을 작성자가 기준 줄 번호로 반박했다. 이동·추출 PR 은 **옮긴 코드의 원본 자리**를 먼저 찾는다.)
@@ -317,6 +321,7 @@ def n_report(c, a):
 
 REGISTRY = {'review_request': n_review_request, 'report': n_report, 'worktree': n_worktree, 'diff_map': n_diff_map, 'codegraph': n_codegraph, 'pack': n_pack, 'arch': n_arch, 'perf_claims': n_perf_claims, 'or_buf': n_or_buf,
             'validate': n_validate, 'gate': n_gate, 'self_check': n_self_check, 'episodic': n_episodic, 'pr_refs': n_pr_refs, 'unit_regress': n_unit_regress}
+REGISTRY['static_lint'] = SL.node   # findings.auto.json 에 append(or_buf 뒤) — 실수 범위 바깥 꼴·상태 버림·에러 경로·정렬 할당·조인 형상
 
 def load(path):
     y = yaml.safe_load(open(path, encoding='utf-8'))
@@ -343,6 +348,8 @@ def run(pipeline_path, pr, out_base, repo, findings_path=None, model=None, local
     manifest = {'pipeline': y['harness'], 'pipeline_sha': _sha([pipeline_path]), 'pr': pr, 'head': sha, 'local_head': bool(local_sha), 'diff_base': local_base if local_sha else 'pr', 'title': meta['title'], 'author': meta['author']['login'], 'jira': meta['jira'],
                 'harness_git': sh('git', '-C', ROOT, 'rev-parse', '--short', 'HEAD').stdout.strip(), 'rules_sha': _sha([os.path.join(ROOT, 'rules', f) for f in os.listdir(os.path.join(ROOT, 'rules'))]),
                 'skills_sha': _sha([os.path.join(dp, f) for dp, _, fs in os.walk(os.path.join(ROOT, 'skills')) for f in fs if f == 'SKILL.md']),
+                # 팩의 known pitfalls 절(모듈 노트 §3, H-29)이 어느 판을 읽었나 — 노트는 다른 리포라 pull 시점에 따라 갈린다
+                'source_notes_git': sh('git', '-C', CP.source_notes_root(), 'rev-parse', '--short', 'HEAD').stdout.strip() or 'none',
                 'model_id': model or os.environ.get('HARNESS_MODEL', 'unset'), 'started': time.strftime('%Y-%m-%dT%H:%M:%S'), 'stages': {}}
     try:
         for st, nodes in y['stages'].items():

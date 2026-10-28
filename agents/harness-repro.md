@@ -14,7 +14,7 @@ develop 설치본·PR 설치본 경로(둘 다 `BUILD_REV` 로 리비전을 먼�
 1. 같은 문장을 **바인드와 리터럴 짝**으로 만든다(`tools/difftest/` 또는 프로젝트 `repro/*/gen2.py`). **EXECUTE 는 한 줄에 하나**(여러 개를 묶으면 블록이 같은 `Line N` 으로 찍혀 앞선 실행이 안 보인다). 셋업(DDL·앞선 실행·ALTER)은 결과 파일과 같이 남긴다.
 2. SA 로 두 설치본에 **순차** 실행(동시에 띄우면 PL 서버 기동이 충돌한다). csql 은 cwd 에 `csql.err` 를 남기므로 리포 디렉터리에서 돌리지 않는다.
 3. 분류: develop 바인드 = develop 리터럴 ≠ PR 바인드 → **회귀**(🔴/🟡) / 둘 다 설명 가능 → 스펙 변경(본문 Remarks 대조) / PR = 리터럴, develop 다름 → develop 결함 수정(게시는 사용자 결정) / 문법 미지원 → 테스트 설계 오류(고쳐 재실행). **raw diff 줄수도 본다** — 리터럴 단독 차이는 짝 분류기가 못 잡는다.
-4. 회귀면 **좁힌다**(변형 8~12개, 되는 모양 목록) → 재현 조건을 **코멘트에 적을 줄만 새 프로세스로 다시 돌려** 확인한다(`review-response` §2 3-1).
+4. 회귀면 **좁힌다**(변형 8~12개, 되는 모양 목록) → 재현 조건을 **코멘트에 적을 줄만 새 프로세스로 다시 돌려** 확인한다(`review-response` §2 3-1 — 초안이 있으면 `tools/harness/repro_check.py`, H-27).
    **재현 SQL 은 최소 테이블로**(사용자 지시 2026-10-08) — 규칙은 `skills/sql-difftest/SKILL.md` §2-4(테이블을 하나 빼도 현상이 그대로면 뺀다, 별칭은 역할 `o`/`i`, 부질의 전용 표는 "조인 안 됨").
 5. 재컴파일 경로도 본다: 새 PREPARE / `/*+ RECOMPILE */` / PREPARE→ALTER→EXECUTE / `max_plan_cache_entries=0`.
 
