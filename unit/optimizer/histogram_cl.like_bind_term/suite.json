@@ -1,0 +1,36 @@
+{
+ "name": "CBRD-27143 LIKE / NOT LIKE in the per-predicate bind fingerprint + unpeeked flag only on columns with a histogram -- histogram_split_hv_predicate (LIKE candidates: user host variable as the pattern, column on the left; ESCAPE form, `? LIKE col`, auto-parameterized pattern and RLIKE excluded) · hv_pred_walk column test = histogram_get_total_rows with the class-cache context (2364bcc7a; adc0adf4a used histogram_column_has_histogram) · bind_term_walk (LIKE slot rows = sel * total, NOT LIKE on 1 - LIKE, 1-row floor, ` NULL` slot, UNKNOWN when unpriced, tree order, memo key includes the operator) · hv_pred_walk (candidate AND a histogram with rows, zero-row blob not flagged, flagged == fingerprint has a slot, probe count, LIKE flags)",
+ "file": "src/optimizer/histogram/histogram_cl.cpp",
+ "mode": "cs",
+ "seams": [
+  "histogram_get_like_selectivity",
+  "histogram_get_equal_selectivity",
+  "histogram_get_comp_selectivity",
+  "histogram_get_total_rows",
+  "histogram_blob_from_class_cache"
+ ],
+ "appendix": "hooks.cpp",
+ "test": "test.cpp",
+ "watch": [
+  "src/optimizer/histogram/histogram_cl.hpp",
+  "src/query/bind_variant.h",
+  "src/optimizer/query_planner.c"
+ ],
+ "fakes": "Real: the walks (bind_term_vector -> bind_term_walk -> bind_term_add / bind_term_memo_hit / bind_term_key, hv_pred_walk), histogram_split_hv_predicate / _range, histogram_is_user_host_var, bind_card_arg_value, bind_card_range_selectivity, bind_value_image_mix. Seams: histogram_get_like_selectivity (histogram_cl.cpp:2110 at adc0adf4a) keeps the real 'cannot price' exits -- rhs NULL, no histogram (reader init: end-of-path PT_NAME, annotation, else the class cache while a fingerprint walk is active, 724-760), DB_VALUE type neither STRING nor CHAR (NULL value, uncast INTEGER), empty pattern; otherwise returns the test's estimate per host-variable index, unclamped like the real one (MAX (1/N, sel) at 2266, no MIN 1). histogram_get_equal/comp_selectivity (1181/1377): rhs NULL, no histogram, DB_TYPE_NULL key -> false, else the test's value. histogram_get_total_rows (1541): the reader model -- end-of-path PT_NAME, annotation, else (bind_fp_active_statement set, read through hooks.cpp unitseam_fp_active_*) histogram_blob_from_class_cache, annotating the name on a hit like the real reader (which annotates a parser-arena copy) -- then the column's rows (default 2^20 so sel * total is exact; a test can set 0 = blob over no rows), true when > 0; the LIKE / equality / comparison fakes use the same model and decline on 0 rows. histogram_blob_from_class_cache (666, TU static): the test's set of columns whose class cache holds a histogram; counts calls. The memo cases use pre-annotated columns. Others: parser_walk_tree = parse_tree_cl.c pt_walk_private order (pre -> PT_EXPR arg1/arg2/arg3 -> or_next -> next -> post); pt_get_end_path_node verbatim; qo_classify = query_planner.c cases these trees reach; qo_between_range_histogram_selectivity = the one-sided operators' single comparison probe; or_packed_value_size / or_pack_value = type + string bytes / int (only 'equal value -> equal image, different -> different' matters for the memo key). Trees: ESCAPE = PT_LIKE (col, PT_LIKE_ESCAPE (?, c)) (type_checking.c), `col > ?` = PT_RANGE (col, PT_BETWEEN_GT_INF (?)) (qo_convert_to_range). Strings set as db_value_domain_init (VARCHAR) + db_make_db_char leave them.",
+ "note": "2026-10-28 head 2364bcc7a (hv_pred_walk -> histogram_get_total_rows with the class-cache context; LIKE estimate clamped to [0,1] before the NOT LIKE complement = U1 fix): 29/30 PASS -- only [defect] U1 FAILs = closed (defects_fixed_in); base d7378784f 10/30; previous head adc0adf4a 27/30 (FAIL: zero-row blob flagged, flagged != usable for a zero-row column, clamp contract; U1 PASS = present). Mutations on 2364bcc7a: flag on the operator alone -> 6 FAIL, no class-cache context in the flag walk -> 8 FAIL, drop the clamp -> clamp contract FAILs and U1 PASSes again. Patches: harness-out/8006/adc0adf4a/unit/histogram_cl.like_bind_term/mut2_*.diff (adc0adf4a ones: fix_u1_clamp_not_like.diff, mut_*.diff). Successor of histogram_cl.like_fingerprint (bound to bind_fp_walk, removed by CBRD-27490 620ceaf6a); its split and G2 contracts carried over, fp/band/G1/null re-expressed on the row vector (slot = MAX (1, sel * total); unpriceable keeps an UNKNOWN slot; a NULL pattern takes a ` NULL` slot of 1 row). U1 (latent, low, adc0adf4a): NOT LIKE complemented the unclamped LIKE estimate; 1 + 2^-52 (MCV frequencies count/sample summed in value order overshoot 1, e.g. counts 9, 18, 1 of 28 rows fully sampled) gave a negative selectivity -> BIND_TERM_UNKNOWN while the planner prices 0.",
+ "origin": {
+  "pr": 8006,
+  "jira": "CBRD-27143",
+  "finding": "contract suite (successor of histogram_cl.like_fingerprint after CBRD-27490) + U1 [defect] latent (adc0adf4a), fixed in 2364bcc7a",
+  "comment": null,
+  "review": "claude-workspace/projects/CBRD-27143/리뷰보고서-PR8006.md",
+  "date": "2026-10-28"
+ },
+ "requires": [
+  "bind_term_walk",
+  "histogram_split_hv_predicate"
+ ],
+ "defects_fixed_in": {
+  "PR8006 U1": "2364bcc7a"
+ }
+}
