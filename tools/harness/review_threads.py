@@ -11,8 +11,10 @@
 사이드이펙트: 읽기만 한다(gh api graphql 질의, git 읽기). 산출 파일 두 개만 쓴다."""
 import argparse, json, os, subprocess, sys, time
 
-Q = '''query($o:String!,$r:String!,$n:Int!){repository(owner:$o,name:$r){pullRequest(number:$n){headRefOid author{login}
- reviewThreads(first:100){nodes{id isResolved isOutdated path line originalLine comments(first:30){nodes{author{login} createdAt body url originalCommit{oid}}}}}}}}'''
+# reviewThreads is paged (100 at most per page): a PR past 100 threads (PR#8196 had 198, 2026-10-27) lost the rest,
+# its newest -- the ones a reviewer had just opened -- among them
+Q = '''query($o:String!,$r:String!,$n:Int!,$c:String){repository(owner:$o,name:$r){pullRequest(number:$n){headRefOid author{login}
+ reviewThreads(first:100, after:$c){pageInfo{hasNextPage endCursor} nodes{id isResolved isOutdated path line originalLine comments(first:30){nodes{author{login} createdAt body url originalCommit{oid}}}}}}}}'''
 
 
 def _git_ok(repo_dir, *a):
@@ -57,9 +59,17 @@ def classify(d, author=None, repo_dir=''):
 
 def collect(pr: int, repo: str = 'CUBRID/cubrid', author: str = None, repo_dir: str = ''):
     o, r = repo.split('/')
-    out = subprocess.run(['gh', 'api', 'graphql', '-f', f'query={Q}', '-f', f'o={o}', '-f', f'r={r}', '-F', f'n={pr}'], stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True)
-    if out.returncode: sys.exit(f'gh api 실패: {out.stderr.strip()[:300]}')
-    d = json.loads(out.stdout)['data']['repository']['pullRequest']
+    nodes, cur = [], None
+    while True:
+        args = ['gh', 'api', 'graphql', '-f', f'query={Q}', '-f', f'o={o}', '-f', f'r={r}', '-F', f'n={pr}'] + (['-f', f'c={cur}'] if cur else [])
+        out = subprocess.run(args, stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True)
+        if out.returncode: sys.exit(f'gh api 실패: {out.stderr.strip()[:300]}')
+        d = json.loads(out.stdout)['data']['repository']['pullRequest']
+        nodes += d['reviewThreads']['nodes']
+        page = d['reviewThreads']['pageInfo']
+        if not page['hasNextPage']: break
+        cur = page['endCursor']
+    d['reviewThreads']['nodes'] = nodes
     if repo_dir == '':
         repo_dir = os.path.expanduser('~/dev/sources/cubrid')
     author, threads = classify(d, author, repo_dir)

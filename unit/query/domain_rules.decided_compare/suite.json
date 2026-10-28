@@ -1,0 +1,50 @@
+{
+ "name": "PR#8213 컴파일러가 정한 세 판정 — 거울 결정 domain_compare_mirror = (b, a) 로 다시 정한 결정(키 쌍 표 키 57개 전 쌍 3,229·키 값 47종 2,185쌍 뒤집힘), 캐시 키 동치 domain_key_values_equal = develop mht_compare_dbvalues_are_identical(메모이즈·부질의 캐시), 해시 조인 공통 도메인 domain_resolve_hash_key·domain_decide_hash_join_key = develop hjoin_init_domain_info(도메인 37종 전 쌍 — 문자열 대 수·날짜 320쌍만 비교 형의 기본 도메인; NULL 타입 쌍·강제변환 이월 포함)",
+ "file": "src/query/domain_rules.c",
+ "mode": "server",
+ "seams": [],
+ "appendix": "",
+ "test": "test.cpp",
+ "extra": [
+  "src/base/memory_hash.c",
+  "src/compat/db_json.cpp",
+  "src/compat/db_json_allocator.cpp",
+  "src/compat/db_json_path.cpp",
+  "src/compat/db_json_types_internal.cpp"
+ ],
+ "requires": [
+  "domain_compare_mirror",
+  "domain_key_values_equal",
+  "domain_resolve_hash_key",
+  "domain_decide_hash_join_key",
+  "domain_compare_decided"
+ ],
+ "watch": [
+  "src/query/domain_rules.h",
+  "src/object/object_domain.c",
+  "src/object/object_domain_convert.cpp",
+  "src/object/object_domain_convert.h",
+  "src/object/object_primitive.c",
+  "src/base/memory_hash.c",
+  "src/base/language_support.h",
+  "src/query/memoize.cpp",
+  "src/query/subquery_cache.c",
+  "src/query/query_hash_join.c",
+  "src/query/xasl_to_stream.c",
+  "src/query/stream_to_xasl.c",
+  "src/parser/xasl_generation.c",
+  "src/storage/btree.c"
+ ],
+ "fakes": "compare_collation·convert_numeric 과 같은 부팅 가짜(에러 관리자 er_set/er_errid/er_clear — 마지막 er_set id 를 er_errid 가 읽음, private 할당자·area 할당자 malloc/calloc, envvar_get=NULL·envvar_trim_char 본문, cubthread::system_core_count=8·cubregex::get_engine_name, boot_Server_status=BOOT_SERVER_DOWN, dk_deduplicate_key_attribute_initialized 빈 함수)에 둘을 더했다: db_private_strdup(memory_alloc.c:698 본문, malloc — db_json 문자열 변환이 부른다), oid_compare(oid.c:252 본문 — OBJECT 키 자리의 OID cmpval). 부팅 순서는 서버와 같게 lang_init_builtin → tp_init → lang_set_charset_lang(\"en_US.utf8\"). 형 체계·변환기·비교는 그 리비전의 실코드다: 테스트 TU 가 system_parameter.c·language_support.c·intl_support.c·chartype.c·mprec.c·dtoa.c·object_primitive.c·object_domain.c·object_domain_convert.cpp·numeric_opfunc.c·db_date.c·db_macro.c·string_opfunc.c 를 #include 하고, memory_hash.c(develop 의 캐시 키 규칙 mht_compare_dbvalues_are_identical)와 db_json*.cpp 4개(JSON 값)는 extra 로 따로 컴파일해 링크한다. 대상 TU 는 domain_rules.c. develop 의 해시 조인 규칙은 2d925cb86 query_hash_join.c:1020-1138 을 규칙 그대로 옮긴 develop_hash_key(test.cpp) — NULL 대 다른 형 분기는 develop 에서도 assert(false). B-tree 가 쓰는 결정은 pt_decide_key_compare(xasl_generation.c:14374-14384)의 정규화(OBJECT → 첫 값 cmpval, 변환 없으면 first 0·converted_first source[0])를 key_decision 이 그대로 한다. 자동 stub 함수 163·데이터 9 는 head 실행 중 한 번도 불리지 않는다(stub_calls []).",
+ "note": "head 76ba766e3: 11건 모두 PASS(단정 22,670, stub 호출 없음) — [contract] 8 = 계약 성립, [defect] 3 = 재현. base 2d925cb86: compile-error(domain_resolve_hash_key·domain_decide_hash_join_key·DOMAIN_HASH_KEY_* 미선언) — 이 PR 신설 코드라 base 비교 없음(unit_regress 는 requires 로 '신설'). K10: 키 57개(문자열·ENUM 은 등록 콜레이션 10개마다)의 3,249쌍 중 ENUM×JSON 20쌍을 뺀 3,229쌍에서 거울 = 교환 결정, 키 값 47종(값 51종 중 NULL·코드셋≠콜레이션 3종 제외) 2,185쌍(변환 1,682·비교 불가 1,172)에서 거울 비교가 결정 비교를 뒤집는다. [defect] R7-06 ENUM-JSON: 순위 0 동률로 (ENUM, JSON)·(JSON, ENUM) 모두 첫 쪽을 변환 — 거울(ENUM 을 변환) ≠ 교환 결정(JSON 을 변환), ENUM 키 10개 모두. 값에서는 결정·거울·교환 결정·행 함수 양순서가 모두 LT/not comparable/-181(JSON <- ENUM 은 변환기 없음('.'), ENUM <- JSON 은 원소 목록이 빈 ENUM 기본 도메인으로 변환해 실패; 실패 답이 순위 0 이라 양순서 LT) — btree_compare_bound_key 는 DB_UNK(btree.c:23112), 결과 차이 없음. R7-06 의 '거울과 원래 결정이 서로 다른 변환을 쓴다' 는 성립하지 않는다(거울은 같은 쪽을 변환). 닿는 것은 xasl_generation.c:14602-14604 optdebug assert 뿐이고, ENUM·JSON 의 비교 공통형이 VARCHAR(type_checking.c:11643-11645 → 11039-11042)라 키 비교로 오는 경로는 낮음(서버 없이 미확인). [defect] R7-06 (latent) 코드셋≠콜레이션 키: 49쌍 중 8쌍 거울 ≠ 교환 결정(LANG_RT_COMMON_COLL 이진 콜레이션 순서 의존 4·코드셋 다른 ENUM 의 codeset_side 4) — 그런 키를 주는 도메인은 없다; 값에서 결정·거울 -1150, 교환 결정 EQ(행 함수도 순서 의존). [defect] R7-02 (latent): 주장 밖 문자열 키 4쌍('A'·'a' — CHAR 값/VARCHAR 자리, 콜레이션 다름, LEAVE, VARIABLE)에서 폴백 tp_value_compare(domain_rules.c:1909)가 같다, develop 은 다르다. R6-02 의 주장 깨짐(INT 키·VARCHAR 자리)은 4cfaa6e5a(키 도메인 = original_domain)가 닫았다. K12: NUMERIC(38,0)·(38,2) 는 head·develop 모두 numeric(40,0)(부동 NUMERIC) — 해시 조인은 그대로 쓰고, 해시 리스트 스캔의 pt_hash_key_domain(xasl_generation.c:7186-7194, ca80ac5f9)은 바로 이 공통 도메인(두 고정 NUMERIC)에서 해시를 끈다(정적 함수, CS TU — 여기서 실행 안 함, 그 입력 조건만 단정). NULL 타입 쌍: 76ba766e3 의 변화는 xts_hash_join_key_domain(xasl_to_stream.c:7556, 정적)이 이 쌍을 domain_decide_hash_join_key 로 보내는 것 — 여기서는 그 결정(단독: common NULL·AS_IS·VALUES, 이월: NULL 도메인)이 develop 과 같음을 단정한다. release 플래그(NDEBUG) 필요: K11 경계 2쌍과 R7-02 는 주장 밖 값이라 debug 는 1907 assert 로 멈춘다. 변이(OUT/unit/domain_rules.decided_compare/mutations/): 거울 source 교환 제거 → K10 키·값 FAIL(값 단계 SIGSEGV), converted_first 정규화 제거 → K10 키·경계·잠재 FAIL, codeset_side 교환 제거 → K10 키·값·경계·잠재 FAIL, rank 부호 유지 → 감도 없음(키 비교 결정은 강제변환이 있어 rank 가 늘 0 — 거울의 rank 반전은 지금 호출자에게 닿지 않음; R7-06 제안의 'rank 변이 → K10 FAIL' 은 성립 안 함), key_values_equal 문자열 분기 → 콜레이션 cmpval → K11 두 건 FAIL, hash key 비교 형 대신 일반형 → K12 행렬·경계 FAIL, NUMERIC 상한 38 → 40 → K12 행렬·경계 FAIL, 강제변환 이월 제거 → K12 경계·NULL 쌍 FAIL, R7-02 제안(폴백 = mht_compare_dbvalues_are_identical) → R7-02 [defect] 만 FAIL, tp_more_general_type 동률을 형 번호로 깨는 변이(object_domain.c) → R7-06 ENUM-JSON [defect] 만 FAIL(계약 유지).",
+ "origin": {
+  "pr": 8213,
+  "jira": "CBRD-27583",
+  "finding": "R7-06 [테스트 제안] — 이 PR 이 신설한 판정 함수 셋의 계약(K10 거울·K11 캐시 키·K12 해시 키) + R7-06 ENUM-JSON 비대칭 [defect] + 같은 비대칭의 코드셋≠콜레이션 키 [defect](잠재) + R7-02 [defect](잠재) 폴백 콜레이션 비교. 게시 안 함(테스트 제안·잠재)",
+  "comment": "https://github.com/CUBRID/cubrid/pull/8213",
+  "reviewed_head": "76ba766e3",
+  "base": "2d925cb86",
+  "artifact": "/home/cubrid/dev/utils/harness-out/8213/c8bb49ef3/unit/domain_rules.decided_compare/",
+  "date": "2026-10-28"
+ }
+}

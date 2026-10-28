@@ -35,6 +35,7 @@ struct h_flush_result
 int h_flush_scenario (int n, const int *rows, const int *grp, int ng, int tuple_count0, int group_count0,
 		      struct h_flush_result *res);
 int h_cache_add_scenario (int n, int *found_first, int *found_last, int *copies, int *frees_key);
+int h_cache_same_group_scenario (int *found_a, int *found_b, int *slot_is_b, int *copies, int *frees_key);
 
 static h_flush_result R;
 
@@ -138,4 +139,19 @@ TEST_CASE ("cache_add: 512 entries at most -- the 513th add starts over, one key
   CHECK (last == 1);		/* the 513th is there, its value naming its slot */
   CHECK (copies == 513);
   CHECK (frees == 512);
+}
+
+/* e90e0705a: the cache's invariant (QEXEC_BATCH_GBY) -- a group has at most one entry, the one its batch_slot names,
+ * which is the one qexec_gby_cache_evicted () drops when the table frees the group.  Before it a second byte string of
+ * the group added a second entry and moved batch_slot to it, so the first outlived the group's eviction. */
+TEST_CASE ("cache_add: one group under two byte strings keeps one entry -- the later bytes replace the earlier, batch_slot names it", "[contract]")
+{
+  int found_a = -1, found_b = -1, slot_is_b = -1, copies = -1, frees = -1;
+  int n_cached = h_cache_same_group_scenario (&found_a, &found_b, &slot_is_b, &copies, &frees);
+  CHECK (n_cached == 1);
+  CHECK (found_a == 0);
+  CHECK (found_b == 1);
+  CHECK (slot_is_b == 1);
+  CHECK (copies == 2);
+  CHECK (frees == 1);		/* the earlier entry's key copy */
 }

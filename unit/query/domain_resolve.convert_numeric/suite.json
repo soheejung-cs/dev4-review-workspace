@@ -1,5 +1,5 @@
 {
- "name": "PR#8022 변환 경계 — tp_value_cast/coerce/cast_force/coerce_strict 가 경계 값에서 내는 상태·오류 코드·값(문자열→수 실패·공백·지수·오버플로, 수→수 좁힘·반올림, NUMERIC 정밀도·스케일, strict 거절, 문자열 절단) + NUMERIC 사칙 결과 p/s + (head) tp_value_find_converter 전 칸 = object_domain_convert.cpp 주석 정책 행렬 + PR#8253(CBRD-27660) 경계: 반올림하면 INT 범위 밖인 값·NaN → SMALLINT/TIME 은 overflow(C8·C10), 열린 결함 F2(DOUBLE·MONETARY → BIGINT 가 [2^52, 2^53) 홀수에서 1 큼, CBRD-27769)·F4(음수 → TIME, CBRD-27770)",
+ "name": "PR#8022 변환 경계 — tp_value_cast/coerce/cast_force/coerce_strict 가 경계 값에서 내는 상태·오류 코드·값(문자열→수 실패·공백·지수·오버플로, 수→수 좁힘·반올림, NUMERIC 정밀도·스케일, strict 거절, 문자열 절단) + NUMERIC 사칙 결과 p/s + (head) tp_value_find_converter 전 칸 = object_domain_convert.cpp 주석 정책 행렬(서버 객체 칸: CBRD-27583 전 6칸, 뒤 5칸 — OID <- OID 를 서버도 변환) + PR#8253(CBRD-27660) 경계: 반올림하면 INT 범위 밖인 값·NaN → SMALLINT/TIME 은 overflow(C8·C10), 열린 결함 F2(DOUBLE·MONETARY → BIGINT 가 [2^52, 2^53) 홀수에서 1 큼, CBRD-27769)·F4(음수 → TIME, CBRD-27770)",
  "file": "src/object/object_domain.c",
  "mode": "server",
  "seams": [],
@@ -16,7 +16,7 @@
   "src/object/object_primitive.c"
  ],
  "fakes": "가짜는 부팅 환경뿐이고 변환·형 체계는 그 리비전의 실코드다(테스트 TU 가 system_parameter.c·language_support.c·intl_support.c·chartype.c·mprec.c·dtoa.c·object_primitive.c·object_domain_convert.cpp(있을 때)·numeric_opfunc.c·db_date.c·db_macro.c·string_opfunc.c 를 #include 한다; 대상 TU 는 object_domain.c). 가짜: er_set/er_errid/er_clear(error_manager.c — 마지막 er_set 의 id 를 er_errid 가 읽고 er_clear 가 지운다, 메시지 인자는 버림), db_private_alloc/free/realloc_release(memory_alloc.c — malloc/free/realloc), area_create/alloc/free(area_alloc.c — tp_init 의 도메인 area 를 요소 크기 calloc 으로), envvar_get=NULL·envvar_trim_char(environment_variable.c:494 본문), cubthread::system_core_count=8·cubregex::get_engine_name(system_parameter.c 정적 초기화가 부른다), boot_Server_status=BOOT_SERVER_DOWN(boot_sr.h:84 — prm_get_value 가 세션 사본 대신 전역 기본값을 읽게, system_parameter.c:10829), dk_deduplicate_key_attribute_initialized 빈 함수(a9940d67a 의 tp_init 이 부른다, 5de66400a 에서 제거). 부팅 순서는 서버와 같게 lang_init_builtin → tp_init → lang_set_charset_lang(\"en_US.utf8\")(tp_apply_sys_charset 포함). 자동 stub 함수 180~187·데이터 8 은 실행 중 한 번도 불리지 않는다(stub_calls 빈 목록).",
- "note": "기대값 표는 UNITSEAM_CAPTURE=1 로 a9940d67a 에서 뽑았고 be683e04c(PR 머지)와 같음을 확인했다 — C1·C2·C3·C5·C6 은 PR#8022 전후로 변환 경계가 바뀌지 않았다는 계약이다. 표에서 뺀 것: [2^31-0.5, 2^31) 의 부동소수·문자열 → INT(16eb8474d 이후 D1), DOUBLE 2147483647.4 → INT(16eb8474d 가 OVERFLOW → 2147483647 로 바꿨다 — 값이 맞으므로 결함 아님), strict 실패 뒤 dest 내용(be683e04c 부터 실패한 변환기의 부분 결과가 남는다 — 호출자 btree.c:19174·domain_resolve.c:2074 가 읽지 않고 지운다, 비관측). C4 는 a9940d67a·be683e04c 에서 FAIL 이 정상(develop 선재 결함: strict 문자열/DOUBLE → BIGINT 가 2^63 근처에서 INT64_MIN 으로 랩, 16eb8474d 가 거절로 고침 — 정확히 표현 가능한 '9223372036854775806' 도 거절되는 한계는 남음). C7 은 base 에 object_domain_convert.cpp 가 없어 'absent' FAIL. 결함 D1 의 귀속은 PR#8022 가 아니라 16eb8474d(#8087): 71d3a3a35(그 부모) FAIL, 16eb8474d PASS. 도달: SELECT CAST(d AS INT)·CAST('2147483647.5' AS INT)·INT 열에 DOUBLE 대입 — fetch_cast_operand(fetch.c:940-954) → tp_value_cast(_force)/tp_value_cast_with_converter → tp_value_cast_internal → tp_value_convert_number. 변이: 반올림·절단 뒤 정수로 범위 검사(trunc (ROUND (number)))하는 수정 → D1 FAIL, C1~C7 PASS. 수정안을 ROUND (number) 로만 쓰면 '-2147483648'·'32767' 같은 정확 경계를 거절해 C1 이 깨진다(첫 변이에서 확인). 2026-10-28 PR#8253 머지(e07b3b09a) 반영: F1(16eb8474d 의 INT 랩)과 F3(DOUBLE·MONETARY NaN → 깨진 TIME)은 e07b3b09a 가 고쳐 이력(defects_fixed_in) — head 에서 PASS 하면 재발이다. C8·C10 은 고친 동작의 계약이다(리뷰 확장판 harness-out/8253/c4da184eb/unit_review/g1 에서 옮김). 확장판의 C9(DOUBLE 계열 2147483647.4 → 2147483647)는 사용자 결정 (c)(원래 값이 DB_INT32_MAX 이하일 때만 변환 — 11.4·NUMERIC·SMALLINT 와 같은 규칙)와 반대라 버렸다. F2·F4 는 열린 결함(PASS = 결함 있음).",
+ "note": "기대값 표는 UNITSEAM_CAPTURE=1 로 a9940d67a 에서 뽑았고 be683e04c(PR 머지)와 같음을 확인했다 — C1·C2·C3·C5·C6 은 PR#8022 전후로 변환 경계가 바뀌지 않았다는 계약이다. 표에서 뺀 것: [2^31-0.5, 2^31) 의 부동소수·문자열 → INT(16eb8474d 이후 D1), DOUBLE 2147483647.4 → INT(16eb8474d 가 OVERFLOW → 2147483647 로 바꿨다 — 값이 맞으므로 결함 아님), strict 실패 뒤 dest 내용(be683e04c 부터 실패한 변환기의 부분 결과가 남는다 — 호출자 btree.c:19174·domain_resolve.c:2074 가 읽지 않고 지운다, 비관측). C4 는 a9940d67a·be683e04c 에서 FAIL 이 정상(develop 선재 결함: strict 문자열/DOUBLE → BIGINT 가 2^63 근처에서 INT64_MIN 으로 랩, 16eb8474d 가 거절로 고침 — 정확히 표현 가능한 '9223372036854775806' 도 거절되는 한계는 남음). C7 은 base 에 object_domain_convert.cpp 가 없어 'absent' FAIL. 결함 D1 의 귀속은 PR#8022 가 아니라 16eb8474d(#8087): 71d3a3a35(그 부모) FAIL, 16eb8474d PASS. 도달: SELECT CAST(d AS INT)·CAST('2147483647.5' AS INT)·INT 열에 DOUBLE 대입 — fetch_cast_operand(fetch.c:940-954) → tp_value_cast(_force)/tp_value_cast_with_converter → tp_value_cast_internal → tp_value_convert_number. 변이: 반올림·절단 뒤 정수로 범위 검사(trunc (ROUND (number)))하는 수정 → D1 FAIL, C1~C7 PASS. 수정안을 ROUND (number) 로만 쓰면 '-2147483648'·'32767' 같은 정확 경계를 거절해 C1 이 깨진다(첫 변이에서 확인). [2026-10-27 PR#8213 갱신] C7: CBRD-27583(PR#8213, 4cfaa6e5a 주석 · object_domain_convert.cpp 8365-8367)이 서버 빌드에서도 OID <- OID 변환기(tp_value_convert_oid_to_oid)를 열어 주석의 서버 객체 칸이 6칸 → 5칸이 됐다(의도된 변경). 리비전은 컴파일 시점에 가른다: 그 static 함수가 서버 모드 TU(테스트가 #include 하는 object_domain_convert.cpp)에 선언돼 있나를 이름 탐색 프로브(unitseam_oid_probe — 정확 일치 > 가변 인자 폴백)로 보고, 있으면 5칸·없으면 6칸을 기대한다. 고른 쪽은 WARN 으로 result.xml 에 남는다('C7 revision: ...'). 확인: 5c6639590 '5칸' PASS, e5013d4b8 '6칸' PASS, 갱신 전 test.cpp 는 5c6639590 에서 dst OID src OID 'o' == '.' FAIL; 2026-10-28 PR 최신 76ba766e3 '5칸' PASS · base 2d925cb86(develop) '6칸' PASS, 갱신 전 test.cpp 는 76ba766e3 에서 같은 한 칸(dst OID (20) src 20)만 FAIL·2d925cb86 PASS — unitseam 직접 실행과 unit_regress 라이브러리 경로 모두 C1~C7 유지. D1(PR8087 F1)은 e07b3b09a(#8253, CBRD-27660 — tp_double_int_overflow: DB_INT32_MAX 자체를 경계로)가 고쳐 e5013d4b8·5c6639590 모두 OVERFLOW(재현 안 됨) — defects_fixed_in 사전으로 이력 처리(다시 PASS 하면 재발). 2026-10-28 PR#8253 머지(e07b3b09a) 반영: F1(16eb8474d 의 INT 랩)과 F3(DOUBLE·MONETARY NaN → 깨진 TIME)은 e07b3b09a 가 고쳐 이력(defects_fixed_in) — head 에서 PASS 하면 재발이다. C8·C10 은 고친 동작의 계약이다(리뷰 확장판 harness-out/8253/c4da184eb/unit_review/g1 에서 옮김). 확장판의 C9(DOUBLE 계열 2147483647.4 → 2147483647)는 사용자 결정 (c)(원래 값이 DB_INT32_MAX 이하일 때만 변환 — 11.4·NUMERIC·SMALLINT 와 같은 규칙)와 반대라 버렸다. F2·F4 는 열린 결함(PASS = 결함 있음).",
  "origin": {
   "pr": 8022,
   "jira": "CBRD-27510",
@@ -24,16 +24,29 @@
   "comment": "https://github.com/CUBRID/cubrid/pull/8022",
   "related": "https://github.com/CUBRID/cubrid/pull/8087",
   "date": "2026-10-16",
-  "followup": {
-   "pr": 8253,
-   "jira": "CBRD-27660",
-   "merge": "e07b3b09a",
-   "date": "2026-10-28",
-   "related": [
-    "CBRD-27769",
-    "CBRD-27770"
-   ]
-  }
+  "updated": [
+   {
+    "pr": 8213,
+    "jira": "CBRD-27583",
+    "date": "2026-10-27",
+    "what": "C7 서버 객체 칸을 리비전(서버 OID 변환기 유무)으로 가름 · D1 을 e07b3b09a 이력으로",
+    "verified": [
+     "5c6639590/e5013d4b8 (2026-10-27)",
+     "76ba766e3/2d925cb86 (2026-10-28)"
+    ]
+   },
+   {
+    "pr": 8253,
+    "jira": "CBRD-27660",
+    "date": "2026-10-28",
+    "what": "PR#8253 머지 반영 — C8·C10 계약, F2·F4 결함, F3 이력(e07b3b09a), C9 버림",
+    "merge": "e07b3b09a",
+    "related": [
+     "CBRD-27769",
+     "CBRD-27770"
+    ]
+   }
+  ]
  },
  "defects_fixed_in": {
   "PR8087 F1": "e07b3b09a",

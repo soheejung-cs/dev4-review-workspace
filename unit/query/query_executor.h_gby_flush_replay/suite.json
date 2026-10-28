@@ -1,5 +1,5 @@
 {
- "name": "page batch hash GROUP BY -- qexec_batch_gby_flush () replays the row path for the pending rows of cached groups (per-group row order, LRU touch by last row, the selectivity check at the row path's tuple counts) and qexec_gby_cache_add () keeps at most 512 entries with one key copy each",
+ "name": "page batch hash GROUP BY -- qexec_batch_gby_flush () replays the row path for the pending rows of cached groups (per-group row order, LRU touch by last row, the selectivity check at the row path's tuple counts) and qexec_gby_cache_add () keeps at most 512 entries with one key copy each and one entry a group",
  "file": "src/query/query_executor.c",
  "mode": "server",
  "seams": [],
@@ -21,5 +21,5 @@
   "qexec_batch_gby_flush",
   "qexec_gby_cache_add"
  ],
- "note": "Sensitivity (2026-10-27, head 2381ce437): mutations/m1_lru_first_row.diff (the flush touches the LRU in first-row order) fails only the LRU case; mutations/m2_cap_plus1.diff (cache_add starts over at 513) fails only the cache_add case; all six PASS unmutated."
+ "note": "Sensitivity (2026-10-27, head 2381ce437): mutations/m1_lru_first_row.diff (the flush touches the LRU in first-row order) fails only the LRU case; mutations/m2_cap_plus1.diff (cache_add starts over at 513) fails only the cache_add case; all six PASS unmutated. 2026-10-27 (head f0513dac2, e90e0705a): the cache_add scenario gives each key its own group (it shared 64 values among 512 keys, eight keys to a group -- a table's groups are one value each), and a case checks the invariant e90e0705a enforces: one group under two byte strings keeps one entry (f0513dac2 PASS, 2381ce437 FAIL: two entries, the earlier still found)."
 }

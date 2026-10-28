@@ -75,7 +75,8 @@ description: CUBRID 엔진 C/C++ 변경의 구현 리뷰 — 정확한가, 핫�
 따로 받아 보고서 §2 에 **파일 → 함수 표**로 전부 깐다. 결함이 없는 함수도 쓴다(계기: PR#8022 보고서가 89파일 중 24파일·함수명 3종만 언급).
 하네스 없이 리뷰할 때도 지적의 필드(why·proposal·verification·evidence·rule_ids)는 스키마 `harness/schemas/finding.json` 을 따른다.
 
-### 한국어 주석 리뷰 PR (`annotate`)
+### 한국어 주석 리뷰 PR (`annotate`) — 사용자가 요청할 때만
+기본 전달물이 아니다(사용자 지시 2026-10-28 — 기본은 비공개 보고서와 게시 코멘트, 2026-10-08 의 '항상' 을 대체). 요청이 있을 때:
 `function_notes` 를 PR head 소스에 `/* [리뷰] … */` 로 심어 **fork 안에** draft PR 을 연다 —
 Files changed 한 화면에서 원 변경 + 한국어 설명 + 지적 번호를 같이 읽는다. 보고서와 diff 를 왕복하지 않아도 된다.
 ```bash

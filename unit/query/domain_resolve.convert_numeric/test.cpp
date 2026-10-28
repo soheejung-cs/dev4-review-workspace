@@ -14,8 +14,11 @@
  *   C5  string truncation: explicit OVERFLOW, force keeps the prefix
  *   C6  NUMERIC + - * / result precision and scale (numeric_opfunc.c)
  *   C7  (head only) tp_value_find_converter, every (src, dst, mode), equals the policy matrix written in
- *       object_domain_convert.cpp above tp_value_find_converter, with the six server-build object cells
- *   D1  [defect] DOUBLE / MONETARY / string in [2^31 - 0.5, 2^31) cast to INT wraps to INT_MIN (16eb8474d, #8087)
+ *       object_domain_convert.cpp above tp_value_find_converter, with the server-build object cells: six before
+ *       CBRD-27583 (PR#8213), five from it - the server converts OID <- OID too. Which one is decided at compile
+ *       time: whether this server-mode TU has the OID converter (unitseam_oid_probe below)
+ *   D1  [defect] DOUBLE / MONETARY / string in [2^31 - 0.5, 2^31) cast to INT wraps to INT_MIN (16eb8474d, #8087;
+ *       fixed in e07b3b09a, #8253 - a history case since)
  *
  * Real code at THIS revision is compiled into the test binary (the test's -I resolves to the worktree):
  * system_parameter.c (prm_Def defaults), language_support.c, intl_support.c, chartype.c, mprec.c, dtoa.c,
@@ -61,6 +64,7 @@
 #include <cstring>
 #include <map>
 #include <string>
+#include <type_traits>
 #include <vector>
 
 /* ---------------------------------------------------------------- fakes: what a booted server process has */
@@ -1044,14 +1048,36 @@ static const policy_row policy_matrix[] = {
   {40, "JSON", ".oooO.............o...o..O.....o........o"},
 };
 
-/* "the server build differs in the six object cells OBJECT <- OBJECT, POINTER, VOBJ, OID and VOBJ <- OBJECT, OID <- OID,
- * which are '.' there" (same comment) */
+/* CBRD-27583 (PR#8213) opened OID <- OID on the server too ("as tp_value_cast_internal clones an OID into an OID
+ * domain"): its converter tp_value_convert_oid_to_oid, static in object_domain_convert.cpp (included above), is
+ * compiled into a server-mode TU only from that revision - before it, the function sits under
+ * #if !defined (SERVER_MODE). Unqualified lookup of the name below finds the static function where it is compiled
+ * (an exact match beats the ellipsis) and the fallback otherwise: the revision, decided at compile time. */
+namespace unitseam_oid_probe
+{
+  struct absent
+  {
+  };
+  absent tp_value_convert_oid_to_oid (...);
+}
+namespace unitseam_oid_probe_use
+{
+  using namespace unitseam_oid_probe;
+  constexpr bool server_converts_oid =
+    !std::is_same<decltype (tp_value_convert_oid_to_oid (nullptr, nullptr, nullptr, nullptr)),
+		  unitseam_oid_probe::absent>::value;
+}
+
+/* The comment's server cells, '.' there: "the server build differs in the six object cells OBJECT <- OBJECT, POINTER,
+ * VOBJ, OID and VOBJ <- OBJECT, OID <- OID" before CBRD-27583; "in the five object cells OBJECT <- OBJECT, POINTER,
+ * VOBJ, OID and VOBJ <- OBJECT" from it (OID <- OID is 'o' on the server as well) */
 static bool
-server_object_cell (int dst, int src)
+server_object_cell (int dst, int src, bool server_converts_oid)
 {
   return (dst == DB_TYPE_OBJECT && (src == DB_TYPE_OBJECT || src == DB_TYPE_POINTER || src == DB_TYPE_VOBJ
 				    || src == DB_TYPE_OID))
-    || (dst == DB_TYPE_VOBJ && src == DB_TYPE_OBJECT) || (dst == DB_TYPE_OID && src == DB_TYPE_OID);
+    || (dst == DB_TYPE_VOBJ && src == DB_TYPE_OBJECT)
+    || (!server_converts_oid && dst == DB_TYPE_OID && src == DB_TYPE_OID);
 }
 
 static char
@@ -1142,10 +1168,16 @@ TEST_CASE ("C6 NUMERIC + - * / result precision and scale", "[contract]")
 }
 
 TEST_CASE ("C7 tp_value_find_converter over every (src, dst, mode) is the policy matrix its comment writes "
-	   "(server build: six object cells '.')", "[contract]")
+	   "(server build: its object cells '.' - six, five once the server converts OID <- OID, CBRD-27583)",
+	   "[contract]")
 {
 #if defined (UNITSEAM_HAS_CONVERTERS)
   REQUIRE (boot_types ());
+  const bool server_oid = unitseam_oid_probe_use::server_converts_oid;
+  const char *revision = server_oid ? "server converts OID <- OID (CBRD-27583): five server object cells '.'"
+    : "no OID <- OID converter on the server (before CBRD-27583): six server object cells '.'";
+  WARN ("C7 revision: " << revision);
+  INFO ("C7 revision: " << revision);
   int cells = 0;
   for (const policy_row & row : policy_matrix)
     {
@@ -1158,7 +1190,7 @@ TEST_CASE ("C7 tp_value_find_converter over every (src, dst, mode) is the policy
 	}
       for (int src = 0; row.cells[src] != '\0'; src++)
 	{
-	  const char want = server_object_cell (row.dst, src) ? '.' : row.cells[src];
+	  const char want = server_object_cell (row.dst, src, server_oid) ? '.' : row.cells[src];
 	  INFO ("dst " << row.name << " (" << row.dst << ") src " << src << " documented '" << row.cells[src] << "'");
 	  CHECK (policy_cell ((DB_TYPE) src, dst) == want);
 	  cells++;
