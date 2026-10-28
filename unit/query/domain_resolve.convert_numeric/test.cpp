@@ -1180,3 +1180,93 @@ TEST_CASE ("PR8087 F1: DOUBLE, MONETARY and string in [2^31 - 0.5, 2^31) cast to
    * FLOAT -> INT only. Before it (a9940d67a, be683e04c) every row here was OVERFLOW. */
   check_conversions (d1_int_wrap, sizeof (d1_int_wrap) / sizeof (d1_int_wrap[0]));
 }
+
+/* ---------------------------------------------------------------- PR#8253 (CBRD-27660), merged as e07b3b09a */
+
+/* What this PR guarantees: a value that rounds out of the INTEGER range overflows, a NaN overflows into SMALLINT */
+static const conversion_case pr8253_contract[] = {
+  {"D:2147483647.5", "INT", 0, "OVERFLOW|0|NULL"},
+  {"D:2147483647.5", "INT", 1, "OVERFLOW|0|NULL"},
+  {"D:2147483647.5", "INT", 2, "OVERFLOW|0|NULL"},
+  {"D:2147483647.999", "INT", 0, "OVERFLOW|0|NULL"},
+  {"M:2147483647.5", "INT", 0, "OVERFLOW|0|NULL"},
+  {"VC:2147483647.5", "INT", 0, "OVERFLOW|0|NULL"},
+  {"VC:2147483647.5", "INT", 1, "OVERFLOW|0|NULL"},
+  {"D:-2147483647.5", "INT", 0, "COMPAT|0|INT -2147483648"},
+  {"VC:-2147483648", "INT", 0, "COMPAT|0|INT -2147483648"},
+  {"VC:32767", "SHORT", 0, "COMPAT|0|SHORT 32767"},
+  {"VC:-32768", "SHORT", 0, "COMPAT|0|SHORT -32768"},
+  {"D:32766.5", "SHORT", 0, "COMPAT|0|SHORT 32767"},
+  {"D:nan", "SHORT", 0, "OVERFLOW|0|NULL"},
+  {"D:nan", "SHORT", 1, "OVERFLOW|0|NULL"},
+  {"D:nan", "SHORT", 2, "OVERFLOW|0|NULL"},
+  {"D:nan", "SHORT", 3, "FAILED|0|-"},
+  {"F:nan", "SHORT", 0, "OVERFLOW|0|NULL"},
+  {"M:nan", "SHORT", 0, "OVERFLOW|0|NULL"},
+  {"VC:nan", "SHORT", 0, "OVERFLOW|0|NULL"},
+  {"VC:nan", "SHORT", 1, "OVERFLOW|0|NULL"},
+  {"D:nan", "INT", 0, "OVERFLOW|0|NULL"},
+  {"D:nan", "BIGINT", 0, "OVERFLOW|0|NULL"},
+};
+
+TEST_CASE ("PR8253 C8: a value rounding out of INT overflows, a NaN overflows into SHORT, exact limits convert",
+	   "[contract]")
+{
+  REQUIRE (boot_types ());
+  check_conversions (pr8253_contract, sizeof (pr8253_contract) / sizeof (pr8253_contract[0]));
+}
+
+/* ROUND (x) is x + .5 in double: in [2^52, 2^53) the spacing is 1, so x + .5 is a tie and rounds to even */
+static const conversion_case pr8253_f2_bigint_tie[] = {
+  {"D:4503599627370497", "BIGINT", 0, "COMPAT|0|BIGINT 4503599627370498"},
+  {"D:4503599627370497", "BIGINT", 1, "COMPAT|0|BIGINT 4503599627370498"},
+  {"D:-4503599627370497", "BIGINT", 0, "COMPAT|0|BIGINT -4503599627370498"},
+  {"M:4503599627370497", "BIGINT", 0, "COMPAT|0|BIGINT 4503599627370498"},
+};
+
+TEST_CASE ("PR8253 F2: DOUBLE and MONETARY odd integers in [2^52, 2^53) cast to BIGINT come out one too large "
+	   "(PASS = defect present)", "[defect]")
+{
+  REQUIRE (boot_types ());
+  check_conversions (pr8253_f2_bigint_tie, sizeof (pr8253_f2_bigint_tie) / sizeof (pr8253_f2_bigint_tie[0]));
+}
+
+/* tp_value_convert_double_to_time / _monetary_to_time: OR_CHECK_INT_OVERFLOW passes a NaN, (int) ROUND (NaN) is
+ * undefined (x86: INT_MIN), the negative remainder fails db_time_encode_core, which writes -1, and the converter
+ * ignores that and answers COMPATIBLE; FLOAT checks with the _FROM_FP form and overflows */
+static const conversion_case pr8253_f3_nan_time[] = {
+  {"D:nan", "TIME", 0, "COMPAT|-787|TIME 0:0:-1"},
+  {"M:nan", "TIME", 0, "COMPAT|-787|TIME 0:0:-1"},
+};
+
+TEST_CASE ("PR8253 F3: a DOUBLE or MONETARY NaN cast to TIME gives an invalid TIME instead of overflowing "
+	   "(PASS = defect present)", "[defect]")
+{
+  REQUIRE (boot_types ());
+  check_conversions (pr8253_f3_nan_time, sizeof (pr8253_f3_nan_time) / sizeof (pr8253_f3_nan_time[0]));
+}
+
+static const conversion_case pr8253_f3_control[] = {
+  {"F:nan", "TIME", 0, "OVERFLOW|0|NULL"},
+  {"D:nan", "TIME", 0, "OVERFLOW|0|NULL"},
+  {"M:nan", "TIME", 0, "OVERFLOW|0|NULL"},
+  {"D:3661.4", "TIME", 0, "COMPAT|0|TIME 1:1:1"},
+};
+
+TEST_CASE ("PR8253 C10: a FLOAT, DOUBLE or MONETARY NaN overflows into TIME, a DOUBLE in range converts", "[contract]")
+{
+  REQUIRE (boot_types ());
+  check_conversions (pr8253_f3_control, sizeof (pr8253_f3_control) / sizeof (pr8253_f3_control[0]));
+}
+
+/* every number type: a negative value gives the same invalid TIME (the time converters ignore the encode error) */
+static const conversion_case pr8253_f4_negative_time[] = {
+  {"I:-1", "TIME", 0, "COMPAT|-787|TIME 0:0:-1"},
+  {"D:-1", "TIME", 0, "COMPAT|-787|TIME 0:0:-1"},
+};
+
+TEST_CASE ("PR8253 F4: a negative number cast to TIME gives an invalid TIME (PASS = defect present)", "[defect]")
+{
+  REQUIRE (boot_types ());
+  check_conversions (pr8253_f4_negative_time, sizeof (pr8253_f4_negative_time) / sizeof (pr8253_f4_negative_time[0]));
+}
