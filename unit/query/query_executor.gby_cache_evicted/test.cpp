@@ -9,6 +9,7 @@
 int unitseam_gby_evict_scenario (int n_evict, int home, int *n_left, int *stale_found, int *stale_slot);
 int unitseam_gby_evict_scenario_keep (int n, int home, unsigned keep_mask, int *n_left, int *stale_found,
 				      int *stale_slot, int *kept_found);
+extern int unitseam_gby_pool_balanced;
 
 TEST_CASE ("one evicted group of a cluster leaves no entry", "[contract]")
 {
@@ -16,6 +17,14 @@ TEST_CASE ("one evicted group of a cluster leaves no entry", "[contract]")
   unitseam_gby_evict_scenario (1, 5, &left, &stale, &slot);
   CHECK (left == 0);
   CHECK (stale == 0);
+}
+
+TEST_CASE ("evicted entries give their key buffers back to the cache's pool (68caaa830)", "[contract]")
+{
+  int left = -1, stale = -1, slot = -1, kept = -1;
+  unitseam_gby_evict_scenario_keep (4, 1022, 1u << 1, &left, &stale, &slot, &kept);
+  CHECK (left == 1);
+  CHECK (unitseam_gby_pool_balanced == 1);
 }
 
 TEST_CASE ("two groups of one cluster evicted together leave no entry", "[contract]")

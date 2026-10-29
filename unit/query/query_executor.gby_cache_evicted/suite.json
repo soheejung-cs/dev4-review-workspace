@@ -8,7 +8,7 @@
  "watch": [
   "src/query/query_aggregate.hpp"
  ],
- "fakes": "No seam. hooks.cpp builds a QEXEC_BATCH_GBY by hand (cache malloc'd, every len -1, as qexec_gby_cache_add () initializes it), places n groups with the same home slot (hash == home, so they sit in one cluster: home, home+1, ...), sets each group's batch_slot as cache_add does, notes value+slot as qexec_batch_gby_consume () notes the LRU head before a row-path call (12158-12162), then calls the real qexec_gby_cache_evicted () with n and reads n_cached and qexec_gby_cache_find () for each group's bytes. e->key is NULL so qdata_free_agg_hkey () is never reached; e->bytes is malloc'd; the TU's db_private_free () (the cache frees through the private heap since the T10 allocator change) is defined in hooks.cpp over plain free, so the release is real. AGGREGATE_HASH_VALUE objects are static (only batch_slot is touched).",
+ "fakes": "No seam. hooks.cpp builds a QEXEC_BATCH_GBY by hand (cache malloc'd, every len -1, as qexec_gby_cache_add () initializes it), places n groups with the same home slot (hash == home, so they sit in one cluster: home, home+1, ...), sets each group's batch_slot as cache_add does, notes value+slot as qexec_batch_gby_consume () notes the LRU head before a row-path call (12158-12162), then calls the real qexec_gby_cache_evicted () with n and reads n_cached and qexec_gby_cache_find () for each group's bytes. e->key is NULL so qdata_free_agg_hkey () is never reached; e->bytes comes from the key pool the fixture allocates as qexec_gby_cache_add () does (68caaa830, H-03: qexec_gby_cache_remove () gives the buffer back to pool_free); the TU's db_private_free () (the cache frees through the private heap since the T10 allocator change) is defined in hooks.cpp over plain free, so the release is real. AGGREGATE_HASH_VALUE objects are static (only batch_slot is touched).",
  "note": "fix_f1_evicted.diff is the fix our review proposed (tag in pass 1 by the noted slots, remove tagged entries in pass 2 with a table rescan; qexec_gby_cache_remove () skips the batch_slot write for a tagged entry). With --patch it passes the four [contract] cases and fails the [defect] case. Applies only to revisions that have qexec_gby_cache_evicted (PR#8196 head 908bdc5af and later); base c966fabc6 has none of these functions. 2026-10-22 (c503fcaa2): pass 2 was changed to a home-cluster probe (no table rescan); two [contract] cases with a kept (not evicted) group inside the cluster (keep_mask in hooks.cpp) check that the tagged entries the backward shift pulled back are still found and removed from the home.",
  "origin": {
   "pr": 8196,
@@ -20,5 +20,8 @@
  "requires": [
   "qexec_gby_cache_evicted"
  ],
- "defects_fixed_in": "064186af8"
+ "defects_fixed_in": "064186af8",
+ "history": [
+  "2026-10-29 (ec25c8e80): the fixture's malloc'd key bytes predated the key pool (68caaa830) -- the remove wrote into a NULL pool_free (SIGSEGV, rule #023: the suite's model, not the code); the fixture now takes the bytes from the pool, and a [contract] case checks the pool balance (free + cached == CACHE_SIZE / 2)"
+ ]
 }

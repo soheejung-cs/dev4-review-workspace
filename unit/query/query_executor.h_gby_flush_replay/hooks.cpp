@@ -172,6 +172,11 @@ h_flush_scenario (int n, const int *rows, const int *grp, int ng, int tuple_coun
       st.cache[k].bytes = NULL;
       st.cache[k].key = NULL;
     }
+  /* the entries' key buffers come from the pool the cache allocates with itself (68caaa830, H-03); the abandon's
+   * clear puts them all back (qexec_gby_pool_reset ()) */
+  st.key_pool = (unsigned char *) malloc ((QEXEC_GBY_CACHE_SIZE / 2) * QEXEC_GBY_KEY_MAX);
+  st.pool_free = (unsigned char **) malloc ((QEXEC_GBY_CACHE_SIZE / 2) * sizeof (unsigned char *));
+  qexec_gby_pool_reset (&st);
   for (g = 0; g < ng; g++)
     {
       unsigned int slot = (unsigned int) (37 * g + 5) & (QEXEC_GBY_CACHE_SIZE - 1);
@@ -180,7 +185,7 @@ h_flush_scenario (int n, const int *rows, const int *grp, int ng, int tuple_coun
       memset (&vals[g], 0, sizeof (vals[g]));
       vals[g].accumulators = &accs[g];
       vals[g].batch_slot = (int) slot;
-      e->bytes = (unsigned char *) malloc (1);
+      e->bytes = st.pool_free[--st.n_pool_free];
       e->bytes[0] = (unsigned char) g;
       e->hash = slot;
       e->len = 1;
@@ -265,14 +270,9 @@ h_flush_scenario (int n, const int *rows, const int *grp, int ng, int tuple_coun
     }
   res->sel_restored = (batch.sel == caller_sel && batch.n_sel == 77) ? 1 : 0;
 
-  /* keys[] are static: the clear must not free them */
-  for (k = 0; k < QEXEC_GBY_CACHE_SIZE; k++)
-    {
-      if (st.cache[k].len >= 0)
-	{
-	  free (st.cache[k].bytes);
-	}
-    }
+  /* keys[] are static: the clear must not free them; the key buffers are the pool's */
+  free (st.key_pool);
+  free (st.pool_free);
   free (st.cache);
   free (st.pend_row);
   free (st.pend_ent);
@@ -331,6 +331,8 @@ h_cache_add_scenario (int n, int *found_first, int *found_last, int *copies, int
   *copies = h_n_copy;
   *frees_key = h_n_free_key;	/* the releases the cache made by itself (its clear when half full) */
   qexec_gby_cache_clear (NULL, &st);
+  free (st.key_pool);
+  free (st.pool_free);
   free (st.cache);
   return n_cached;
 }
@@ -368,6 +370,8 @@ h_cache_same_group_scenario (int *found_a, int *found_b, int *slot_is_b, int *co
   *copies = h_n_copy;
   *frees_key = h_n_free_key;
   qexec_gby_cache_clear (NULL, &st);
+  free (st.key_pool);
+  free (st.pool_free);
   free (st.cache);
   return n_cached;
 }

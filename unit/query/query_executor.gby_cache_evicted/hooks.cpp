@@ -2,6 +2,9 @@
  * n groups of one linear-probe cluster (same home slot), then qexec_gby_cache_evicted () over the note
  * the consumer would have taken (slot = each group's batch_slot before the call). Returns what is left.
  * keep_mask: bit i set = group i of the cluster is NOT evicted (not noted) and must still be found after. */
+/* the last scenario's pool: every buffer is either an entry's or back on the free stack */
+int unitseam_gby_pool_balanced = -1;
+
 int
 unitseam_gby_evict_scenario_keep (int n, int home, unsigned keep_mask, int *n_left, int *stale_found, int *stale_slot,
 				  int *kept_found)
@@ -19,6 +22,11 @@ unitseam_gby_evict_scenario_keep (int n, int home, unsigned keep_mask, int *n_le
     {
       st.cache[k].len = -1;
     }
+  /* the entries' key buffers come from the pool the cache allocates with itself (68caaa830, H-03): a removed entry
+   * gives its buffer back there (qexec_gby_cache_remove ()) */
+  st.key_pool = (unsigned char *) malloc ((QEXEC_GBY_CACHE_SIZE / 2) * QEXEC_GBY_KEY_MAX);
+  st.pool_free = (unsigned char **) malloc ((QEXEC_GBY_CACHE_SIZE / 2) * sizeof (unsigned char *));
+  qexec_gby_pool_reset (&st);
   for (i = 0; i < n; i++)
     {
       QEXEC_GBY_ENTRY *e;
@@ -26,7 +34,7 @@ unitseam_gby_evict_scenario_keep (int n, int home, unsigned keep_mask, int *n_le
       for (s = (unsigned) home & mask; st.cache[s].len >= 0; s = (s + 1) & mask)
 	;
       e = &st.cache[s];
-      e->bytes = (unsigned char *) malloc (1);
+      e->bytes = st.pool_free[--st.n_pool_free];
       e->bytes[0] = (unsigned char) i;
       e->hash = (unsigned) home;
       e->len = 1;
@@ -44,6 +52,7 @@ unitseam_gby_evict_scenario_keep (int n, int home, unsigned keep_mask, int *n_le
     }
   qexec_gby_cache_evicted (NULL, &st, note_val, note_slot, n_note);
   *n_left = st.n_cached;
+  unitseam_gby_pool_balanced = (st.n_pool_free + st.n_cached == QEXEC_GBY_CACHE_SIZE / 2);
   *stale_found = 0;
   *stale_slot = -1;
   *kept_found = 0;
@@ -65,13 +74,8 @@ unitseam_gby_evict_scenario_keep (int n, int home, unsigned keep_mask, int *n_le
 	  *stale_slot = (int) (e - st.cache);
 	}
     }
-  for (k = 0; k < QEXEC_GBY_CACHE_SIZE; k++)
-    {
-      if (st.cache[k].len >= 0)
-	{
-	  free (st.cache[k].bytes);
-	}
-    }
+  free (st.key_pool);
+  free (st.pool_free);
   free (st.cache);
   return 0;
 }
