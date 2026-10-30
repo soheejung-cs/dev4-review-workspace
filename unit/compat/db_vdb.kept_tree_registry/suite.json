@@ -1,0 +1,31 @@
+{
+ "name": "CBRD-27231 / CBRD-27583 registry of kept SQL-level prepared trees (db_Kept_trees) -- db_prepared_tree_register (transient chain -> list, name copy, server session, same-name replace / other-signature chain capped at DB_MAX_SIGNATURE_PLANS), _remove, _free_all, the EXECUTE checkout (head db_prepared_tree_take = off the list; base db_prepared_tree_lookup = stays on the list) with its session / text / original_buffer checks, db_prepared_tree_put_back (newer entry wins), the stale discard, nested SQL during an execution (DEALLOCATE / re-PREPARE / EXECUTE of the same name, session change), thread scope = db_Session_id's, invariants over random nested sequences",
+ "file": "src/compat/db_vdb.c",
+ "mode": "cs",
+ "seams": [
+  "db_close_session_local"
+ ],
+ "appendix": "hooks.cpp",
+ "test": "test.cpp",
+ "watch": [
+  "src/compat/db_session.h",
+  "src/compat/db_admin.c",
+  "src/compat/db.h",
+  "src/compat/db_multi_threads_connections.h",
+  "src/parser/parse_dbi.c"
+ ],
+ "fakes": "db_close_session_local (seam, db_vdb.c:5782 @71916dad2): walks the chains the real one walks in its order -- signature_plans (each recursively), then the transient `next` chain -- and counts closes per session instead of freeing statements / parser, so a double close or a close of an executing tree is visible (sessions live in the test's pool). db_get_session_id (db_admin.c:3446): returns db_Session_id, CUB_THREAD_LOCAL -> a thread_local the test sets; a server session change = new id + db_prepared_tree_free_all, as db_set_session_id does. pt_host_vars_match_signature (parse_dbi.c:3429): the NULL host_var_compiled_domains / count < host_var_count exit verbatim, else equality of the signature numbers the test gave the compiled parser and the values' host-variable array. Real: db_prepared_tree_unlink / _close / _remove / _register / _free_all and, per revision, _take + _put_back (head) or _lookup (base), through hooks.cpp. hooks.cpp unitseam_exec_checkout / _return_ok / _stale copy the EXECUTE choreography of db_execute_and_keep_statement_local line by line from each revision (head db_vdb.c:3330-3378: take, put_back on success and on a genuine error, signature miss -> put_back else close (kept); base cbe8d181b 3302-3340: lookup, nothing on return, !signature_miss -> remove (name)) -- a model of the caller, not the caller. Functions of one revision only are reached via ::name inside templates with an unitseam_absent fallback (char_keys device); P1-P3 FAIL 'absent at this revision' before PR#8314.",
+ "note": "2026-10-30 head 71916dad2 32/32 PASS (build MULTI_CONN_TO_A_SERVER off -> CUB_THREAD_LOCAL empty, list process-wide like db_Session_id; T1/T2 assert the scope relation, so they hold either way). Base cbe8d181b 21/32: X1 (checked-out tree stays on the list), X2 / X3 / F1 (nested DEALLOCATE / PREPARE, nested EXECUTE that registers, free_all close the executing tree = the use-after-free PR#8314 fixes), S2 (stale remove (name) closes the tree nested SQL kept), I1 (seed 3: executing tree closed), X5 (head design: a deallocated name comes back), P1-P3 (take/put_back absent), U1 (base closes instead). Mutations on 71916dad2 (harness-out/8314/71916dad2/unit/db_vdb.kept_tree_registry/mut_*.diff): put_back without the same-name check -> X4 P2 P3 I1 FAIL; take without the session / text / buffer check -> C2 C3 C4 X7 F2 FAIL.",
+ "origin": {
+  "pr": 8314,
+  "jira": "CBRD-27231",
+  "finding": "contract suite (harness-review 3-1(c)) + U1 latent: a re-PREPARE of the name nested in its own EXECUTE does not release the kept tree",
+  "comment": null,
+  "date": "2026-10-30"
+ },
+ "requires": [
+  "db_prepared_tree_register",
+  "db_prepared_tree_free_all",
+  "kept_session_id"
+ ]
+}

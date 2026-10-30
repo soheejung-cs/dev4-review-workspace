@@ -37,6 +37,7 @@ python3.11 -m tools.harness.unitseam run --rev <rev> --file … --mode … --tes
 |---|---|---|
 | `query/xasl_cache.bind_variant` | `xcache_bind_variant` 상태기계 | PR#8013 F1 고아 예약 |
 | `compat/db_vdb.bind_variant_key` | `db_bind_variant_switch` 변형 키 할당(parser 아레나) | PR#8013 F2 전환마다 키 누적 |
+| `compat/db_vdb.kept_tree_registry` | SQL 수준 PREPARE 의 kept tree 레지스트리(`db_Kept_trees`): `db_prepared_tree_register`(transient 체인→리스트·이름 복사·서버 세션·같은 이름 교체/다른 시그니처 체인 16 상한)·`_remove`·`_free_all`·EXECUTE 체크아웃(head `_take` = 리스트에서 빠짐, base `_lookup` = 남음)의 세션·텍스트·buffer 검사·`_put_back`(새 항목 우선)·stale 폐기·실행 중 중첩 SQL(같은 이름 DEALLOCATE·재 PREPARE·EXECUTE·세션 변경)·스레드 범위 = `db_Session_id`·무작위 중첩 시퀀스 불변식 | PR#8314(CBRD-27231) 계약 31건 + [defect] U1(잠재 — 실행 중 중첩 재 PREPARE 가 kept tree 를 놓지 않음). head 71916dad2 32/32, base cbe8d181b 21/32(X1·X2·X3·F1·S2·I1 = PR 이 고친 실행 중 해제, P1-P3 함수 없음, X5 head 설계). 변이 2종 감도. base 전용·head 전용 함수는 `unitseam_absent` 템플릿으로 |
 | `optimizer/histogram_cl.unique_pinned` | `bind_target_spec_is_unique_pinned` UNIQUE 계열 고정 판정 | PR#8013 F4 함수·필터 UNIQUE 도 고정(잠재 — 문법이 UNIQUE 함수·필터 인덱스를 거부) |
 | `optimizer/histogram_cl.char_keys` | `string_key_size_for_column`·`histogram_repad_char_value`/`histogram_repad_ctx`·HV2 폭 슬롯·`histogram_extract_key` 프로브 키 | PR#7977 계약 29건(결함 없음, base 2건 동작 차이 = CBRD-27251 수정분) |
 | `query/px_scan_checker.worker_sp` | 병렬 스캔 체커 `CANNOT_RUN_IN_WORKER` 전파(select list·집계·퍼센타일·뒤 조인·CONNECT BY 세 술어) | PR#8136 계약 13건 + F1 CONNECT BY 미검사 이력 4건(머지 전 4b7108f25 에서 고쳐짐) |
