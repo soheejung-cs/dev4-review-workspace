@@ -70,6 +70,7 @@ gh api graphql -f query="mutation{resolveReviewThread(input:{threadId:\"$TID\"})
 ```
 PR 본문 갱신은 `gh api -X PATCH repos/CUBRID/cubrid/pulls/<n> -F body=@file` (`gh pr edit` 는 이 서버에서 조용히 실패 — H-25).
 **CI 트리거(`/run all`)는 사용자·리뷰어가 친다.** TC 답안을 고쳤으면 `/run all` 전에 `tc/pr-<n>` push 가 끝나 있어야 한다.
+엔진 헤드가 그대로이고 TC 만 고친 재실행은 `/run all` 이 아니라 CI 본문(런 Summary)의 `/run rerun <run_id>` 다 — gha-ci 스킬 §1-6, `gha_rerun_cmd.sh`(2026-10-30).
 게시로 끝나지 않는다 — §6(보드·세션기록)과 §7(배운것 append + `/self-evolution`)까지가 대응이다.
 
 ## 5. TC PR(cubrid-testcases-private-ex `tc/pr-<n>`) 의 답글
