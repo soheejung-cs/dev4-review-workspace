@@ -1,0 +1,47 @@
+{
+ "name": "PR#8344 (CBRD-27144) qo_session_variable_value -- 세션 변수 읽기를 그 값으로 추정하는 계약: 파서가 표시한 PT_EVALUATE_VARIABLE 만(그 밖은 NULL, 요청 없음), 블록(QO_ENV)당 변수 1회 요청·대소문자 무시(`@v`/`@V` 한 항목), 변수마다 고정 항목(BETWEEN 두 경계를 쥔 채 다음 요청), 세션이 못 주는 변수는 NULL·오류 스택 push/pop 으로 호출자 오류 보존·실패도 캐시, NULL 값(타입 있는 NULL 포함) -> NULL, qo_env_free 가 항목과 값(문자열 사본)을 모두 해제 + 소비자 qo_between_range_arg_value(PC_OTHER 분기)·qo_equal_selectivity(`c1 = @v` 히스토그램 탐침, 못 쓰는 값 -> 기본 경로)",
+ "requires": [
+  "qo_session_variable_value"
+ ],
+ "file": "src/optimizer/query_planner.c",
+ "mode": "cs",
+ "seams": [
+  "qo_index_cardinality"
+ ],
+ "appendix": "hooks.cpp",
+ "test": "test.cpp",
+ "extra": [
+  "src/optimizer/query_graph.c",
+  "src/optimizer/query_bitset.c",
+  "src/object/object_primitive.c",
+  "src/base/memory_alloc.c",
+  "src/base/system_parameter.c",
+  "src/base/language_support.c",
+  "src/base/intl_support.c",
+  "src/base/chartype.c",
+  "src/compat/db_macro.c"
+ ],
+ "watch": [
+  "src/optimizer/query_graph.h",
+  "src/optimizer/query_graph.c",
+  "src/parser/parse_tree.h",
+  "src/parser/xasl_generation.c",
+  "src/compat/db_admin.c",
+  "src/communication/network_interface_cl.c",
+  "src/session/session.c",
+  "src/optimizer/histogram/histogram_cl.hpp"
+ ],
+ "fakes": "진짜: query_planner.c(qo_session_variable_value·qo_between_range_arg_value·qo_equal_selectivity·qo_classify, hooks.cpp 로 호출), query_graph.c(qo_env_free), query_bitset.c, object_primitive.c(pr_clear_value), memory_alloc.c(CS 의 db_private_alloc/free -> db_ws_alloc/free), system_parameter.c, language_support.c+intl_support.c+chartype.c(intl_identifier_casecmp, lang_init_builtin + lang_set_charset_lang(\"en_US.utf8\") = 부팅된 클라이언트), db_macro.c. 가짜: db_get_variable = db_admin.c:1480 -> csession_get_variable(network_interface_cl.c:5498, CS) -> session_get_variable(session.c:2110) 의 두 분기 -- 이름을 intl_identifier_casecmp 로 찾으면 NO_ERROR 와 값(문자열은 or_unpack_db_value 처럼 db_private_alloc 사본 + need_clear), 없으면 서버의 er_set(ER_SES_VARIABLE_NOT_FOUND) 가 클라이언트 오류 영역에 오고 ER_FAILED, 값은 손대지 않음(network_interface_sr.cpp:10339 ssession_get_session_variable 이 오류면 unpack 전에 돌아감); 요청 수와 요청한 이름을 센다. er_set/er_errid/er_clear/er_stack_push/er_stack_pop = error_context.cpp:237-305 의 모델(base level + stack, push 는 빈 level(NO_ERROR) 을 위에, pop 은 top 버림, er_set/er_errid 는 현재 level) -- 고정 배열이라 K6 창에 할당이 없다. pt_value_to_db = parse_dbi.c:1079 의 PT_VALUE 분기(db_value_is_initialized 면 그대로, 아니면 pt_db_value_initialize 의 PT_TYPE_CHAR/VARCHAR 분기 parse_dbi.c:3975-3989: db_make_char/varchar, TP_FLOATING_PRECISION_VALUE, LANG_COERCIBLE_*; 세션 변수 이름은 호스트 변수·PT_PARAMETER 분기에 닿지 않음). pt_is_function_index_expression = parser_support.c:1586 그대로. histogram_get_equal_selectivity = histogram_cl.cpp:1181 의 출구 -- 값 없음·히스토그램 없는 열 -> success false, 정수 열 히스토그램에 문자열 키 -> success false(histogram_extract_key/kind 검사), 그 밖 -> 테스트의 추정치(열 c1, INTEGER); 탐침 수·값 기록. qo_index_cardinality(seam) = query_planner.c:14480 의 `return 0` 출구(노드·세그먼트·NDV·인덱스 통계 없음) -> DEFAULT_EQUAL_SELECTIVITY. db_ws_alloc/db_ws_free = quick_fit.c:105/236 의 DB_IS_UTILITY_THREAD 분기(malloc/free). tp_apply_sys_charset = object_domain.c:704 의 tp_Domain_area NULL(타입 모듈 미초기화) 분기 = 아무것도 안 함. init_builtin_calendar_names(string_opfunc.c)·db_date_locale_init(db_date.c) = 로캘 부가 표(달력 이름·AM/PM), 식별자 비교가 읽지 않음 -> 빈 함수. envvar_get/envvar_trim_char/cubregex::get_engine_name = 환경 변수 없음·정적 초기화. malloc/calloc/realloc/free 는 __libc_* 로 넘기고 창 안에서 할당된 블록만 목록으로 추적(K6). 구조체: PT_NODE·PARSER_CONTEXT 는 calloc, 읽기는 csql_grammar.y session_variable(2442)/session_variable_expression(2416) 모양(PT_EVALUATE_VARIABLE + CHAR PT_VALUE 이름 + do_not_fold), 표시는 PT_EXPR_INFO_SET_FLAG(파서가 pt_mark_peekable_session_variables 로 다는 것 -- parser/xasl_generation.session_variable_mark 가 그 쪽 계약); QO_ENV 는 qo_env_new(query_graph.c:6072-6130) 가 qo_env_free 가 읽는 필드에 하는 초기화(bitset_init 3개, limit NULL, 나머지 0)를 흉내; `c1 = @v` 는 qo_converse_sarg_terms(rewriter/query_rewrite_term.c:1201) 가 열을 왼쪽에 둔 꼴.",
+ "note": "base(582fa3941) 에는 qo_session_variable_value 와 PT_EXPR_INFO_PEEK_SESSION_VARIABLE 이 없다 -- test.cpp 가 그 매크로로 갈라 base 에는 develop 공유 케이스(K8 develop·K9 develop)만 등록한다(신설 코드라 base 비교 없음). 결과는 origin.result 참고.",
+ "origin": {
+  "pr": 8344,
+  "jira": "CBRD-27144",
+  "finding": "G1-04 (테스트 제안) qo_session_variable_value 계약 K1-K6 + 소비자 K8(between-range)·K9(equality) -- [contract] suite, 결함 재현 아님",
+  "comment": null,
+  "date": "2026-10-30",
+  "reviewed_head": "e99d2dfbe",
+  "base": "582fa3941",
+  "artifact": "harness-out/8344/e99d2dfbe/unit/G1-04/",
+  "result": "2026-10-30: head e99d2dfbe 14/14 PASS(K1-K7·K8·K8 develop·K9·K9 develop·K10), base 582fa3941 2/2 PASS(develop 공유 K8 develop·K9 develop 만 등록 -- 신설 코드), stub 호출 0. 변이 10종(harness-out/8344/e99d2dfbe/unit/G1-04/mut/*.diff, 각 .py 가 생성 원본) 모두 감지: A1 캐시 없음 -> K2·K2b·K3·K4·K5·K6·K8·K9, A2 strcmp -> K2·K3·K4·K5·K6·K8, A3 er_stack push/pop 없음 -> K4·K4b·K9, A4 실패 미캐시 -> K4·K6, A5 표시 무시 -> K1·K6·K8·K8 develop·K9 develop, A6 qo_env_free 가 값 미해제 -> K6, A7 항목 하나 재사용 -> K3·K5·K6, A8 등호 소비자 제거 -> K9, A9 범위 소비자 제거 -> K8, A10 할당 실패에 er_set -> K10. unit_regress(라이브러리 경로)도 head 14/14, base 는 requires 로 건너뜀(신설)."
+ }
+}

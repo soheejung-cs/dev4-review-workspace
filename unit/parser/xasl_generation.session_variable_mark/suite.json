@@ -1,0 +1,45 @@
+{
+ "name": "PR#8344 (CBRD-27144) pt_mark_peekable_session_variables -- 문장이 대입하지 않는 세션 변수의 읽기에만 PT_EXPR_INFO_PEEK_SESSION_VARIABLE 표시(pt_type_session_variables 를 통해): 대입 목록과 이름이 같으면 표시 안 함(대소문자 무시), 범위는 문장 전체(다른 UNION 블록·부질의의 대입도 막음), 대입 노드·다른 식은 표시 안 함, 세션에 없는 변수도 표시(값이 아니라 대입 여부), walker 가 따르는 목록(next·or_next·select list·부질의) 전부, 세션 변수 없는 문장은 그대로, develop 의 타입 표(CBRD-27583)는 그대로",
+ "requires": [
+  "pt_mark_peekable_session_variables"
+ ],
+ "file": "src/parser/xasl_generation.c",
+ "mode": "cs",
+ "seams": [],
+ "appendix": "",
+ "test": "test.cpp",
+ "extra": [
+  "src/parser/parse_tree.c",
+  "src/parser/parse_tree_cl.c",
+  "src/base/language_support.c",
+  "src/base/intl_support.c",
+  "src/base/chartype.c",
+  "src/object/object_domain.c",
+  "src/object/object_primitive.c",
+  "src/query/domain_rules.c",
+  "src/compat/db_macro.c",
+  "src/base/memory_alloc.c",
+  "src/base/system_parameter.c"
+ ],
+ "watch": [
+  "src/parser/parse_tree.h",
+  "src/parser/parser.h",
+  "src/parser/parse_tree_cl.c",
+  "src/parser/view_transform.c",
+  "src/parser/csql_grammar.y",
+  "src/optimizer/query_planner.c"
+ ],
+ "fakes": "진짜: xasl_generation.c(pt_type_session_variables 와 그 walker 셋 -- pt_count_/pt_collect_/pt_mark_peekable_session_variables -- 과 pt_session_variable_name/_index/_expr_domain/_start_domain/_stored_domain/_same_type), parse_tree.c + parse_tree_cl.c(parser_create_parser·parser_new_node·pt_init_*·parser_alloc(0 으로 채움)·pt_append_bytes/_string·parser_walk_tree/pt_walk_private 와 pt_apply_* 표·parser_free_parser), language_support.c + intl_support.c + chartype.c(intl_identifier_casecmp, en_US.utf8), object_domain.c + object_primitive.c + domain_rules.c(tp_Null_domain, domain_value_domain 의 INTEGER -> tp_domain_resolve_default), db_macro.c, memory_alloc.c, system_parameter.c. 가짜: db_get_variable = db_admin.c:1480 -> csession_get_variable(network_interface_cl.c:5498) -> session_get_variable(session.c:2110) 의 두 분기 -- 이름을 intl_identifier_casecmp 로 찾으면 NO_ERROR 와 INTEGER 값(`SET @v = 0`), 없으면 er_set(ER_SES_VARIABLE_NOT_FOUND) + ER_FAILED, 값 그대로; 요청 수를 센다. er_set/er_errid/er_clear/er_stack_push/er_stack_pop = error_context.cpp:237-305 의 base level + stack 모델. pt_value_to_db = parse_dbi.c:1079 의 PT_VALUE 분기 + pt_db_value_initialize 의 PT_TYPE_CHAR 분기(parse_dbi.c:3975-3981, db_make_char). pt_parser_line_col = scanner_support.c:249(C 링키지) -- lexer 가 없어 위치 0. pt_free_dblink_remote_cols = name_resolution.c:12542 -- dblink 를 해석하지 않은 parser(dblink_remote NULL)에서 루프가 아무것도 안 함. init_builtin_calendar_names·db_date_locale_init = 로캘 부가 표, 읽지 않음 -> 빈 함수. envvar_get/envvar_trim_char/cubregex::get_engine_name = 환경 변수 없음·정적 초기화. 트리: 진짜 parser_new_node 로 만들고 문법 동작이 채우는 필드를 같게 -- 읽기 = csql_grammar.y session_variable_expression(2416) PT_EXPR(PT_EVALUATE_VARIABLE, session_variable(2442) 의 CHAR PT_VALUE, do_not_fold), 대입 = session_variable_definition(2404) PT_EXPR(PT_DEFINE_VARIABLE, 이름, 값, do_not_fold) -- normal_expression(14982) 이라 select list·술어 피연산자·부질의 어디에나 온다; 연산자 노드는 parser_make_expression(22797) 처럼 op/arg 만. WHERE 는 CNF next 목록, OR 은 or_next. 호출은 mq_translate 가 compiled_every_time 일 때 하는 그대로(view_transform.c:10175-10205: 세션 변수가 있는 질의·DML 문장, cannot_prepare 를 세운 직후).",
+ "note": "base(582fa3941) 에는 pt_type_session_variables(CBRD-27583) 는 있고 표시 walker 와 플래그는 없다 -- test.cpp 는 플래그 비트(0x8000000, base 에서 비어 있음)를 스스로 정의해 base 에서도 돈다: 표시를 기대하는 케이스는 base 에서 FAIL(이 PR 이 신설한 동작), 표시하지 않음을 단정하는 케이스와 M9 develop(타입 표)은 base 에서도 PASS. unit_regress 는 requires 로 base 를 건너뛴다(신설). 결과는 origin.result 참고.",
+ "origin": {
+  "pr": 8344,
+  "jira": "CBRD-27144",
+  "finding": "G2-01 (테스트 제안) 표시 규칙(대입하는 문장의 읽기는 표시하지 않음, 문장 전체 범위)의 단위 고정 -- [contract] suite, 결함 재현 아님",
+  "comment": null,
+  "date": "2026-10-30",
+  "reviewed_head": "e99d2dfbe",
+  "base": "582fa3941",
+  "artifact": "harness-out/8344/e99d2dfbe/unit/G2-01/",
+  "result": "2026-10-30: head e99d2dfbe 11/11 PASS, base 582fa3941 4/11(M2·M3·M8·M9 develop PASS, 표시를 기대하는 M1·M3b·M4·M5·M5b·M6·M7 FAIL = 이 PR 이 신설한 표시), stub 호출 0. 변이 4종(harness-out/8344/e99d2dfbe/unit/G2-01/mut/*.diff) 모두 감지: B1 대입 목록 무시 -> M2·M3·M3b·M4·M5·M5b, B2 strcmp -> M4·M5, B5 첫 대입만 -> M5b, B6 walk 하나로 합침(그때까지 만난 대입만) -> M2·M3·M3b·M4·M5·M5b. unit_regress(라이브러리 경로)도 head 11/11, base 는 requires 로 건너뜀(신설)."
+ }
+}
