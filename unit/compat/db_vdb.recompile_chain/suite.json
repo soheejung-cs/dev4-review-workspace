@@ -1,0 +1,26 @@
+{
+ "name": "CBRD-27852 / PR#8343 do_recompile_and_execute_prepared_statement closes the subsessions earlier executions of the client session left on its transient chain before opening this execution's; a subsession (kept tree) passed as the session keeps its chain",
+ "file": "src/compat/db_vdb.c",
+ "mode": "cs",
+ "seams": [
+  "db_close_session_local",
+  "db_open_buffer_copy_local"
+ ],
+ "appendix": "hooks.cpp",
+ "test": "test.cpp",
+ "watch": [
+  "src/compat/db_session.h"
+ ],
+ "fakes": "db_open_buffer_copy_local (seam): throws, so the call stops where this execution's subsession would be opened (hooks.cpp catches it). db_close_session_local (seam, db_vdb.c:5761 @ec36a772f): walks signature_plans then the transient next chain in the real order and counts closes per session instead of freeing.",
+ "note": "2026-10-30 head ec36a772f 4/4 PASS; base 604ab8b22 2/4 (R1·R4 FAIL: the chain stays until the client session closes). Mutation mut_no_guard.diff (harness-out/8343/ec36a772f/unit/db_vdb.recompile_chain/) dropping !session->is_subsession_for_prepared -> R2 FAIL (a kept tree's list closed).",
+ "origin": {
+  "pr": 8343,
+  "jira": "CBRD-27852",
+  "finding": "contract suite (harness-review 3-1(c))",
+  "comment": null,
+  "date": "2026-10-30"
+ },
+ "requires": [
+  "do_recompile_and_execute_prepared_statement"
+ ]
+}
