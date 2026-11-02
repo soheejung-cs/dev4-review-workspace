@@ -69,7 +69,7 @@ TID=$(gh api graphql -f query='{repository(owner:"CUBRID",name:"cubrid"){pullReq
 gh api graphql -f query="mutation{resolveReviewThread(input:{threadId:\"$TID\"}){thread{isResolved}}}"
 ```
 PR 본문 갱신은 `gh api -X PATCH repos/CUBRID/cubrid/pulls/<n> -F body=@file` (`gh pr edit` 는 이 서버에서 조용히 실패 — H-25).
-**CI 트리거(`/run all`)는 사용자·리뷰어가 친다.** TC 답안을 고쳤으면 `/run all` 전에 `tc/pr-<n>` push 가 끝나 있어야 한다.
+**CI 트리거(`/run all`)는 PR 작성자 쪽이 단다 — 에이전트가 작성자의 PR 을 대응하면 에이전트가, 리뷰 반영 커밋을 push 한 뒤 한 번**(조건·예외의 정본: claude-workspace 메모리 `PR브랜치-규칙` §0, 2026-11-02). TC 답안을 고쳤으면 `/run all` 전에 `tc/pr-<n>` push 가 끝나 있어야 하고, 같은 PR 의 런이 돌고 있으면 기다린다(새 `/run` 이 도는 런을 취소한다).
 엔진 헤드가 그대로이고 TC 만 고친 재실행은 `/run all` 이 아니라 CI 본문(런 Summary)의 `/run rerun <run_id>` 다 — gha-ci 스킬 §1-6, `gha_rerun_cmd.sh`(2026-10-30).
 게시로 끝나지 않는다 — §6(보드·세션기록)과 §7(배운것 append + `/self-evolution`)까지가 대응이다.
 
