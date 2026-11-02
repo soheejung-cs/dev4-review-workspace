@@ -1,0 +1,19 @@
+{
+ "name": "CBRD-27851 / PR#8363 btree_range_scan_start and the restart-from-root request of a descending range scan: cleared on entry (the start locates from the root), a restart raised during the start returned with (flag set, not started), consecutive starts end",
+ "file": "src/storage/btree.c",
+ "mode": "server",
+ "seams": [
+  "btree_find_lower_bound_leaf",
+  "btree_range_scan_advance_over_filtered_keys"
+ ],
+ "appendix": "hooks.cpp",
+ "test": "test.cpp",
+ "watch": [
+  "src/storage/btree.h",
+  "src/storage/btree_load.h"
+ ],
+ "fakes": "btree_find_lower_bound_leaf: positions nothing (C_page stays NULL). btree_range_scan_advance_over_filtered_keys: scripted per call -- ok (records the flag it finds, leaves it) or restart (raises the flag, as the previous-leaf step does when the leaf is gone). lower_key NULL branch only.",
+ "note": "2026-11-02 head 570e44137 4/4 PASS; base 1684945ed 2/4 (R1 stale request seen and returned again, R3 ten starts without starting = the CBRD-27851 hang). Mutation mut_alt_B.diff (harness-out/8363/570e44137/unit/btree.range_scan_start_restart/: clear the flag in the restart branch instead of on entry, the issue's first sketch) -> R1 R2 R3 FAIL (R2: the restart is not returned to btree_range_scan, which would fall into the key loop with C_page NULL).",
+ "origin": {"pr": 8363, "jira": "CBRD-27851", "finding": "contract suite (harness-review 3-1(c))", "comment": null, "date": "2026-11-02"},
+ "requires": ["btree_range_scan_start", "force_restart_from_root"]
+}
