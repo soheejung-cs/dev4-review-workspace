@@ -1,7 +1,7 @@
 # TC PR 본문·제목 쓰는 법 (`tc/pr-<N>` — cubrid-testcases · cubrid-testcases-private-ex)
 
 사용자 지시 2026-11-03: "수정 파일이 있으면 무조건 해당 tc 의 본문을 업데이트" · "쓰는 법도 하네스에 기록".
-규칙 정본은 claude-workspace 메모리 `PR브랜치-규칙` §3, QA 정본은 private-ex `shell/AGENTS.md` 「The PR」 이다(둘이 다르면 룰북을 따른다).
+짝 문서: [머지메시지.md](머지메시지.md)(세 리포의 스쿼시 머지 메시지). 규칙 정본은 claude-workspace 메모리 `PR브랜치-규칙` §3, QA 정본은 private-ex `shell/AGENTS.md` 「The PR」 이다(둘이 다르면 룰북을 따른다).
 머지 전 기계 검사는 claude-workspace `tools/merge_gate.py` 4) — 바뀐 파일이 있는 TC PR 의 봇 기본 본문·봇 제목·첫 줄 JIRA 링크 없음을 FAIL 로 낸다.
 
 ## 언제 쓰나
