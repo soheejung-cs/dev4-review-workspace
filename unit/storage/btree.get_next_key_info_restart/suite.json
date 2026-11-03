@@ -1,0 +1,25 @@
+{
+ "name": "CBRD-27871 / PR#8376 btree_get_next_key_info and the restart-from-root request of a descending key info scan: met before any key is read (resume again / start again, the fixed leaf unfixed first), never a row of the let-go leaf's slot 0, S_END when the new locate ends the scan",
+ "file": "src/storage/btree.c",
+ "mode": "server",
+ "seams": [
+  "btree_prepare_bts",
+  "btree_find_lower_bound_leaf",
+  "btree_locate_key_from_saved_leaf",
+  "btree_range_scan_advance_over_filtered_keys",
+  "btree_record_get_num_oids",
+  "btree_key_find_first_visible_row",
+  "btree_key_find_first_visible_row_from_all_ovf",
+  "btree_leaf_is_flaged"
+ ],
+ "test": "test.cpp",
+ "watch": [
+  "src/storage/btree.h",
+  "src/storage/btree_load.h",
+  "src/storage/page_buffer.h"
+ ],
+ "fakes": "btree_range_scan_start and btree_range_scan_resume are REAL (their flag handling is under test); the leaf-positioning functions they call are faked. btree_prepare_bts: counts, lower_key NULL (key_range NULL branch). btree_find_lower_bound_leaf: fixes the rightmost leaf, slot = key count (use_desc_index branch, btree.c@abc0ad106 18850-18935); after 10 starts ends the scan (empty-index branch) so a start that never ends shows as a count. btree_locate_key_from_saved_leaf: *leaf_page=NULL first; saved vpid -> leaf unchanged; NULL vpid (after a restart) -> found on the scripted relocation leaf. btree_range_scan_advance_over_filtered_keys scripted: OK(slot) / RESTART = descending_fix_prev_leaf previous leaf deallocated (C_page unfixed, NULL, slot 0, flag; btree.c 29560-29567) / RESTART_HELD = current leaf re-fixed, key not found (C_page still fixed; 29666-29672) / END (end_scan, C_page fixed). Record reads (num_oids, first_visible_row, leaf_is_flaged) note a read without a fixed page or at slot 0. pgbuf_unfix/pgbuf_get_lsa: fix/unfix ledger over fake pages. pr_clear_value/pr_clone_value/db_value_domain_init: the parts of the real ones for values owning no memory. prm_Def: zero array (btree_log_if_enabled off).",
+ "note": "2026-11-03 head abc0ad106 5/6 (R2 FAIL: 11 starts -- the second start meets the request left set and restarts again, PR#8376 relies on PR#8363's clear on entry; merge order in the PR body); base 1802aa581 1/6 (R1 R1b R4 R5: the row is the let-go leaf's slot 0 with the last consumed key and a NULL first OID; R2: the row is C_vpid NULL slot 0). head + PR#8363 (pr8363.diff) 6/6; head + fix_clear_before_start.diff 6/6. Mutations: mut_no_unfix -> R4 FAIL, mut_if_not_while -> R1b FAIL, mut_resume_only -> R2 FAIL. Artifacts harness-out/8376/abc0ad106/unit/get_next_key_info_restart/.",
+ "origin": {"pr": 8376, "jira": "CBRD-27871", "finding": "contract suite (harness-review 3-8)", "comment": null, "date": "2026-11-03"},
+ "requires": ["btree_get_next_key_info", "force_restart_from_root"]
+}
