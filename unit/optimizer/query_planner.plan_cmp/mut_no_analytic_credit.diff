@@ -1,0 +1,11 @@
+--- a/src/optimizer/query_planner.c	2026-11-03 18:58:06.389212804 +0900
++++ b/src/optimizer/query_planner.c	2026-11-03 18:58:06.544212798 +0900
+@@ -6990,7 +6990,7 @@
+   double cost;
+ 
+   cost = plan->fixed_cpu_cost + plan->fixed_io_cost + plan->variable_cpu_cost + plan->variable_io_cost;
+-  if (scan != NULL && qo_is_iscan_from_analytic (scan))
++  if (scan != NULL && qo_is_iscan_from_analytic (scan) && false)
+     {
+       cost -= qo_analytic_sort_cost (scan);
+     }

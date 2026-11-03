@@ -1,0 +1,10 @@
+--- a/src/optimizer/query_planner.c	2026-11-03 18:58:06.389212804 +0900
++++ b/src/optimizer/query_planner.c	2026-11-03 18:58:06.552212798 +0900
+@@ -7074,7 +7074,6 @@
+ 
+     case QO_PLANTYPE_JOIN:
+       qo_plan_tie_keys (plan->plan_un.join.outer, keys);
+-      qo_plan_tie_keys (plan->plan_un.join.inner, keys);
+       break;
+ 
+     case QO_PLANTYPE_FOLLOW:

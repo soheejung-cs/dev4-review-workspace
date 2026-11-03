@@ -1,0 +1,15 @@
+--- a/src/optimizer/query_planner.c	2026-11-03 18:58:06.389212804 +0900
++++ b/src/optimizer/query_planner.c	2026-11-03 18:58:06.442212802 +0900
+@@ -7220,9 +7220,9 @@
+ 
+   a_cost = qo_plan_cmp_cost (a);
+   b_cost = qo_plan_cmp_cost (b);
+-  a_bucket = qo_cost_bucket (a_cost);
+-  b_bucket = qo_cost_bucket (b_cost);
+-  if (a_bucket != b_bucket)
++  a_bucket = a_cost;
++  b_bucket = b_cost;
++  if (fabs (a_bucket - b_bucket) > (QO_COST_BUCKET_RATIO - 1.0) * MAX (a_bucket, b_bucket))
+     {
+       return (a_bucket < b_bucket) ? PLAN_COMP_LT : PLAN_COMP_GT;
+     }
