@@ -1,6 +1,6 @@
 --- a/src/optimizer/query_planner.c
 +++ b/src/optimizer/query_planner.c
-@@ -7232,7 +7232,7 @@
+@@ -7235,7 +7235,7 @@
  
    for (i = 0; i < (signed) planner->T; i++)
      {

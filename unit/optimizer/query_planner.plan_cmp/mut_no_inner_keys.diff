@@ -1,6 +1,6 @@
 --- a/src/optimizer/query_planner.c
 +++ b/src/optimizer/query_planner.c
-@@ -7119,7 +7119,6 @@
+@@ -7120,7 +7120,6 @@
  
      case QO_PLANTYPE_JOIN:
        qo_plan_tie_keys (plan->plan_un.join.outer, keys);

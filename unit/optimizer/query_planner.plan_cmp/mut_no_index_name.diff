@@ -1,6 +1,6 @@
 --- a/src/optimizer/query_planner.c
 +++ b/src/optimizer/query_planner.c
-@@ -7188,7 +7188,7 @@
+@@ -7189,7 +7189,7 @@
    QO_TIE_PREFER_LESS (a_keys.n, b_keys.n);
    for (i = 0; i < a_keys.n; i++)
      {

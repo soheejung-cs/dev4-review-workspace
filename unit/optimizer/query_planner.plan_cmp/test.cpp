@@ -4,9 +4,9 @@
  *         analytic index scan saves) with a share of 1% for each sort a plan of one scan does not skip and off for its
  *         covering index scan (qo_plan_pref_cost ()); two plans whose values fall into one cell of a 1e-6 log grid by
  *         values of each plan in a fixed order (qo_plan_tie_cmp ()). Two plans of a LIMIT query, or of a query with an
- *         INST_NUM () term or a forced filter index (planner->plan_cmp_by_rules), keep the band and its rules
+ *         INST_NUM () term or a filter index it names (planner->plan_cmp_by_rules), keep the band and its rules
  *         (qo_plan_cmp_limit ()).
- *   base: the band (cost difference < 50 and ratio < 1.2, x10 under LIMIT) lets about twenty rules pick the plan.
+ *   base: the band (cost difference < 50 or ratio < 1.2, x10 under LIMIT) lets about twenty rules pick the plan.
  *
  * Real code: the TU (qo_plan_cmp and what it calls in query_planner.c), query_bitset.c, system_parameter.c (prm_Def
  * static initializers: cost_seq_page, cost_cpu_tuples_per_page for the analytic sort cost).
@@ -606,7 +606,7 @@ TEST_CASE ("C16 with an INST_NUM () term (plan_cmp_by_rules) the plans keep the 
   CHECK (unitseam_plan_cmp (sq, ix) == PLAN_COMP_GT);
 }
 
-TEST_CASE ("C17 qo_plan_cmp_by_rules () marks a query with an INST_NUM () term or a forced filter index, no other",
+TEST_CASE ("C17 qo_plan_cmp_by_rules () marks a query with an INST_NUM () term or a filter index it names, no other",
 	   "[contract]")
 {
   if (unitseam_plan_cmp_by_rules (NULL) < 0)
@@ -642,11 +642,11 @@ TEST_CASE ("C17 qo_plan_cmp_by_rules () marks a query with an INST_NUM () term o
   plain->force = 1;
   CHECK (unitseam_plan_cmp_by_rules (s.planner) == 0);	/* forced, no filter */
   filter->constraints->filter_predicate = (SM_PREDICATE_INFO *) s.alloc (sizeof (SM_PREDICATE_INFO));
-  CHECK (unitseam_plan_cmp_by_rules (s.planner) == 0);	/* a filter index, not forced */
+  CHECK (unitseam_plan_cmp_by_rules (s.planner) == 1);	/* a filter index named, not forced */
   filter->force = -1;
   CHECK (unitseam_plan_cmp_by_rules (s.planner) == 0);	/* ignored */
   filter->force = 1;
-  CHECK (unitseam_plan_cmp_by_rules (s.planner) == 1);
+  CHECK (unitseam_plan_cmp_by_rules (s.planner) == 1);	/* forced */
 }
 
 TEST_CASE ("C18 a join is ranked by its cost alone: a covering inner index does not win a join 0.5% dearer",
@@ -704,6 +704,28 @@ TEST_CASE ("C20 below zero (an analytic scan less its sort) the covering share s
 
   CHECK (unitseam_plan_cmp (cov, plain) == PLAN_COMP_LT);
   CHECK (unitseam_plan_cmp (plain, cov) == PLAN_COMP_GT);
+}
+
+TEST_CASE ("C21 a scan of infinite cost (qo_worst_cost ()) loses to a finite plan both ways, with or without its "
+	   "shares", "[contract]")
+{
+  scene s (false);
+  QO_NODE *t = s.node ("t", 0);
+  QO_INFO *i = s.info (100.0, 64);
+  QO_PLAN *sq = s.seq (t, i, 100.0);
+  QO_PLAN *cov_inf = s.iscan (t, i, s.index ("i_c", 20), HUGE_VAL, 1, 0, true);
+  QO_PLAN *ix_inf = s.iscan (t, i, s.index ("i_p", 20), HUGE_VAL, 1, 0, false);
+  QO_PLAN *srt_inf = s.sort (s.iscan (t, i, s.index ("i_s", 20), HUGE_VAL, 1, 0, true), SORT_ORDERBY, 0.0);
+  QO_PLAN *cov_inf2 = s.iscan (t, i, s.index ("i_c2", 20), HUGE_VAL, 1, 0, true);
+
+  for (QO_PLAN *inf : {cov_inf, ix_inf, srt_inf})
+    {
+      CHECK (unitseam_plan_cmp (sq, inf) == PLAN_COMP_LT);
+      CHECK (unitseam_plan_cmp (inf, sq) == PLAN_COMP_GT);
+      CHECK (kept_of ({inf, sq}) == sq);
+      CHECK (kept_of ({sq, inf}) == sq);
+    }
+  CHECK (sgn (unitseam_plan_cmp (cov_inf, cov_inf2)) == -sgn (unitseam_plan_cmp (cov_inf2, cov_inf)));
 }
 
 TEST_CASE ("D1 develop: inside the band the iscan rule overrides the cost (iscan 99 beats sscan 56)", "[defect]")

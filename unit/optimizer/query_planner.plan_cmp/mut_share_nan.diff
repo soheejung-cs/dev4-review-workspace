@@ -1,0 +1,11 @@
+--- a/src/optimizer/query_planner.c
++++ b/src/optimizer/query_planner.c
+@@ -7038,7 +7038,7 @@
+     }
+ 
+   /* weight is above 0 and below 2 */
+-  return (cost < 0.0) ? cost * (2.0 - weight) : cost * weight;
++  return cost + fabs (cost) * (weight - 1.0);
+ }
+ 
+ /*

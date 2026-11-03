@@ -8,4 +8,4 @@
 +      weight *= 1.0;
      }
  
-   return cost + fabs (cost) * (weight - 1.0);
+   /* weight is above 0 and below 2 */
