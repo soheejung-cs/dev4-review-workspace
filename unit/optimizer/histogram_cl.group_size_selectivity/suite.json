@@ -1,0 +1,34 @@
+{
+ "name": "PR#8325 (CBRD-27811) histogram_cl.cpp -- histogram_get_group_size_selectivity (MCV by its count freq*rows*scale rounded, a bucket's values geometric with its average count rows*scale/ndv, r^(ceil(min_rows)-1), over MCVs + bucket distinct values; min_rows <= 1 every value; NULL rows not a value; exits: no histogram / not a name / refused blob / rows 0 / no distinct / scale <= 0) · histogram_split_hv_predicate + histogram_hv_operand_column (SUM/AVG/MIN/MAX of one column op ? = a predicate on that column, either way round; COUNT(*)/COUNT(x)/STDDEV/expression/two arguments/constant not; DISTINCT SUM is -- current behaviour) · bind_target_walk (an aggregate equality pins nothing) · bind_term_walk slot of AGG(x) op ? = x op ? + [defect] U4 latent/low (SUM's slot is x op v, HAVING prices x op v / group size)",
+ "requires": [
+  "histogram_get_group_size_selectivity"
+ ],
+ "file": "src/optimizer/histogram/histogram_cl.cpp",
+ "mode": "cs",
+ "seams": [
+  "histogram_init_reader_from_lhs"
+ ],
+ "appendix": "hooks.cpp",
+ "test": "test.cpp",
+ "watch": [
+  "src/optimizer/histogram/histogram_cl.hpp",
+  "src/optimizer/histogram/histogram_reader.hpp",
+  "src/optimizer/histogram/histogram_reader.cpp",
+  "src/optimizer/query_planner.c",
+  "src/parser/parser_support.c",
+  "src/query/bind_variant.h"
+ ],
+ "fakes": "이음매 하나: histogram_init_reader_from_lhs(histogram_cl.cpp:724, TU static) -- 실제 본문에서 클래스 캐시 분기만 뺐다(bind_fp_active_statement != NULL 인 문장 전체 지문 walk 중에만 탄다 -- 훅은 노드 하나를 걸어 NULL 이다): PT_DOT_ 끝 노드, PT_NAME 아니면 false, 주석(query_graph.c qo_get_attr_info 의 VARBIT 사본) 없으면 false, db_get_bit 바이트를 HistogramReader::reset. 진짜: histogram_get_group_size_selectivity·histogram_get_comp_selectivity·histogram_get_total_rows·histogram_extract_key·comp_parts, HistogramReader(histogram_reader.cpp 를 test.cpp 에 #include, byte_order.c 로 OR_GET_*), histogram_split_hv_predicate·histogram_hv_operand_column·histogram_is_user_host_var, bind_target_walk/bind_target_add, bind_term_walk/bind_term_add/bind_card_arg_value/bind_term_key(hooks.cpp). 다른 TU 의 가짜: pt_get_end_path_node·pt_is_derived_host_var(parser_support.c 본문 그대로), qo_classify(query_planner.c:16251 본문, pt_is_function_index_expression 은 PT_EXPR_INFO_FUNCTION_INDEX 검사로 펼침), or_packed_value_size/or_pack_value(형 + 값 8바이트 이미지 -- bind_term_key 는 '같은 값 = 같은 이미지' 만 쓰고 memo 를 안 쓰니 값은 무관). blob 은 histogram_cl.equal_selectivity_sum 과 같은 OR_* 작성기(헤더 48B, MCV 16B, 버킷 24B). 기대값은 함수 주석으로 쓴 오라클(blob 명세에 적용)과 비교 -- 코드에서 베끼지 않았다. 노드는 calloc(파서 없음), PARSER_CONTEXT 도 calloc(host_var_count 2·auto_param_count 2·host_var_derived_from NULL -- 2·3 번은 사용자 변수 아님). 다른 외부 심볼은 stub(호출 0).",
+ "note": "전부 head 5cfef7f5b 의 새 동작(S1 develop 만 base 대조군). 2026-11-03 head 5cfef7f5b 12/12 PASS(계약 11 + [defect] U4 PASS = 있음), base ef2c78cda 1/12(S1 develop; G 는 함수 없음 'absent', S2-S4·B1·U4 는 집계 피연산자가 이 PR 의 새 후보), stub 호출 0(stub 함수 54·데이터 2). U4(잠재·낮음): bind_term_walk(histogram_cl.cpp:3417-3499)는 histogram_split_hv_predicate 가 돌려준 열 x 로 `x op v` 를 가격하는데, HAVING 은 SUM(x) op v 를 x op v / 그룹 크기로 가격한다(query_planner.c:991-1000) -- 10행 그룹에서 v = 500·900 은 HAVING 추정을 5배 움직이지만(x > 50, x > 90) 슬롯은 둘 다 1행(x 는 [1,100]) 이라 밴드 검사가 첫 값의 계획을 지킨다. 반대로 v 가 x 범위 안에서 움직이면 SUM 문턱(v/그룹)은 거의 안 움직이는데 슬롯은 움직여 불필요한 재계획. AVG/MIN/MAX 는 x op v 가 HAVING 의 매핑과 같은 축이라 정상(B1). 그룹 크기는 계획의 값이라 지문 walk 에는 없다 -- 제안 수정(fix_u4_sum_slot_unknown): SUM 피연산자의 슬롯을 BIND_TERM_UNKNOWN 으로(첫 실행 peek 은 그대로, 밴드 비교에서만 빠진다). 다른 길: histogram_hv_operand_column 에서 PT_SUM 을 빼기(그러면 S2 의 SUM 항목도 바뀐다). S3 의 DISTINCT SUM 후보는 '(current behaviour)': HAVING 은 SUM/AVG DISTINCT 를 가격하지 않아(0.5) 그 슬롯의 움직임은 추정과 무관 -- 낮음, 게시 판단은 리뷰에서. 변이(harness-out/8325/5cfef7f5b/unit/group_size_selectivity/mut/*.diff, make_mutations.py, run_mutations.sh) 10종: fix_u4 -> U4 만 FAIL(11/12), 감도 9종 모두 감지 (h01 MCV 반올림 제거 -> G3, h02 버킷 지수에 분수 -> G2, h03 MCV scale 무시·h04 버킷 scale 무시 -> G4, h05 분모를 버킷 값만 -> G1-G4·G6, h06 scale 0 허용 -> G6, h07 COUNT 피연산자 허용·h09 인자 둘 허용 -> S3, h08 집계 등호가 고정 -> S4).",
+ "origin": {
+  "pr": 8325,
+  "jira": "CBRD-27811",
+  "finding": "harness-review step 3-1 (c): [contract] suite for the PR's histogram_cl.cpp changes (5cfef7f5b) + [defect] U4 latent/low",
+  "comment": null,
+  "date": "2026-11-03",
+  "reviewed_head": "5cfef7f5b",
+  "base": "ef2c78cda",
+  "artifact": "harness-out/8325/5cfef7f5b/unit/group_size_selectivity/",
+  "result": "2026-11-03: head 5cfef7f5b 12/12 PASS([defect] U4 PASS = 있음), base ef2c78cda 1/12(S1 develop), stub 호출 0. 변이 10종: fix_u4 는 U4 만 FAIL, 감도 9종 전부 감지. unit_regress 는 requires(histogram_get_group_size_selectivity)로 base 를 건너뛴다(신설)."
+ }
+}
