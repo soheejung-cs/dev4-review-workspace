@@ -145,4 +145,4 @@ DB 서버·CTP 는 이 CLI 가 띄우지 않는다(`review-testing` 스킬의 �
 - **adjudicate**: `passed`(통과 의무) 기록, `mentions_resolve`(지적이 `name ()` 로 부르는 함수가 그래프에 있나), `verification.artifact` 경로 존재 확인(static 인데 file:line 인용이 없으면 표시).
 - **pipeline**: `pr_refs` 노드(context 단계), `--sha/--base` 로컬 head 리뷰, arch 의 `include_edges`(diff 의 새 `#include` → 계층 간선) + `new-include` 리스크(바닥으로 내려가면 무해, 바닥이 위를 include 하면 high), diff 의 모드 가드(`#if … SERVER_MODE|CS_MODE|SA_MODE`) 추가·삭제를 INV-3 신호로.
 - **episodic**: 로컬 판정도 적재(`source=local`), 팩의 episodic 절이 `[local valid/non-blocking]` 로 표시, 작은 episodic 절은 팩 예산에서 잘리지 않음.
-- **도구**: `review_threads`(스레드 분류) · `pr_refs`(본문 참조 확인) · `compile_check`(커밋 단위 컴파일) · `review_reply.py`(답글 초안 ↔ 스레드 dry-run/게시) · `tools/ab/`(A/B 표준, `ab_pair.sh`). 구조도: `harness/구조도.html`.
+- **도구**: `review_threads`(스레드 분류) · `missed_review`(다른 리뷰어 지적 ↔ 우리 findings·스레드 대조 → `references/놓친지적-반성.md`, harness-review 절차 10) · `pr_refs`(본문 참조 확인) · `compile_check`(커밋 단위 컴파일) · `review_reply.py`(답글 초안 ↔ 스레드 dry-run/게시) · `tools/ab/`(A/B 표준, `ab_pair.sh`). 구조도: `harness/구조도.html`.
