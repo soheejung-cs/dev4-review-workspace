@@ -1,0 +1,12 @@
+--- a/src/storage/heap_file.c	2026-11-03 16:03:59.422579663 +0900
++++ b/src/storage/heap_file.c	2026-11-03 16:03:59.492579660 +0900
+@@ -12906,7 +12906,8 @@
+    * oversized one, which the shared setval refuses (ER_INVALID_PRECISION) where the cast stores the value */
+   precision = db_value_precision (value);
+   if ((type == DB_TYPE_VARCHAR || type == DB_TYPE_VARBIT)
+-      && (precision == 0 || precision == TP_FLOATING_PRECISION_VALUE))
++      && (precision == 0 || precision == TP_FLOATING_PRECISION_VALUE
++	  || precision > ((type == DB_TYPE_VARCHAR) ? DB_MAX_VARCHAR_PRECISION : DB_MAX_VARBIT_PRECISION)))
+     {
+       precision = (type == DB_TYPE_VARCHAR) ? DB_MAX_VARCHAR_PRECISION : DB_MAX_VARBIT_PRECISION;
+     }

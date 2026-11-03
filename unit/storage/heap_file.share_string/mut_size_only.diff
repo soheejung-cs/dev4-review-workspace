@@ -1,0 +1,11 @@
+--- a/src/storage/heap_file.c	2026-11-03 16:03:59.837579648 +0900
++++ b/src/storage/heap_file.c	2026-11-03 16:03:59.984579643 +0900
+@@ -12926,7 +12926,7 @@
+     {
+       return true;
+     }
+-  return db_get_string_length (value) <= precision;
++  return type == DB_TYPE_VARBIT && db_get_string_length (value) <= precision;
+ }
+ 
+ /*

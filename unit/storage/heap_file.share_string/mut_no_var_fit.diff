@@ -1,0 +1,15 @@
+--- a/src/storage/heap_file.c	2026-11-03 16:04:00.053579640 +0900
++++ b/src/storage/heap_file.c	2026-11-03 16:04:00.128579638 +0900
+@@ -12922,11 +12922,7 @@
+     {
+       return db_get_string_length (value) == precision;
+     }
+-  if (type == DB_TYPE_VARCHAR && db_get_string_size (value) <= precision)
+-    {
+-      return true;
+-    }
+-  return db_get_string_length (value) <= precision;
++  return true;
+ }
+ 
+ /*

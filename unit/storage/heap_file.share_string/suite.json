@@ -1,0 +1,64 @@
+{
+ "name": "PR#8378 (CBRD-27847) heap_attrinfo_set_converted ()의 문자열 지름길 - static heap_attrinfo_can_share_string () 의 계약(91465a14a): 타입·정밀도(VARCHAR/VARBIT 의 미정 -1/0 만 최대, 최대 초과는 캐스트)·콜레이션(TP_EXACT_MATCH)·코드셋이 열과 같고, 고정 길이(CHAR·BIT)는 길이 = 정밀도, 가변(VARCHAR·VARBIT)은 길이 ≤ 정밀도, 버퍼를 소유하지 않는 값만 버퍼째 넣는다. D1-D11 어떤 (DB_VALUE, TP_DOMAIN) 쌍이 공유·캐스트되나, E1-E2 저장 = 캐스트(모든 코드셋 - 오류 코드·레코드 이미지·되읽은 값), M1 빌린 원천 무변경, P1 생성 행렬(공유 = 판정, 저장 = 캐스트, 공유 값은 메모리에서도 캐스트 값), P2 판정 = 계약 정의, O1 짧은 BIT 는 캐스트(메모리 값도 같다), 이력 결함 U1·U2(binary·EUC-KR 짧은 CHAR 패딩)·U3(최대 초과 정밀도 → ER_INVALID_PRECISION) - e97790141 에서 재현, 91465a14a 에서 고쳐짐",
+ "requires": [
+  "heap_attrinfo_can_share_string"
+ ],
+ "file": "src/storage/heap_file.c",
+ "mode": "server",
+ "seams": [],
+ "appendix": "hooks.cpp",
+ "test": "test.cpp",
+ "extra": [
+  "src/base/memory_hash.c",
+  "src/base/system_parameter.c",
+  "src/base/language_support.c",
+  "src/base/intl_support.c",
+  "src/base/chartype.c",
+  "src/base/mprec.c",
+  "src/base/dtoa.c",
+  "src/object/object_primitive.c",
+  "src/object/object_domain.c",
+  "src/object/object_domain_convert.cpp",
+  "src/query/numeric_opfunc.c",
+  "src/compat/db_date.c",
+  "src/compat/db_macro.c",
+  "src/query/string_opfunc.c",
+  "src/storage/oid.c",
+  "src/object/object_representation.c",
+  "src/base/mem_block.cpp"
+ ],
+ "watch": [
+  "src/storage/heap_file.h",
+  "src/query/heap_attrinfo.h",
+  "src/object/object_primitive.c",
+  "src/object/object_primitive.h",
+  "src/object/object_domain.c",
+  "src/object/object_domain.h",
+  "src/object/object_domain_convert.cpp",
+  "src/object/object_domain_convert.h",
+  "src/query/string_opfunc.c",
+  "src/compat/db_macro.c",
+  "src/compat/dbtype.h",
+  "src/compat/dbtype_function.i",
+  "src/base/intl_support.c",
+  "src/query/stream_to_xasl.c"
+ ],
+ "fakes": "대상 두 함수(heap_attrinfo_set_converted · static heap_attrinfo_can_share_string)와 그 아래 형 체계는 전부 그 리비전의 실코드다(seam 없음): heap_attrinfo_start_set/check/heap_attrvalue_locate(heap_file.c), pr_type setval·get_disk_size_of_value·data_writeval·data_readval·pr_clear_value·pr_pad_char_to_precision(object_primitive.c), tp_value_auto_cast_with_precision_check_converter·tp_value_cast_internal·tp_domain_check·tp_domain_resolve(_value)·tp_domain_status_er_set(object_domain.c), tp_value_find_converter 와 문자열·비트 변환기(object_domain_convert.cpp), db_char_string_coerce·qstr_coerce·db_bit_string_coerce·db_get_string_length(string_opfunc.c), db_value_domain_init(db_macro.c), or_* 쓰기(object_representation.c), 콜레이션·코드셋·pad 문자(language_support.c·intl_support.c), prm_Def 기본값(system_parameter.c). 가짜는 부팅 환경뿐 - btree.prefix_value_hash 와 같은 묶음: er_set/er_errid/er_clear(마지막 id), db_private_alloc/free/realloc_release = malloc/free/realloc(단 test 가 소유한 원천 바이트('protected')를 free 하려 하면 하지 않고 기록 - M1·P1 이 그 횟수 0 을 본다), area_create/alloc/free(요소 크기 calloc), envvar_get=NULL·envvar_trim_char 본문, cubthread::system_core_count=8·cubregex::get_engine_name, boot_Server_status=DOWN, LZ4_decompress_safe = -1(lz4 미링크 - 잘못된 입력에 LZ4 가 내는 값; 문자열이 모두 255바이트 미만이라 압축하지 않으므로, 압축 버퍼를 가진 값을 공유하는 변이만 닿는다), 부팅 순서 lang_init_builtin → tp_init → lang_set_charset_lang(\"en_US.utf8\"). 속성 캐시는 attr_slot: OR_ATTRIBUTE(type·domain·is_fixed) 1개 + HEAP_ATTRVALUE 1개 + HEAP_CACHE_ATTRINFO(num_values 1, inst_oid NULL) - heap_attrinfo_start_set 이 읽는 전부. 플랜의 변환기는 stx_plan_assignment 처럼 tp_value_find_converter (value_type, 열 도메인, DOMAIN_CONVERT_ASSIGN)(stream_to_xasl.c:4905). 레코드 이미지는 heap_attrinfo_get_record_payload_size 의 get_disk_size_of_value(짧은 CHAR 를 제자리에서 채운다) 다음 heap_attrinfo_transform_{fixed,variable}_to_disk 의 data_writeval 순서, 되읽기는 그 도메인·길이의 data_readval. 비교 기준(캐스트)은 PR 의 else 가지이자 base 가 모든 문자열에 하는 tp_value_auto_cast_with_precision_check_converter. 소유 원천의 '대입 직후 해제'는 locator_mvcc_reev_cond_assigns 처럼 대입 뒤 원천 바이트(또는 압축 버퍼)를 'X' 로 덮는다. 정밀도 -1·0·최대 초과 값은 domain.char_info.length 직접 쓰기로 만든다(db_value_domain_init 은 VARCHAR/VARBIT 의 -1·0 을 최대로, 최대 초과를 ER_INVALID_PRECISION 으로 고친다). hooks.cpp(heap_file.c 끝): unitseam_can_share_string 은 그 리비전의 heap_attrinfo_can_share_string - 없으면 템플릿 폴백이 false 와 absent. 자동 stub 함수 406·데이터 24 는 실행 중 한 번도 불리지 않는다(stub_calls 빈 목록).",
+ "note": "계약은 91465a14a 의 것(e97790141 → 91465a14a 에서 CHAR·BIT 는 길이 = 정밀도일 때만 공유, VARCHAR/VARBIT 정밀도 정규화는 -1·0 만 최대, 최대 초과는 캐스트). requires 는 heap_attrinfo_can_share_string - 이 PR 이 들어오지 않은 리비전에서는 '적용 안 됨'. 2026-11-03 unitseam 직접 실행(TMPDIR 고정): head 91465a14a 22건 중 [contract] 19/19 PASS, [defect] U1·U2·U3 FAIL(고쳐짐 = defects_fixed_in 이력); base ef2c78cda 13/22 - D1-D5(공유 기대: base 는 모든 문자열을 캐스트)·P2(함수 없음)·U1-U3 FAIL, D2b·D5b·D6-D11·E1·E2·M1·P1·O1 PASS(캐스트 경로·저장 동치는 PR 전후 같다); 재현 기준 e97790141 14/22 - U1·U2·U3 PASS(재현), D2b·D5b(짧은 CHAR·BIT 공유)·D11·E1·E2·P1·P2·O1 FAIL. 행렬(P1/P2): 8,894쌍(VARCHAR/CHAR × utf8_bin·utf8_en_ci·iso88591_bin·binary·euckr_bin, BIT/VARBIT, 정밀도·미정 -1/0·최대 초과, 소유/비소유) - 91465a14a 공유 88·오류 478(전부 캐스트와 같은 코드), e97790141 공유 120·오류 490, base 공유 0. 감도 변이(91465a14a 에 --patch, mut_*.diff): mut_no_codeset → D7·E1, mut_no_need_clear → D6·E1·P1·P2, mut_short_fixed(CHAR·BIT 길이 ≤ 정밀도 = U1/U2 되살림) → D2b·D5b·E1·E2·P1·P2·O1 FAIL 에 U1·U2 PASS(재발), mut_oversize(최대 초과를 최대로 = U3 되살림) → D11·E1·P1·P2 FAIL 에 U3 PASS(재발), mut_no_unset → D4·P2, mut_size_only → D3·P2, mut_no_var_fit → D8·E1·P1·P2. 도달성(5-2): U1/U2/U3 는 e97790141 에서 입력 생산자를 찾지 못한 잠재 결함이었다(힙 레코드·리스트 값은 이미 정밀도까지 채워짐 - object_primitive.c:12144-12158·string_opfunc.c:9931-9938, DML 상수는 컴파일 때 열 타입 CAST - semantic_check.c:13810·15750, 호스트 변수는 기대 도메인으로 캐스트하거나 CAS 가 정밀도 -1 - parse_dbi.c:3381·cas_execute.c:4067, 계산 값은 소유; 최대 초과 정밀도는 db_value_domain_init 이 만들지 않음 - db_macro.c:291-296). 첫 버전(e97790141 계약: 짧은 CHAR·BIT 도 공유, 공유 동치는 utf8·iso·비트만)의 실행 기록은 origin.artifacts 의 out/·out_fix_*/·out_mut_*/.",
+ "origin": {
+  "pr": 8378,
+  "jira": "CBRD-27847",
+  "head": "91465a14a",
+  "reproduced_at": "e97790141b76ae21092619226bdacc65a9cc7edb",
+  "base": "ef2c78cdae03a705f953ed8cbdb44036e3864831",
+  "finding": "계약 suite (harness-review 3-1(c)) + 이 suite 가 e97790141 에서 찾은 U1(binary CHAR 짧은 값: 쓰기 공백 vs 캐스트 NUL, 되읽은 값도 다름)·U2(EUC-KR: 공백 vs 0xA1A1, 바이트만 다름)·U3(최대 초과 정밀도 → ER_INVALID_PRECISION) - 작성자가 91465a14a 에서 고침(U3 는 fix_u3.diff 그대로)",
+  "comment": "https://github.com/CUBRID/cubrid/pull/8378",
+  "artifacts": "/home/cubrid/dev/utils/harness-out/8378/e97790141/unit/heap_file.share_string/ (result.md, out_v2/<rev9>/, mut_v2/, 첫 버전 out/·out_fix_*/·out_mut_*/·fix_u1u2.diff·fix_u3.diff)",
+  "date": "2026-11-03"
+ },
+ "defects_fixed_in": {
+  "PR8378 U1": "91465a14a",
+  "PR8378 U2": "91465a14a",
+  "PR8378 U3": "91465a14a"
+ }
+}

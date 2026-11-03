@@ -1,0 +1,12 @@
+--- a/src/storage/heap_file.c	2026-11-03 16:03:58.937579680 +0900
++++ b/src/storage/heap_file.c	2026-11-03 16:03:58.979579678 +0900
+@@ -12896,8 +12896,7 @@
+     }
+ 
+   if (TP_IS_CHAR_TYPE (type)
+-      && (db_get_string_codeset (value) != TP_DOMAIN_CODESET (domain)
+-	  || db_get_string_collation (value) != TP_DOMAIN_COLLATION (domain)))
++      && (db_get_string_collation (value) != TP_DOMAIN_COLLATION (domain)))
+     {
+       return false;
+     }
