@@ -42,7 +42,7 @@ python3 -m tools.harness.implement_pack --key CBRD-n --pr <PR>      # 리뷰 대
 - 주석은 "왜"를 적는다(리뷰 하네스가 `why` 를 요구하듯). 저수준(pgbuf/heap/MVCC)은 검증된 코드 재사용(규칙 `저수준-검증된코드-재사용`).
 - **커밋 단위**: 리뷰 대응은 "지적 묶음 1커밋 + 성능 변경 1커밋" 처럼 나눈다. **헝크로 쪼개 커밋을 만들면(`git diff -U0` + `apply --cached`) 조각 커밋이 컴파일되지 않을 수 있다** — 쪼갠 커밋은 S4 의 `compile_check --commits` 로 각각 컴파일하거나, 편집 스크립트를 커밋 단위로 다시 적용해 만든다.
 - TC: plan.tests 를 `cubrid-testcases(-private-ex)` 의 해당 카테고리 형식으로. shell TC 는 `write_ok "<케이스> : <무엇>"`.
-  shell TC 는 **private-ex 룰북을 먼저 읽는다**(`shell/AGENTS.md` → `shell/rules/test-perspectives.md`·`writing-rules.md`): 새 버그 수정 TC 는 쓰는 날의 반기 디렉터리 `shell/_06_issues/_<yy>_<1|2>h/`, release·debug 둘 다 CTP, **버그 수정이면 수정 없는 develop NOK·수정 빌드 OK 를 TC PR 에**, SQL 만으로 되는 시나리오는 sql TC 로.
+  shell TC 는 **private-ex 룰북을 먼저 읽는다**(`shell/AGENTS.md` → `shell/rules/test-perspectives.md`·`writing-rules.md`): 새 버그 수정 TC 는 쓰는 날의 반기 디렉터리 `shell/_06_issues/_<yy>_<1|2>h/`, release·debug 둘 다 CTP, **버그 수정이면 수정 없는 develop NOK·수정 빌드 OK 를 TC PR 에**, SQL 만으로 되는 시나리오는 sql TC 로. **TC 파일을 `tc/pr-<n>` 에 push 했으면 그 TC PR 의 본문·제목을 같이 갱신한다** — 봇 기본 본문·`Draft: TC changes for PR` 제목을 남기지 않는다(사용자 지시 2026-11-03, 정본 메모리 PR브랜치-규칙 §3, 머지 전 검사 `tools/merge_gate.py` 4)).
 
 ## S4. 게이트 (결정론)
 ```bash
