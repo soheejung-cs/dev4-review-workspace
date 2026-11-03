@@ -13,6 +13,9 @@
                           · loop-end·fall-through(정밀도가 낮아 notes 에만).
   untracked-aligned-alloc posix_memalign·aligned_alloc·memalign·valloc·pvalloc(·mmap)을 직접 부른다 — 메모리 모니터가 추적하는
                           cub_aligned_alloc 이 아니다(META-REVIEW PR#7658 → H-33).
+  comment-fallthrough     switch 의 case 사이 fall through 를 주석(`/* fall through */`·`/* FALLTHRU */`)으로만 표시한다 — 주석을 지우고
+                          컴파일하는 빌드(Jenkins cubridci 의 ccache 3.1.x)에서 -Werror=implicit-fallthrough 로 Release 빌드가 깨진다
+                          (CUBRIDQA-1703, PR#8388: #8318·#8196 이 넣은 두 곳). develop 의 나머지 137곳처럼 `[[fallthrough]];` 를 쓴다. 변경 줄만.
   join-shape-checklist    카디널리티·선택도 모델 함수가 바뀌면 조인 형상 체크리스트를 테스트 제안으로 싣는다 — preamble 의
                           「자동 finding」 절로 리뷰 단계에 주입된다(META-REVIEW PR#7937 → H-33). 파이프라인에서만.
 
@@ -46,8 +49,9 @@ from typing import Dict, List, Optional, Tuple
 from .codegraph import TS_LIB, _normalize_split_headers
 
 SRC_EXT = ('.c', '.cpp', '.cc', '.cxx', '.h', '.hpp', '.hh')
-CHECKERS = ('fp-range-outside', 'discarded-status', 'error-path-continues', 'untracked-aligned-alloc', 'join-shape-checklist')
-DIFF_ONLY = {'error-path-continues', 'untracked-aligned-alloc'}      # 선재분까지 내면 저장소 전체의 관행을 다시 리뷰하게 된다
+CHECKERS = ('fp-range-outside', 'discarded-status', 'error-path-continues', 'untracked-aligned-alloc', 'comment-fallthrough',
+            'join-shape-checklist')
+DIFF_ONLY = {'error-path-continues', 'untracked-aligned-alloc', 'comment-fallthrough'}      # 선재분까지 내면 저장소 전체의 관행을 다시 리뷰하게 된다
 # error-path-continues 의 '블록을 빠져나가 계속'·'반복 끝' 은 develop 표본(2026-10-28, 15건)에서 대부분 의도된 '기록하고 계속'(정리 후 반환·
 # 일관성 검사기의 전수 수집)이었다 — 파이프라인에서는 지적으로 내지 않고 static_lint.json 의 notes 에만 남긴다
 NOTE_ONLY = {'fall-through', 'loop-end'}
@@ -837,8 +841,52 @@ def check_aligned(ctx: FileCtx, f: Fn, stats) -> List[Hit]:
     return out
 
 
+# ------------------------------------------------------------------ checker 5: comment-fallthrough (CUBRIDQA-1703, PR#8388)
+FT_COMMENT = re.compile(r'(/\*|//)\s*(-\s*)?(fall(s|ing)?[\s-]*thr(ough|u)|FALLTHRU|FALLTHROUGH)\b', re.I)
+FT_LABEL = re.compile(r'^\s*(case\b.*|default\s*):\s*(/\*.*\*/|//.*)?$')
+FT_ATTR = re.compile(r'^\s*\[\[\s*(gnu::)?fallthrough\s*\]\]\s*;')
+
+
+def fallthrough_comment_lines(lines: List[str], candidates=None) -> List[Tuple[int, str, bool]]:
+    """주석으로만 표시한 case fall through 의 줄(1부터)과 그 줄 — lines 는 파일 전체, candidates 는 볼 줄 번호(없으면 전부).
+    통과: 다음 코드 줄이 [[fallthrough]]; 이거나, 앞 코드 줄이 case/default 라벨(문장 없이 쌓인 라벨 — 경고 없음).
+    지적: 다음 코드 줄이 case/default 라벨 — gcc 가 주석을 못 보는 빌드에서 -Werror=implicit-fallthrough.
+    셋째 값: 앞 문장이 assert 뿐인가(release 는 무해, debug 만 위험)."""
+    def code(i, step):
+        while 0 <= i < len(lines):
+            t = lines[i].strip()
+            if t and not t.startswith(('//', '/*', '*')) and not FT_COMMENT.search(t):
+                return i
+            i += step
+        return None
+    out = []
+    for ln in (candidates if candidates is not None else range(1, len(lines) + 1)):
+        i = ln - 1
+        if not (0 <= i < len(lines)) or not FT_COMMENT.search(lines[i]):
+            continue
+        if FT_ATTR.search(lines[i]):
+            continue
+        nxt = code(i + 1, 1)
+        prv = code(i - 1, -1)
+        if nxt is not None and FT_ATTR.search(lines[nxt]):
+            continue
+        if prv is not None and FT_LABEL.match(lines[prv]):
+            continue
+        if nxt is not None and FT_LABEL.match(lines[nxt]):
+            # 앞 문장이 assert 뿐이면 release(NDEBUG)에선 빈 식이라 경고가 없다 — debug 빌드에서만 같은 위험(낮은 등급)
+            only_assert = prv is not None and re.match(r'^\s*assert(_release)?\s*\(', lines[prv]) is not None
+            out.append((ln, lines[i].strip(), only_assert))
+    return out
+
+
+def check_fallthrough(ctx: FileCtx, f: Fn, stats) -> List[Hit]:
+    lines = ctx.src.decode('utf-8', 'replace').split('\n')
+    return [Hit('comment-fallthrough', ctx.rel, ln, f.name, t, 'low' if only_assert else 'high', facts={'comment': t})
+            for ln, t, only_assert in fallthrough_comment_lines(lines, range(f.start, f.end + 1))]
+
+
 RUN = {'fp-range-outside': check_fp_range, 'discarded-status': check_discarded, 'error-path-continues': check_error_path,
-       'untracked-aligned-alloc': check_aligned}
+       'untracked-aligned-alloc': check_aligned, 'comment-fallthrough': check_fallthrough}
 
 
 def scan_file(rel: str, raw: bytes, gs: GitSrc, checkers, stats, only_lines=None, resolve=None) -> List[Hit]:
@@ -948,6 +996,13 @@ TEXT = {
              '앞선 리뷰는 "래퍼는 operator new/delete 만 감싼다" 는 틀린 전제로 넘겼다.'),
         proposal=('정렬 할당은 `cub_aligned_alloc (alignment, size, __FILE__, __LINE__)`(src/base/memory_cwrapper.h)로 받고 free () 로 놓는다 — '
                   'SERVER_MODE 에서는 모니터가 기록하고 다른 모드에서는 posix_memalign 과 같다. 추적하지 않아야 할 이유가 있으면 그 이유를 주석으로 남긴다.')),
+    'comment-fallthrough': dict(
+        claim='case 사이 fall through 를 주석(`{comment}`)으로만 표시했다 — 주석을 지우고 컴파일하는 빌드에서 Release 빌드가 깨진다',
+        why=('gcc 의 -Wimplicit-fallthrough 는 주석 표시를 전처리 전 소스에서만 알아본다. Jenkins 이미지(cubridci, ccache 3.1.x)처럼 주석을 지운 '
+             '소스를 컴파일하면 표시가 사라져 -Werror=implicit-fallthrough 로 Release 빌드가 실패한다 — CUBRIDQA-1703 에서 #8318 의 '
+             '`/* fall through */` 와 #8196 의 `/* FALLTHRU */` 가 develop 빌드를 막았고 PR#8388 이 고쳤다. develop 의 나머지 137곳은 `[[fallthrough]];` 다.'),
+        proposal=('주석 대신 속성 문장으로 표시한다.\n\n```c\n      [[fallthrough]];\n    case NEXT:\n```\n\n'
+                  '의도한 fall through 가 아니면 break 를 넣는다.')),
 }
 
 
@@ -971,6 +1026,9 @@ def _finding(h: Hit, layer: str, line: int, pre: bool, base_ev: Optional[str]) -
                  'fall-through': 'return·goto 없이 블록을 빠져나가 다음 문장으로 계속 진행한다'}[fx['verdict']]
         kw = dict(sev=fx['severity'], code=fx['code'], after=after, code_or_errid=fx['code'] if fx['code'].startswith('ER_') else 'er_errid ()')
         ver = 'er_set 다음 문장: %s → %s' % (' ; '.join(fx['after']) or '(없음)', fx['verdict'])
+    elif h.checker == 'comment-fallthrough':
+        kw = dict(comment=fx['comment'][:60])
+        ver = '주석 다음 코드 줄이 case/default 라벨이고 [[fallthrough]]; 가 없다'
     else:
         kw = dict(callee=fx['callee'])
         ver = '호출 `%s` 는 추적 래퍼(cub_aligned_alloc)가 아니다' % fx['callee']
@@ -979,7 +1037,7 @@ def _finding(h: Hit, layer: str, line: int, pre: bool, base_ev: Optional[str]) -
         claim = '(이 줄은 이 PR 이 바꾸지 않았다 — 손댄 함수 안의 선재 결함 후보) ' + claim
     if line != h.line:
         claim += ' (%s:%d)' % (h.file, h.line)
-    if h.checker in ('fp-range-outside', 'discarded-status', 'error-path-continues') and not pre and h.level == 'high':
+    if h.checker in ('fp-range-outside', 'discarded-status', 'error-path-continues', 'comment-fallthrough') and not pre and h.level == 'high':
         sev, cat = 'non-blocking', '버그 가능성'
     else:
         sev, cat = 'question', '확인 질문'

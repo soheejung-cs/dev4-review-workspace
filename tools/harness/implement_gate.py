@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """구현 게이트 — 워킹트리의 변경이 plan 을 지켰고 깨뜨린 게 없는지 결정론적으로 판정.
 사용: python3 -m tools.harness.implement_gate --plan <out>/plan.json [--repo ~/dev/sources/cubrid] [--base <rev>] [--before <out>/codegraph.sqlite3]
-검사: (1) 범위 — 바뀐 파일·함수가 plan.changes 안인가  (2) codestyle.sh  (3) -fsyntax-only (compile_commands 있으면)
+검사: (1) 범위 — 바뀐 파일·함수가 plan.changes 안인가  (2) codestyle.sh  (2-1) 주석만의 case fall through(PR#8388)  (3) -fsyntax-only (compile_commands 있으면)
       (4) 관문 짝 — 바뀐 함수의 latch/lock/alloc 카운트가 계획 없이 달라졌나 (before 그래프와 비교)
       (5) 성능 작업이면 structure.json  (6) 수명 있는 상태 — diff 가 구조체에 포인터 필드를 더했거나 plan.lifetime_state 가 있으면
           plan.release_sites 에 그 상태를 놓는 자리 전수의 판정(released/cannot-attach/not-applicable)이 있어야 하고, 그래프가 뽑은
@@ -144,6 +144,17 @@ def main():
             sh('bash', cs, dst); d = sh('diff', '-q', os.path.join(repo, f), dst)
             if d.returncode: fail('codestyle', f'{f}: codestyle.sh 가 바꾼 줄 있음 → 스크립트 출력으로 교체')
             shutil.rmtree(tmp, ignore_errors=True)
+    # (2-1) case fall through 를 주석으로만 표시하지 않는다 — 주석을 지우고 컴파일하는 Jenkins 이미지(ccache 3.1.x)에서
+    #       -Werror=implicit-fallthrough 로 Release 빌드가 깨진다(CUBRIDQA-1703, PR#8388). 추가한 줄만 본다.
+    from .static_lint import _added as _ft_added, fallthrough_comment_lines
+    for f, rows in _ft_added(diff_text).items():
+        path = os.path.join(repo, f)
+        if not os.path.isfile(path):
+            continue
+        for ln, t, only_assert in fallthrough_comment_lines(open(path, encoding='utf-8', errors='replace').read().split('\n'),
+                                                            sorted({r[0] for r in rows})):
+            fail('fallthrough', f'{f}:{ln}: case fall through 를 주석({t[:50]})으로만 표시 — `[[fallthrough]];` 로'
+                 + (' (앞 문장이 assert 뿐: release 는 무해, debug 빌드만 위험)' if only_assert else ''))
     # (3) -fsyntax-only
     sc = AD.self_check_build(repo, [f for f in changed_files if f.endswith(('.c', '.cpp', '.cc'))])
     res['checks']['syntax'] = sc
