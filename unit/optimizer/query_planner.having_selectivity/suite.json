@@ -1,0 +1,56 @@
+{
+ "name": "PR#8325 (CBRD-27811) HAVING selectivity on the GROUP BY row estimate -- qo_having_aggregate_selectivity (AVG = p, SUM = x op c / group size, MAX > / MIN < = some row, MAX < / MIN > = every row of geometric groups, COUNT (*) = group size P (size >= k) = r^(k-1), NULL share has_value / value_size, reversed operands, host variables, [0.001, 1], other shapes -1), qo_having_selectivity (product, non-aggregate conjunct = WHERE term, GROUPBY_NUM () conjunct = 1, other aggregate = DEFAULT_SELECTIVITY, subquery aggregates not counted, one conjunct per walk, list intact), qo_has_aggregate_pre flags, qo_estimate_ngroups (groups x HAVING at rows / groups, unknown NDV = rows at group size 1, floor 1, GROUP BY sort only, group_rows only lowered) + [defect] U1 latent (walk stops descending after a subquery)",
+ "requires": [
+  "qo_estimate_ngroups",
+  "qo_having_aggregate_selectivity"
+ ],
+ "file": "src/optimizer/query_planner.c",
+ "mode": "cs",
+ "seams": [
+  "qo_get_group_ndv",
+  "qo_expr_selectivity"
+ ],
+ "appendix": "hooks.cpp",
+ "test": "test.cpp",
+ "extra": [
+  "src/optimizer/query_graph.c",
+  "src/parser/parser_support.c",
+  "src/parser/parse_tree.c",
+  "src/parser/parse_tree_cl.c",
+  "src/base/language_support.c",
+  "src/base/intl_support.c",
+  "src/base/chartype.c",
+  "src/object/object_domain.c",
+  "src/object/object_primitive.c",
+  "src/object/object_domain_convert.cpp",
+  "src/query/domain_rules.c",
+  "src/query/numeric_opfunc.c",
+  "src/compat/db_macro.c",
+  "src/base/memory_alloc.c",
+  "src/base/system_parameter.c"
+ ],
+ "watch": [
+  "src/optimizer/query_planner.h",
+  "src/optimizer/query_graph.h",
+  "src/optimizer/query_graph.c",
+  "src/optimizer/optimizer.h",
+  "src/optimizer/histogram/histogram_cl.hpp",
+  "src/optimizer/histogram/histogram_cl.cpp",
+  "src/parser/parser_support.c",
+  "src/parser/parse_tree.h",
+  "src/parser/parse_tree_cl.c"
+ ],
+ "fakes": "진짜: query_planner.c(qo_having_aggregate_selectivity·qo_having_selectivity·qo_has_aggregate_pre·qo_estimate_ngroups·qo_estimate_ndv·qo_classify·qo_and_selectivity, hooks.cpp 로 호출), query_graph.c(lookup_node·lookup_seg -- HAVING 의 주석 없는 이름을 spec id·이름(pt_name_equal)으로 세그먼트에 잇는다, qo_abort), parser_support.c(pt_is_aggregate_function·pt_get_end_path_node·pt_name_equal·pt_is_function_index_expression), parse_tree.c + parse_tree_cl.c(parser_create_parser·parser_new_node·parser_walk_tree/pt_walk_private 와 pt_apply_* 표·pt_is_function_index_expr), object_domain.c + object_domain_convert.cpp + object_primitive.c + domain_rules.c + numeric_opfunc.c(tp_value_coerce -> tp_Double_domain: INTEGER·DOUBLE·NUMERIC, NUMERIC 리터럴은 numeric_coerce_string_to_num), db_macro.c, language_support.c + intl_support.c + chartype.c(intl_identifier_casecmp, lang_init_builtin + en_US.utf8), memory_alloc.c, system_parameter.c. 이음매: qo_get_group_ndv = query_planner.c:1133(766999f0e) 의 출구 -- SELECT 가 아니면 -1, 아니면 GROUP BY 목록(SORT_GROUPBY)·select list(SORT_DISTINCT) 열의 인덱스 통계 NDV 곱, 그런 열이 하나도 없으면 -1(qo_get_col_product_ndv 가 NDV 0 을 1 로 곱하고 곱 1 -> -1); 테스트가 목록별 값을 준다. qo_expr_selectivity = WHERE 항 추정(실제는 PT_EXPR 를 QO_ASSERT) -- 테스트가 값(0.3)을 주고 받은 conjunct 를 기록. 가짜: histogram_get_comp_selectivity = histogram_cl.cpp:1377 의 출구 -- rhs NULL, 끝 이름이 PT_NAME 이 아니거나 주석(info.name.histogram) 없음(클래스 캐시 폴백은 bind 지문 walk 중에만 -- 계획 중엔 없음), 수 열에 수가 아닌 키(문자열·NULL) -> 실패; total_rows <= 0 -> 성공 0; 그 밖은 NULL 아닌 행 중 비율(실제가 null 질량을 나눠 낸다, 1496-1501)을 [0,1] 로 자르고 0 이면 1/total_rows(1515-1518). 열 x 는 [0,100] 균등(P(x<v)=v/100, total_rows 1e6, 연속이라 include_equal 무관), 탐침마다 lhs·값·형·is_ge·include_equal 기록. er_set/er_errid/er_clear = 한 단계 오류 영역(qo_abort 가 longjmp 전에 er_set). pt_parser_line_col(lexer 없음 -> 위치 0)·pt_free_dblink_remote_cols(dblink 없음)·envvar_get/envvar_trim_char·init_builtin_calendar_names/db_date_locale_init·cubregex::get_engine_name = 다른 suite 와 같은 부팅 가짜. 구조: 블록 하나 `SELECT ... FROM t GROUP BY a HAVING ...` -- QO_NODE 1개(entity_spec = PT_SPEC id 0x1001), 세그먼트 x(히스토그램 주소 + null_frequency: qo_get_attr_info query_graph.c:5509-5524 가 다는 주석)·y(히스토그램 없음)·a(GROUP BY 열), HAVING 의 이름은 같은 열의 다른 PT_NAME(주석 없음); u 는 부질의에만 나오는 표(조인 안 됨, 노드 없음). QO_INFO 는 qo_sort_new(query_planner.c:3315-3343)가 넘기는 모양 -- 서브플랜의 info 를 GROUP BY·DISTINCT 정렬이 공유, group_rows 는 cardinality 로 시작(8051). hooks 는 qo_optimize_query 처럼 env->catch_ 에 setjmp -- QO_ASSERT 가 터지면 aborted=1 로 돌아온다(케이스가 CHECK).",
+ "note": "base(309265e6d) 에는 qo_has_aggregate_pre·qo_having_aggregate_selectivity·qo_having_selectivity 가 없다 -- hooks.cpp 가 QO_HAVING_HAS_AGGREGATE(이 PR 이 query_planner.c 에 둔 매크로)로 갈라 base 에서는 sentinel 을 주고 A·H·U 케이스는 'not on this revision' 으로 FAIL(신설 코드라 base 비교 없음). qo_estimate_ngroups 는 두 리비전에 있어 E 케이스는 둘 다 돈다: 이름에 develop 이 붙은 E1·E4·E5 는 base 도 PASS, E2·E3·E6·E7 은 base FAIL = 이 PR 이 만든 동작(E7: develop 의 NDV 모름 경로는 group_rows = cardinality 로 덮어 DISTINCT 가 앞선 GROUP BY 추정을 지웠다). unit_regress 는 requires(qo_having_aggregate_selectivity)로 base 를 건너뛴다. 결과(2026-11-03): head 766999f0e 25/25 PASS(U1 [defect] PASS = 있음), base 309265e6d 3/25(E1·E4·E5 develop), stub 호출 0(stub 함수 341·데이터 15). U1(잠재, 낮음): qo_has_aggregate_pre 가 *continue_walk 를 PT_CONTINUE_WALK 로 되돌리지 않아 부질의에서 세운 PT_LIST_WALK 가 walk 순서상 뒤 노드로 샌다(pt_walk_private parse_tree_cl.c:1114-1183 은 pre 가 남긴 값을 그 노드의 자식 방문에 쓴다) -- `a > (SELECT MAX(z) FROM u) OR SUM(x) > 500`, `(SELECT COUNT(*) FROM u) < SUM(x) + 1` 의 SUM 을 못 봐 conjunct 가 WHERE 항 추정으로 간다(실제 값: 기본 0.1 두 개의 OR = 0.19, 의도 DEFAULT_SELECTIVITY 0.1; 둘째 꼴은 둘 다 0.1). 도달: 이 블록의 집계가 든 conjunct 는 WHERE 로 옮겨지지 않는다(rewriter/query_rewrite.c:358-413), OR 은 pt_cnf(326) 뒤에도 한 conjunct 의 or_next, 상수는 PT_HOST_IN 호스트 변수가 될 뿐(517, parser_support.c pt_create_param_for_value). 같은 꼴이 develop 의 qo_skip_subquery(309265e6d query_planner.c:4541-4549, 병렬 판정 walk 4724·4729)에도 있다 -- 별도 이슈 후보, 미검증. 변이(harness-out/8325/766999f0e/unit/having_selectivity/mut/*.diff, 생성 원본 make_mutations.py, 실행 run_mutations.sh) -- head 766999f0e 에 적용한 결과: 16종 모두 감지. fix_u1_continue_walk(제안 수정: qo_has_aggregate_pre 첫 줄에 *continue_walk = PT_CONTINUE_WALK) -> U1 만 FAIL·계약 24건 PASS. m01 MIN/MAX 모델 뒤바꿈 -> A4·A7·A8, m02 SUM 문턱을 value_size 대신 group_size 로 -> A3·A7, m03 하한 0.001 제거 -> A8, m04 GROUPBY_NUM conjunct 를 건너뛰지 않음 -> H3·E4 develop, m05 walk 가 next 를 따라감(pred->next = NULL 제거) -> H2, m06 NDV 모름 경로가 group_rows 를 덮어씀(develop 동작) -> E7, m07 c op AGG 에서 연산자 안 뒤집음 -> A2, m08 COUNT(*) floor/ceil 뒤바꿈 -> A2·A5·A6·A7·H1·H2·H6·E2·E6, m09 has_value 곱 제거 -> A7, m10 NDV 모름 경로의 그룹 크기 1 -> expected_nrows -> E6, m11 NDV 경로의 그룹 크기 rows/groups -> 1 -> E2·E7, m12 1그룹 하한 MAX -> MIN -> E2·E3·E4 develop·E7, m13 DISTINCT 정렬에도 HAVING -> E5 develop·E7, m14 PT_HOST_OUT 허용 -> A9, m15 SUM/AVG DISTINCT 허용 -> A10. 살아남은 변이 0.",
+ "origin": {
+  "pr": 8325,
+  "jira": "CBRD-27811",
+  "finding": "harness-review step 3-1 (c): [contract] suite for the PR's changed functions + U1 [defect] latent",
+  "comment": null,
+  "date": "2026-11-03",
+  "reviewed_head": "766999f0e",
+  "base": "309265e6d",
+  "artifact": "harness-out/8325/766999f0e/unit/having_selectivity/",
+  "result": "2026-11-03: head 766999f0e 25/25 PASS(계약 24 + [defect] U1 PASS = 있음), base 309265e6d 3/25(E1·E4·E5 develop PASS; A·H·U 는 함수 없음, E2·E3·E6·E7 은 이 PR 의 새 동작), stub 호출 0. 변이 16종 감지(fix_u1 은 U1 만 FAIL). unit_regress(라이브러리 경로)는 head 만 돌리고 base 는 requires 로 건너뛴다(신설)."
+ }
+}

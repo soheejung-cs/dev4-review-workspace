@@ -73,6 +73,18 @@ pt_get_end_path_node (PT_NODE *node)
   return node;
 }
 
+/* parser_support.c pt_is_derived_host_var (5068 at 309265e6d; histogram_is_user_host_var asks it since CBRD-27583
+ * 52193efa9, which PR#8006 took in with the develop merge 40055253a): true only for an auto-parameterized position
+ * that stands for a user host variable, read off parser->host_var_derived_from. Every scene here builds its parser
+ * with calloc, so that list is NULL and the real function's first conjunct gives false -- an auto-parameterized
+ * literal stays outside the candidates, as before. Returns false without reading the field so the suite still
+ * compiles at revisions whose PARSER_CONTEXT has no such member (adc0adf4a and earlier). */
+extern "C" bool
+pt_is_derived_host_var (const PARSER_CONTEXT *parser, int index)
+{
+  return false;
+}
+
 PARSER_CONTEXT *unitseam_fp_active_parser (void);
 PT_NODE *unitseam_fp_active_statement (void);
 DB_VALUE *histogram_blob_from_class_cache (PARSER_CONTEXT *parser, PT_NODE *statement, PT_NODE *name);
