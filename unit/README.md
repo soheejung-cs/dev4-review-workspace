@@ -31,6 +31,7 @@ python3.11 -m tools.harness.unitseam run --rev <rev> --file … --mode … --tes
 - 가짜는 실제 함수의 해당 분기를 읽고 같게 만든다 — `suite.json` 의 `fakes` 에 무엇을 흉내 냈는지 적는다. 가짜가 틀리면 재현이 무의미하다.
 - 엔진이 시그니처·구조를 바꿔 suite 가 컴파일되지 않으면 `unit_regress` 가 "suite 갱신 필요" 로 보고한다 — 그때 고친다.
 - 부팅된 프로세스라면 가졌을 전역 기본값은 `tools/harness/unitseam_prelude.cpp` 에 weak 로 추가한다.
+- CS_MODE·SA_MODE 의 `db_private_alloc (NULL, …)` 은 워크스페이스 Lea 힙(`quick_fit.c` `db_ws_alloc`)에서 잡는다 — `mallinfo` 로는 누수를 못 본다. 누수 계약은 `db_ws_alloc`/`db_ws_realloc`/`db_ws_free` 를 malloc 계열 + 살아 있는 블록 수로 가짜를 두고 잰다(예: `parser/parse_dbi.set_host_variables`).
 
 ## 목록
 | suite | 대상 | 출처 |
