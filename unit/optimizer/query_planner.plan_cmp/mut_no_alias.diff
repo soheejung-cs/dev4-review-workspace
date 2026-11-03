@@ -1,7 +1,7 @@
---- a/src/optimizer/query_planner.c	2026-11-03 18:58:06.389212804 +0900
-+++ b/src/optimizer/query_planner.c	2026-11-03 18:58:06.480212800 +0900
-@@ -7157,8 +7157,7 @@
-   /* 7. the aliases in join order, then the index names */
+--- a/src/optimizer/query_planner.c
++++ b/src/optimizer/query_planner.c
+@@ -7181,8 +7181,7 @@
+   /* 5. the aliases in join order, then the index names */
    for (i = 0; i < a_keys.n && i < b_keys.n; i++)
      {
 -      c = strcmp (QO_NODE_NAME (a_keys.nodes[i]) != NULL ? QO_NODE_NAME (a_keys.nodes[i]) : "",

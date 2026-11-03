@@ -1,0 +1,11 @@
+--- a/src/optimizer/query_planner.c
++++ b/src/optimizer/query_planner.c
+@@ -7232,7 +7232,7 @@
+ 
+   for (i = 0; i < (signed) planner->T; i++)
+     {
+-      if (QO_TERM_CLASS (&planner->term[i]) == QO_TC_TOTALLY_AFTER_JOIN)
++      if (QO_TERM_CLASS (&planner->term[i]) == QO_TC_TOTALLY_AFTER_JOIN && false)
+ 	{
+ 	  /* a term of no node with an INST_NUM () (qo_analyze_term ()) */
+ 	  return true;

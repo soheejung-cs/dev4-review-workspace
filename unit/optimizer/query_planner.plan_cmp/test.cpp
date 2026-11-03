@@ -1,15 +1,18 @@
 /*
  * CBRD-27146 -- qo_plan_cmp () of src/optimizer/query_planner.c (CS_MODE), reached through hooks.cpp:
- *   head: two plans of a query without LIMIT are compared by the 1% log bucket of their cost (less the analytic sort
- *         an analytic index scan saves), two plans of one bucket by values of each plan in a fixed order
- *         (qo_plan_tie_cmp ()); two plans of a LIMIT query keep the band and its rules (qo_plan_cmp_limit ()).
+ *   head: two plans of a query without LIMIT are ranked by one value of each plan, its cost (less the analytic sort an
+ *         analytic index scan saves) with a share of 1% for each sort a plan of one scan does not skip and off for its
+ *         covering index scan (qo_plan_pref_cost ()); two plans whose values fall into one cell of a 1e-6 log grid by
+ *         values of each plan in a fixed order (qo_plan_tie_cmp ()). Two plans of a LIMIT query, or of a query with an
+ *         INST_NUM () term or a forced filter index (planner->plan_cmp_by_rules), keep the band and its rules
+ *         (qo_plan_cmp_limit ()).
  *   base: the band (cost difference < 50 and ratio < 1.2, x10 under LIMIT) lets about twenty rules pick the plan.
  *
  * Real code: the TU (qo_plan_cmp and what it calls in query_planner.c), query_bitset.c, system_parameter.c (prm_Def
  * static initializers: cost_seq_page, cost_cpu_tuples_per_page for the analytic sort cost).
  * Fakes: the five plan predicates of plan_generation.c that the rules call (qo_is_index_covering_scan,
  * qo_is_index_iss_scan, qo_is_index_loose_scan, qo_is_index_mro_scan, qo_plan_multi_range_opt), copied from that file
- * without their asserts; db_Io_page_size = 16K.
+ * without their asserts, and qo_is_filter_index () of query_graph.c; db_Io_page_size = 16K.
  * Structures: calloc'ed; only the fields the comparison reads are set (index_equi so the base rules take the key count
  * from the index statistics instead of a term selectivity).
  * The [contract] cases over generated sets run on the head only: on base the rules read fields of the scans and
@@ -75,8 +78,17 @@ qo_plan_multi_range_opt (QO_PLAN * plan)
   return plan != NULL && plan->multi_range_opt_use == PLAN_MULTI_RANGE_OPT_USE;
 }
 
+/* query_graph.c */
+bool
+qo_is_filter_index (QO_INDEX_ENTRY * ent)
+{
+  return ent != NULL && ent->constraints != NULL && ent->constraints->filter_predicate != NULL && ent->force > 0;
+}
+
 QO_PLAN_COMPARE_RESULT unitseam_plan_cmp (QO_PLAN * a, QO_PLAN * b);
-int unitseam_has_cost_buckets (void);
+int unitseam_has_cost_order (void);
+void unitseam_set_cmp_by_rules (QO_PLANNER * planner, int on);
+int unitseam_plan_cmp_by_rules (QO_PLANNER * planner);
 
 namespace
 {
@@ -271,11 +283,22 @@ namespace
     return bad;
   }
 
-  /* bucket boundaries of 1.01: 1.01^462 = 99.19, 1.01^463 = 100.18, 1.01^464 = 101.19 -- 100.3 and 101.0 share one */
+  /* what qo_check_planvec () keeps of a set offered in this order: a plan replaces the kept one on PLAN_COMP_GT */
+  QO_PLAN *kept_of (const std::vector<QO_PLAN *> &order)
+  {
+    QO_PLAN *kept = order[0];
+    for (size_t k = 1; k < order.size (); k++)
+      {
+	if (unitseam_plan_cmp (kept, order[k]) == PLAN_COMP_GT)
+	  {
+	    kept = order[k];
+	  }
+      }
+    return kept;
+  }
 }
 
-TEST_CASE ("C1 without LIMIT a cheaper plan of another cost bucket wins over the rules (F1: iscan 99 vs sscan 56)",
-	   "[contract]")
+TEST_CASE ("C1 without LIMIT the cheaper plan wins over the rules (F1: iscan 99 vs sscan 56)", "[contract]")
 {
   scene s (false);
   QO_NODE *t = s.node ("t", 0);
@@ -297,7 +320,7 @@ TEST_CASE ("C2 a plan compared with itself is equal", "[contract]")
   CHECK (unitseam_plan_cmp (sq, sq) == PLAN_COMP_EQ);
 }
 
-TEST_CASE ("C3 in one cost bucket the covering index scan wins (101.0 covering vs 100.3)", "[contract]")
+TEST_CASE ("C3 within its share of the cost the covering index scan wins (101.0 covering vs 100.3)", "[contract]")
 {
   scene s (false);
   QO_NODE *t = s.node ("t", 0);
@@ -309,7 +332,7 @@ TEST_CASE ("C3 in one cost bucket the covering index scan wins (101.0 covering v
   CHECK (unitseam_plan_cmp (plain, cov) == PLAN_COMP_GT);
 }
 
-TEST_CASE ("C4 across cost buckets the cheaper plan wins even when the other is covering (101.5 vs 100.3)",
+TEST_CASE ("C4 beyond its share the cheaper plan wins even when the other is covering (101.5 vs 100.3)",
 	   "[contract]")
 {
   scene s (false);
@@ -382,7 +405,7 @@ TEST_CASE ("C8 the analytic index scan is weighed with the analytic sort it save
 
   CHECK (unitseam_plan_cmp (an, sq) == PLAN_COMP_LT);
   CHECK (unitseam_plan_cmp (sq, an) == PLAN_COMP_GT);
-  if (!unitseam_has_cost_buckets ())
+  if (!unitseam_has_cost_order ())
     {
       WARN ("base: the analytic iscan against a plain iscan goes into the iscan rules -- not run");
       return;
@@ -394,7 +417,7 @@ TEST_CASE ("C8 the analytic index scan is weighed with the analytic sort it save
 
 TEST_CASE ("C9 generated scans and sorts of one table: antisymmetric and transitive", "[contract]")
 {
-  if (!unitseam_has_cost_buckets ())
+  if (!unitseam_has_cost_order ())
     {
       WARN ("base: the rules read scan and term fields the generated plans do not fill -- not run (see D2)");
       return;
@@ -424,7 +447,7 @@ TEST_CASE ("C9 generated scans and sorts of one table: antisymmetric and transit
 	}
     }
   set.push_back (s.iscan (t, i, s.index ("i_an", 30), 120.0, 0, 0, false, QO_SCANMETHOD_INDEX_ANALYTIC_SCAN));
-  /* the window counterexample: 100.0 / 100.7 / 101.4, keys preferring the dearer ones (covering, more terms) */
+  /* a 1% window would chain 100.0 / 100.7 / 101.4, the dearer ones covering or with more terms */
   set.push_back (s.iscan (t, i, s.index ("w_a", 10), 100.0, 1, 0, false));
   set.push_back (s.iscan (t, i, s.index ("w_b", 10), 100.7, 2, 0, false));
   set.push_back (s.iscan (t, i, s.index ("w_c", 10), 101.4, 2, 0, true));
@@ -436,7 +459,7 @@ TEST_CASE ("C9 generated scans and sorts of one table: antisymmetric and transit
 
 TEST_CASE ("C10 generated join plans of two tables: antisymmetric and transitive", "[contract]")
 {
-  if (!unitseam_has_cost_buckets ())
+  if (!unitseam_has_cost_order ())
     {
       WARN ("base: not run (see D2)");
       return;
@@ -484,14 +507,13 @@ TEST_CASE ("C11 two index joins of one cost and order: the smaller inner index w
   CHECK (unitseam_plan_cmp (by_pk, by_fk) == PLAN_COMP_GT);
 }
 
-TEST_CASE ("C12 two joins of one cost bucket: the cheaper wins over more index terms and a smaller inner index",
+TEST_CASE ("C12 two joins 0.3% apart: the cheaper wins over more index terms and a smaller inner index",
 	   "[contract]")
 {
   scene s (false);
   QO_NODE *o = s.node ("o", 0);
   QO_NODE *l = s.node ("l", 1);
   QO_INFO *io = s.info (1000.0, 64), *il = s.info (6000.0, 64), *iol = s.info (1000.0, 128);
-  /* 500.0 and 501.5 share the bucket 625 */
   QO_PLAN *cheap = s.join (s.seq (o, io, 50.0), s.iscan (l, il, s.index ("i_big", 80), 9.0, 1, 0, false),
 			   QO_JOINMETHOD_IDX_JOIN, iol, 500.0);
   QO_PLAN *dear = s.join (s.seq (o, io, 50.0), s.iscan (l, il, s.index ("i_small", 30), 7.0, 2, 0, false),
@@ -501,6 +523,187 @@ TEST_CASE ("C12 two joins of one cost bucket: the cheaper wins over more index t
   dear->plan_un.join.inner->top_rooted = false;
   CHECK (unitseam_plan_cmp (cheap, dear) == PLAN_COMP_LT);
   CHECK (unitseam_plan_cmp (dear, cheap) == PLAN_COMP_GT);
+}
+
+TEST_CASE ("C13 three plans a chain of 1e-6 windows apart, the keys against the costs: no cycle, one plan kept",
+	   "[contract]")
+{
+  if (!unitseam_has_cost_order ())
+    {
+      WARN ("base: the rules read scan and term fields the generated plans do not fill -- not run (see D2)");
+      return;
+    }
+
+  scene s (false);
+  QO_NODE *t = s.node ("t", 0);
+  QO_NODE *x = s.node ("x", 0);
+  QO_NODE *y = s.node ("y", 1);
+  QO_INFO *i = s.info (100.0, 64), *ix = s.info (100.0, 64), *iy = s.info (100.0, 64), *ixy = s.info (100.0, 128);
+  std::string first;
+  /* neighbours within 1e-6 of each other, the ends 1.8e-6 apart; the names and the methods prefer the dearer */
+  QO_PLAN *a = s.iscan (t, i, s.index ("i_3", 10), 1000.0, 1, 0, false);
+  QO_PLAN *b = s.iscan (t, i, s.index ("i_2", 10), 1000.0009, 1, 0, false);
+  QO_PLAN *c = s.iscan (t, i, s.index ("i_1", 10), 1000.0018, 1, 0, false);
+  QO_PLAN *h = s.join (s.seq (x, ix, 10.0), s.seq (y, iy, 10.0), QO_JOINMETHOD_HASH_JOIN, ixy, 1000000.0);
+  QO_PLAN *d = s.join (s.seq (x, ix, 10.0), s.seq (y, iy, 10.0), QO_JOINMETHOD_IDX_JOIN, ixy, 1000000.9);
+  QO_PLAN *n = s.join (s.seq (x, ix, 10.0), s.seq (y, iy, 10.0), QO_JOINMETHOD_NL_JOIN, ixy, 1000001.8);
+
+  CHECK (order_violations ({a, b, c}, first) == 0);
+  CHECK (kept_of ({a, b, c}) == kept_of ({c, b, a}));
+  CHECK (kept_of ({a, b, c}) == kept_of ({b, c, a}));
+  CHECK (order_violations ({h, d, n}, first) == 0);
+  CHECK (kept_of ({h, d, n}) == kept_of ({n, d, h}));
+  CHECK (kept_of ({h, d, n}) == kept_of ({d, n, h}));
+}
+
+TEST_CASE ("C14 scaling every cost by 1.002 keeps the winner of C3's pair (covering 101.0 vs plain 100.3)",
+	   "[contract]")
+{
+  scene s (false);
+  QO_NODE *t = s.node ("t", 0);
+  QO_INFO *i = s.info (100.0, 64);
+  QO_PLAN *cov = s.iscan (t, i, s.index ("i_c", 20), 101.0, 1, 0, true);
+  QO_PLAN *plain = s.iscan (t, i, s.index ("i_p", 20), 100.3, 1, 0, false);
+  QO_PLAN *cov2 = s.iscan (t, i, s.index ("i_c", 20), 101.0 * 1.002, 1, 0, true);
+  QO_PLAN *plain2 = s.iscan (t, i, s.index ("i_p", 20), 100.3 * 1.002, 1, 0, false);
+
+  CHECK (unitseam_plan_cmp (cov, plain) == PLAN_COMP_LT);
+  CHECK (unitseam_plan_cmp (cov2, plain2) == PLAN_COMP_LT);
+}
+
+TEST_CASE ("C15 a pair of one cost ratio (covering 1.005x vs plain x) as x grows from 100 to 110: the covering scan "
+	   "wins at every step", "[contract]")
+{
+  scene s (false);
+  QO_NODE *t = s.node ("t", 0);
+  QO_INFO *i = s.info (100.0, 64);
+  QO_NODE_INDEX_ENTRY *ic = s.index ("i_c", 20), *ip = s.index ("i_p", 20);
+  int cov_wins = 0, steps = 0;
+
+  for (int k = 0; k < 1000; k++, steps++)
+    {
+      double x = 100.0 + 0.01 * k;
+      QO_PLAN *cov = s.iscan (t, i, ic, 1.005 * x, 1, 0, true);
+      QO_PLAN *plain = s.iscan (t, i, ip, x, 1, 0, false);
+
+      cov_wins += (unitseam_plan_cmp (cov, plain) == PLAN_COMP_LT) ? 1 : 0;
+    }
+  INFO ("steps " << steps << ", covering wins " << cov_wins);
+  CHECK (cov_wins == steps);
+}
+
+TEST_CASE ("C16 with an INST_NUM () term (plan_cmp_by_rules) the plans keep the band and rules: F1's iscan 99 beats "
+	   "sscan 56 as on develop", "[contract]")
+{
+  scene s (false);
+  QO_NODE *t = s.node ("t", 0);
+  QO_INFO *i = s.info (2990.0, 220);
+  QO_PLAN *ix = s.iscan (t, i, s.index ("i_t_a", 10), 99.0, 1, 0, false);
+  QO_PLAN *sq = s.seq (t, i, 56.0);
+
+  unitseam_set_cmp_by_rules (s.planner, 1);
+  CHECK (unitseam_plan_cmp (ix, sq) == PLAN_COMP_LT);
+  CHECK (unitseam_plan_cmp (sq, ix) == PLAN_COMP_GT);
+}
+
+TEST_CASE ("C17 qo_plan_cmp_by_rules () marks a query with an INST_NUM () term or a forced filter index, no other",
+	   "[contract]")
+{
+  if (unitseam_plan_cmp_by_rules (NULL) < 0)
+    {
+      WARN ("base: no qo_plan_cmp_by_rules () -- not run");
+      return;
+    }
+
+  scene s (false);
+  QO_TERM *terms = (QO_TERM *) s.alloc (2 * sizeof (QO_TERM));
+  QO_NODE *nodes = (QO_NODE *) s.alloc (2 * sizeof (QO_NODE));
+  QO_NODE_INDEX *ni = (QO_NODE_INDEX *) s.alloc (sizeof (QO_NODE_INDEX) + sizeof (QO_NODE_INDEX_ENTRY));
+  QO_INDEX_ENTRY *plain = (QO_INDEX_ENTRY *) s.alloc (sizeof (QO_INDEX_ENTRY));
+  QO_INDEX_ENTRY *filter = (QO_INDEX_ENTRY *) s.alloc (sizeof (QO_INDEX_ENTRY));
+
+  plain->constraints = (SM_CLASS_CONSTRAINT *) s.alloc (sizeof (SM_CLASS_CONSTRAINT));
+  filter->constraints = (SM_CLASS_CONSTRAINT *) s.alloc (sizeof (SM_CLASS_CONSTRAINT));
+  terms[0].term_class = QO_TC_SARG;
+  terms[1].term_class = QO_TC_JOIN;
+  ni->n = 2;
+  ni->index[0].head = plain;
+  ni->index[1].head = filter;
+  nodes[1].indexes = ni;	/* the first node has none (a derived table) */
+  s.planner->term = terms;
+  s.planner->T = 2;
+  s.planner->node = nodes;
+  s.planner->N = 2;
+
+  CHECK (unitseam_plan_cmp_by_rules (s.planner) == 0);
+  terms[1].term_class = QO_TC_TOTALLY_AFTER_JOIN;
+  CHECK (unitseam_plan_cmp_by_rules (s.planner) == 1);
+  terms[1].term_class = QO_TC_OTHER;
+  plain->force = 1;
+  CHECK (unitseam_plan_cmp_by_rules (s.planner) == 0);	/* forced, no filter */
+  filter->constraints->filter_predicate = (SM_PREDICATE_INFO *) s.alloc (sizeof (SM_PREDICATE_INFO));
+  CHECK (unitseam_plan_cmp_by_rules (s.planner) == 0);	/* a filter index, not forced */
+  filter->force = -1;
+  CHECK (unitseam_plan_cmp_by_rules (s.planner) == 0);	/* ignored */
+  filter->force = 1;
+  CHECK (unitseam_plan_cmp_by_rules (s.planner) == 1);
+}
+
+TEST_CASE ("C18 a join is ranked by its cost alone: a covering inner index does not win a join 0.5% dearer",
+	   "[contract]")
+{
+  scene s (false);
+  QO_NODE *o = s.node ("o", 0);
+  QO_NODE *l = s.node ("l", 1);
+  QO_INFO *io = s.info (1000.0, 64), *il = s.info (6000.0, 64), *iol = s.info (1000.0, 128);
+  QO_PLAN *cheap = s.join (s.seq (o, io, 50.0), s.iscan (l, il, s.index ("i_l", 30), 9.0, 1, 0, false),
+			   QO_JOINMETHOD_IDX_JOIN, iol, 500.0);
+  QO_PLAN *dear = s.join (s.seq (o, io, 50.0), s.iscan (l, il, s.index ("i_lc", 30), 9.0, 1, 0, true),
+			  QO_JOINMETHOD_IDX_JOIN, iol, 502.5);
+
+  cheap->plan_un.join.inner->top_rooted = false;
+  dear->plan_un.join.inner->top_rooted = false;
+  CHECK (unitseam_plan_cmp (cheap, dear) == PLAN_COMP_LT);
+  CHECK (unitseam_plan_cmp (dear, cheap) == PLAN_COMP_GT);
+}
+
+TEST_CASE ("C19 a scan that skips the ORDER BY wins over a sort that costs less by less than its share, not more",
+	   "[contract]")
+{
+  scene s (false);
+  QO_NODE *t = s.node ("t", 0);
+  QO_INFO *i = s.info (3000.0, 100);
+  QO_NODE_INDEX_ENTRY *ix = s.index ("i_t_a", 10);
+  QO_PLAN *skip, *near, *far;
+
+  ix->head->orderby_skip = true;
+  skip = s.iscan (t, i, ix, 100.5, 1, 0, false);
+  near = s.sort (s.seq (t, i, 90.0), SORT_ORDERBY, 10.0);	/* 100.0: x1.01 = 101.0 */
+  far = s.sort (s.seq (t, i, 90.0), SORT_ORDERBY, 8.0);	/* 98.0: x1.01 = 98.98 */
+
+  CHECK (unitseam_plan_cmp (skip, near) == PLAN_COMP_LT);
+  CHECK (unitseam_plan_cmp (near, skip) == PLAN_COMP_GT);
+  CHECK (unitseam_plan_cmp (skip, far) == PLAN_COMP_GT);
+  CHECK (unitseam_plan_cmp (far, skip) == PLAN_COMP_LT);
+}
+
+TEST_CASE ("C20 below zero (an analytic scan less its sort) the covering share still gains", "[contract]")
+{
+  if (!unitseam_has_cost_order ())
+    {
+      WARN ("base: the analytic iscans go into the iscan rules -- not run");
+      return;
+    }
+
+  scene s (false);
+  QO_NODE *t = s.node ("t", 0);
+  /* the sort of C8, about 30.8: the two scans rank at about -3.0 and -3.03 */
+  QO_INFO *i = s.info (3000.0, 100);
+  QO_PLAN *cov = s.iscan (t, i, s.index ("i_ac", 30), 27.8, 0, 0, true, QO_SCANMETHOD_INDEX_ANALYTIC_SCAN);
+  QO_PLAN *plain = s.iscan (t, i, s.index ("i_ap", 30), 27.78, 0, 0, false, QO_SCANMETHOD_INDEX_ANALYTIC_SCAN);
+
+  CHECK (unitseam_plan_cmp (cov, plain) == PLAN_COMP_LT);
+  CHECK (unitseam_plan_cmp (plain, cov) == PLAN_COMP_GT);
 }
 
 TEST_CASE ("D1 develop: inside the band the iscan rule overrides the cost (iscan 99 beats sscan 56)", "[defect]")

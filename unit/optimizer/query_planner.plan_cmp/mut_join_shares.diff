@@ -1,0 +1,13 @@
+--- a/src/optimizer/query_planner.c
++++ b/src/optimizer/query_planner.c
+@@ -7027,6 +7027,10 @@
+       plan = plan->plan_un.sort.subplan;
+     }
+ 
++  if (plan->plan_type == QO_PLANTYPE_JOIN)
++    {
++      plan = plan->plan_un.join.inner;
++    }
+   if (plan->plan_type != QO_PLANTYPE_SCAN)
+     {
+       return cost;

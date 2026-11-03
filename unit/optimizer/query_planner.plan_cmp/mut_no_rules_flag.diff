@@ -1,0 +1,12 @@
+--- a/src/optimizer/query_planner.c
++++ b/src/optimizer/query_planner.c
+@@ -7277,8 +7277,7 @@
+       return PLAN_COMP_EQ;
+     }
+ 
+-  if ((QO_PLAN_HAS_LIMIT (a) && QO_PLAN_HAS_LIMIT (b))
+-      || (a->info != NULL && a->info->planner != NULL && a->info->planner->plan_cmp_by_rules))
++  if ((QO_PLAN_HAS_LIMIT (a) && QO_PLAN_HAS_LIMIT (b)))
+     {
+       return qo_plan_cmp_limit (a, b);
+     }

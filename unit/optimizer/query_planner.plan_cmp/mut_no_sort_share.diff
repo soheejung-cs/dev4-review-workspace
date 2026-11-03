@@ -1,0 +1,10 @@
+--- a/src/optimizer/query_planner.c
++++ b/src/optimizer/query_planner.c
+@@ -7023,7 +7023,6 @@
+ 
+   while (plan->plan_type == QO_PLANTYPE_SORT && plan->plan_un.sort.subplan != NULL)
+     {
+-      weight *= 1.0 + QO_PLAN_PREFER_SHARE;
+       plan = plan->plan_un.sort.subplan;
+     }
+ 

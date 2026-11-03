@@ -1,14 +1,12 @@
---- a/src/optimizer/query_planner.c	2026-11-03 18:58:06.389212804 +0900
-+++ b/src/optimizer/query_planner.c	2026-11-03 18:58:06.536212798 +0900
-@@ -7213,11 +7213,6 @@
+--- a/src/optimizer/query_planner.c
++++ b/src/optimizer/query_planner.c
+@@ -7277,8 +7277,7 @@
        return PLAN_COMP_EQ;
      }
  
--  if (QO_PLAN_HAS_LIMIT (a) && QO_PLAN_HAS_LIMIT (b))
--    {
--      return qo_plan_cmp_limit (a, b);
--    }
--
-   a_cost = qo_plan_cmp_cost (a);
-   b_cost = qo_plan_cmp_cost (b);
-   a_bucket = qo_cost_bucket (a_cost);
+-  if ((QO_PLAN_HAS_LIMIT (a) && QO_PLAN_HAS_LIMIT (b))
+-      || (a->info != NULL && a->info->planner != NULL && a->info->planner->plan_cmp_by_rules))
++  if ((a->info != NULL && a->info->planner != NULL && a->info->planner->plan_cmp_by_rules))
+     {
+       return qo_plan_cmp_limit (a, b);
+     }

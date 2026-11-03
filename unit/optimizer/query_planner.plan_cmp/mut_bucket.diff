@@ -1,0 +1,13 @@
+--- a/src/optimizer/query_planner.c
++++ b/src/optimizer/query_planner.c
+@@ -7283,8 +7283,8 @@
+       return qo_plan_cmp_limit (a, b);
+     }
+ 
+-  a_cell = qo_cost_cell (qo_plan_pref_cost (a));
+-  b_cell = qo_cost_cell (qo_plan_pref_cost (b));
++  a_cell = floor (log (MAX (qo_plan_cmp_cost (a), 1.0)) / log (1.01));
++  b_cell = floor (log (MAX (qo_plan_cmp_cost (b), 1.0)) / log (1.01));
+   if (a_cell != b_cell)
+     {
+       return (a_cell < b_cell) ? PLAN_COMP_LT : PLAN_COMP_GT;

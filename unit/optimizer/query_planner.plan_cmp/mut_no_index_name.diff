@@ -1,6 +1,6 @@
---- a/src/optimizer/query_planner.c	2026-11-03 18:58:06.389212804 +0900
-+++ b/src/optimizer/query_planner.c	2026-11-03 18:58:06.508212799 +0900
-@@ -7164,7 +7164,7 @@
+--- a/src/optimizer/query_planner.c
++++ b/src/optimizer/query_planner.c
+@@ -7188,7 +7188,7 @@
    QO_TIE_PREFER_LESS (a_keys.n, b_keys.n);
    for (i = 0; i < a_keys.n; i++)
      {

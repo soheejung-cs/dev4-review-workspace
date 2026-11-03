@@ -1,0 +1,11 @@
+--- a/src/optimizer/query_planner.c
++++ b/src/optimizer/query_planner.c
+@@ -7034,7 +7034,7 @@
+ 
+   if (plan->plan_un.scan.index != NULL && qo_is_index_covering_scan (plan))
+     {
+-      weight *= 1.0 - QO_PLAN_PREFER_SHARE;
++      weight *= 1.0;
+     }
+ 
+   return cost + fabs (cost) * (weight - 1.0);
