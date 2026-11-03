@@ -6,7 +6,7 @@
 리스트·튜플(qfile) / 집계·정렬·해시 / 메모리 할당 / 기타.
 CBRD-27361(2026-10-18): 조인 질의의 85%가 앞의 셋이라는 걸 이걸로 처음 봤다 — 식 batch 가 조인을 못 줄이는 이유.
 """
-import json, os, re, subprocess, sys
+import json, os, re, shutil, subprocess, sys
 
 BUCKETS = [
     ('page_buffer', '페이지 버퍼 fix/unfix·래치·LRU', r'^(pgbuf_|__pthread_mutex|pthread_|lf_|\[k\]|0xffff)'),
@@ -20,8 +20,13 @@ BUCKETS = [
 
 def flat_lines(path):
     if path.endswith('.data'):
-        perf = os.path.expanduser('~/tools/bin/perf')
-        env = dict(os.environ, LD_LIBRARY_PATH=os.path.expanduser('~/tools/lib'))
+        # perf 는 컨테이너마다 다르다: $PERF, 없으면 ~/tools/bin/perf(.50·.51 — 동봉 라이브러리 필요), 그것도 없으면 PATH 의 perf(.52)
+        perf = os.environ.get('PERF') or os.path.expanduser('~/tools/bin/perf')
+        env = dict(os.environ)
+        if os.path.isfile(perf) and perf.startswith(os.path.expanduser('~/tools/')):
+            env['LD_LIBRARY_PATH'] = os.path.expanduser('~/tools/lib')
+        elif not os.path.isfile(perf):
+            perf = shutil.which('perf') or perf
         out = subprocess.run([perf, 'report', '-i', path, '--no-children', '--sort', 'sym', '--stdio', '-g', 'none'],
                              stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, universal_newlines=True, env=env).stdout
         return out.splitlines()

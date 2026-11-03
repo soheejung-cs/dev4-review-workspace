@@ -5,12 +5,15 @@
 set -u
 DB=$1; SQL=$2; OUT=$3; F=${4:-997}
 export LD_LIBRARY_PATH=$HOME/tools/lib:${LD_LIBRARY_PATH:-}
+# perf 는 컨테이너마다 다르다(메모리 howto/프로파일러-위치 표): $PERF 가 있으면 그것, 없으면 ~/tools/bin/perf(.50·.51), 그것도 없으면 PATH 의 perf(.52 시스템 perf)
+if [ -n "$PERF" ]; then PERF_BIN=$PERF; elif [ -x "$HOME/tools/bin/perf" ]; then PERF_BIN=$HOME/tools/bin/perf; export LD_LIBRARY_PATH=$HOME/tools/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}; else PERF_BIN=$(command -v perf); fi
+[ -n "$PERF_BIN" ] || { echo "perf 없음 — PERF=<경로> 로 지정"; exit 1; }
 PID=$(ps -o pid=,args= -u "$(id -u)" | awk -v db="$DB" '$2=="cub_server" && $3==db {print $1}')
 [ -n "$PID" ] || { echo "cub_server $DB 없음"; exit 1; }
 csql -u dba "$DB" -i "$SQL" > "$OUT.out" 2>&1 &
 C=$!
 sleep 0.3
-"$HOME/tools/bin/perf" record -F "$F" -g -o "$OUT" -t "$(ls /proc/$PID/task | paste -sd,)" -- sleep 3600 > /dev/null 2>&1 &
+"$PERF_BIN" record -F "$F" -g -o "$OUT" -t "$(ls /proc/$PID/task | paste -sd,)" -- sleep 3600 > /dev/null 2>&1 &
 P=$!
 wait $C
 kill -INT $P; wait $P 2>/dev/null
