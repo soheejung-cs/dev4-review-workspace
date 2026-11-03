@@ -12,6 +12,15 @@
  *   histogram_get_comp_selectivity    (seam) same
  * so a slot's rows come out as MAX (1.0, sel * total) = the rows the test asked for (total is 2^20,
  * exact). BIND_WATCH_STATE is filled by the test or by a first check.
+ *
+ * Since the merge 620ceaf6a (CBRD-27490) the walk takes the statement's memo (ws->memo, BIND_TERM_MEMO):
+ * a predicate whose key -- column node, the histogram annotation it carries, operator, every byte of
+ * its value -- matches the slot's last entry takes its rows from the memo without a probe, and the
+ * column's row count is read once per (node, annotation). So every bind () below gives the host
+ * variable a NEW value (new bytes = what "new values" are), reprice () keeps the bytes, and a column
+ * whose histogram went away is modelled the way a recompile shows it: the optimizer re-annotates the
+ * name (query_graph.c qo_get_attr_info: NULL, then a fresh copy when the class still has one).
+ * The memo's value image comes from or_packed_value_size / or_pack_value (fakes below).
  */
 #include "catch.hpp"
 #include "dbtype_def.h"
@@ -20,6 +29,7 @@
 #include "parse_tree.h"
 #include "query_planner.h"
 #include "histogram_cl.hpp"
+#include "object_representation.h"
 #include "system_parameter.h"
 #include "error_manager.h"
 #include <cstdarg>
@@ -43,6 +53,10 @@ struct price
   double rows;
 };
 static std::map<int, price> g_price;	/* host variable index -> what the histogram says */
+static int g_probes;		/* histogram_get_equal/comp_selectivity calls */
+static int g_total_calls;	/* histogram_get_total_rows calls */
+static int g_value_seq = 1000;	/* every bind () takes a new value */
+static DB_VALUE g_hist_a, g_hist_b, g_hist_c;	/* stand for histogram copies the optimizer annotates; only the address is used */
 
 static int
 hv_index_of (const DB_VALUE *v)
@@ -55,6 +69,7 @@ hv_index_of (const DB_VALUE *v)
 bool
 histogram_get_total_rows (PT_NODE *lhs, double *total_rows)
 {
+  g_total_calls++;
   auto it = g_total.find (lhs->info.name.original);
   if (it == g_total.end ())
     {
@@ -73,6 +88,7 @@ fake_price (PT_NODE *lhs, DB_VALUE *rhs, double *selectivity, bool *success)
   auto t = g_total.find (lhs->info.name.original);
   auto p = g_price.find (hv_index_of (rhs));
 
+  g_probes++;
   if (rhs == NULL || t == g_total.end () || p == g_price.end () || !p->second.ok)
     {
       *success = false;
@@ -93,6 +109,29 @@ histogram_get_comp_selectivity (PT_NODE *lhs, DB_VALUE *rhs_db_value, bool is_ge
 				double *selectivity, bool *success)
 {
   fake_price (lhs, rhs_db_value, selectivity, success);
+}
+
+/* object_representation.c: the packed image bind_value_image_mix hashes (bind_term_key, the memo key;
+ * histogram_bind_value_hash). Only "equal values -> equal image, different values -> different image"
+ * matters: the type, then the integer (the only non-NULL values bound here; a NULL never gets here). */
+int
+or_packed_value_size (const DB_VALUE *value, int collapse_null, int include_domain, int include_domain_classoids)
+{
+  (void) value;
+  (void) collapse_null;
+  (void) include_domain;
+  (void) include_domain_classoids;
+  return 8 + (int) sizeof (int);
+}
+
+char *
+or_pack_value (char *buf, DB_VALUE *value)
+{
+  int t = (int) value->domain.general_info.type;
+
+  memcpy (buf, &t, sizeof (t));
+  memcpy (buf + 8, &value->data.i, sizeof (int));
+  return buf + 8 + sizeof (int);
 }
 
 /* parse_tree_cl.c:1111 pt_walk_private, for the node kinds built here: pre; then (CONTINUE/LEAF) the
@@ -266,12 +305,15 @@ mk (PT_NODE_TYPE t)
   return n;
 }
 
+/* a column of t; `histogram` is the annotation the optimizer left on it (NULL = none: the reader
+ * then goes to the class cache, which the fakes model by g_total alone) */
 static PT_NODE *
-col (const char *name)
+col (const char *name, DB_VALUE *histogram = NULL)
 {
   PT_NODE *n = mk (PT_NAME);
   n->info.name.original = name;
   n->info.name.resolved = "t";
+  n->info.name.histogram = histogram;
   return n;
 }
 
@@ -331,6 +373,8 @@ struct scene
     g_total.clear ();
     g_price.clear ();
     g_log.clear ();
+    g_probes = 0;
+    g_total_calls = 0;
     trace (false);
   }
   void hist (const char *column)
@@ -349,14 +393,18 @@ struct scene
       }
     tail = pred;
   }
-  void bind (int i, double rows)	/* a value the histogram prices at `rows` */
+  void bind (int i, double rows)	/* a new value the histogram prices at `rows` */
   {
-    set_int (&parser->host_variables[i], 1000 + i);
+    set_int (&parser->host_variables[i], ++g_value_seq);
     g_price[i] = { true, rows };
   }
-  void bind_unpriceable (int i)	/* a value whose type the histogram does not hold */
+  void reprice (int i, double rows)	/* the same value (same bytes), the fake now says `rows` */
   {
-    set_int (&parser->host_variables[i], 1000 + i);
+    g_price[i] = { true, rows };
+  }
+  void bind_unpriceable (int i)	/* a new value whose type the histogram does not hold */
+  {
+    set_int (&parser->host_variables[i], ++g_value_seq);
     g_price[i] = { false, 0.0 };
   }
   void bind_null (int i)
@@ -367,6 +415,8 @@ struct scene
   bool check (BIND_WATCH_STATE *ws, double band, bool *usable)
   {
     g_log.clear ();
+    g_probes = 0;
+    g_total_calls = 0;
     return histogram_bind_watch_check (parser, stmt, ws, band, usable);
   }
 };
@@ -579,14 +629,22 @@ TEST_CASE ("a column whose histogram went away drops its slot: the term count ch
 	   "'terms' reason", "[contract]")
 {
   scene s (2);
-  two_preds (s);
+  s.hist ("a");
+  s.hist ("b");
+  PT_NODE *b = col ("b", &g_hist_b);
+  s.add (cmp (PT_EQ, col ("a", &g_hist_a), hv (0)));
+  s.add (cmp (PT_GT, b, hv (1)));
   s.bind (0, 5000);
   s.bind (1, 300);
   BIND_WATCH_STATE *ws = new_ws ();
   bool usable = false;
   REQUIRE (s.check (ws, 1.5, &usable));
 
-  g_total.erase ("b");				/* histogram_get_total_rows fails -> bind_term_add returns */
+  /* a recompile after the statistics lost b's histogram re-annotates b with none (query_graph.c
+   * qo_get_attr_info), and the class has none either: histogram_get_total_rows fails, bind_term_add
+   * returns. The values are the same -- the memo of b does not apply to the new annotation. */
+  b->info.name.histogram = NULL;
+  g_total.erase ("b");
   CHECK (s.check (ws, 1.5, &usable));
   CHECK (find_log ("bind watch replan (terms): 1 priced predicate(s), the plan was chosen with 2") != NULL);
   CHECK (find_log ("bind watch replan: ") == NULL);
@@ -621,6 +679,90 @@ TEST_CASE ("PR8013 F22: a NULL bind value keeps its slot at 1 row, so the term s
   CHECK (rep->now == 1.0);
   CHECK (ws->terms == 2);
   CHECK (ws->rows[0] == 1.0);
+}
+
+/* ---------------------------------------------------------------- memo (620ceaf6a) */
+
+TEST_CASE ("memo: a predicate checked again under the same value and the same annotation takes its rows from the memo "
+	   "without a probe; a new value probes again but reads the column's row count from the memo", "[contract]")
+{
+  scene s (2);
+  s.hist ("a");
+  s.hist ("b");
+  s.add (cmp (PT_EQ, col ("a", &g_hist_a), hv (0)));
+  s.add (cmp (PT_GT, col ("b", &g_hist_b), hv (1)));
+  s.bind (0, 5000);
+  s.bind (1, 300);
+  BIND_WATCH_STATE *ws = new_ws ();
+  bool usable = false;
+
+  REQUIRE (s.check (ws, 1.5, &usable));		/* first record: both priced */
+  CHECK (g_probes == 2);
+  CHECK (g_total_calls == 2);
+
+  s.reprice (0, 9000);				/* same bytes: the memo answers, the fake is not asked */
+  CHECK_FALSE (s.check (ws, 1.5, &usable));
+  CHECK (usable);
+  CHECK (g_probes == 0);
+  CHECK (g_total_calls == 0);
+  CHECK (ws->rows[0] == 5000.0);
+
+  s.bind (0, 9000);				/* a new value: probed, the row count still from the memo */
+  CHECK (s.check (ws, 1.5, &usable));		/* 9000 / 5000 = 1.8 */
+  CHECK (g_probes == 1);
+  CHECK (g_total_calls == 0);
+  CHECK (ws->rows[0] == 9000.0);
+  CHECK (ws->rows[1] == 300.0);
+}
+
+TEST_CASE ("memo boundary: a recompile that re-annotates the column with a new histogram copy prices it again -- the "
+	   "key and the row count both follow the annotation", "[contract]")
+{
+  scene s (1);
+  s.hist ("a");
+  PT_NODE *a = col ("a", &g_hist_a);
+  s.add (cmp (PT_EQ, a, hv (0)));
+  s.bind (0, 5000);
+  BIND_WATCH_STATE *ws = new_ws ();
+  bool usable = false;
+  REQUIRE (s.check (ws, 1.5, &usable));
+
+  a->info.name.histogram = &g_hist_b;		/* a fresh copy (new statistics), the same value */
+  s.reprice (0, 20000);
+  CHECK (s.check (ws, 1.5, &usable));		/* 20000 / 5000 = 4 */
+  CHECK (g_probes == 1);
+  CHECK (g_total_calls == 1);
+  CHECK (ws->rows[0] == 20000.0);
+}
+
+TEST_CASE ("memo boundary: when a predicate drops out, the ones after it move up a slot and are priced again -- an "
+	   "entry is taken only for the node it was made for, never a neighbour's rows", "[contract]")
+{
+  scene s (3);
+  s.hist ("a");
+  s.hist ("b");
+  s.hist ("c");
+  PT_NODE *b = col ("b", &g_hist_b);
+  s.add (cmp (PT_EQ, col ("a", &g_hist_a), hv (0)));
+  s.add (cmp (PT_EQ, b, hv (1)));
+  s.add (cmp (PT_EQ, col ("c", &g_hist_c), hv (2)));
+  s.bind (0, 5000);
+  s.bind (1, 70000);
+  s.bind (2, 3000);
+  BIND_WATCH_STATE *ws = new_ws ();
+  bool usable = false;
+  REQUIRE (s.check (ws, 1.5, &usable));
+  REQUIRE (ws->terms == 3);
+
+  b->info.name.histogram = NULL;		/* b's histogram went away */
+  g_total.erase ("b");
+  CHECK (s.check (ws, 1.5, &usable));		/* 'terms' replan, re-recorded */
+  REQUIRE (ws->terms == 2);
+  CHECK (ws->rows[0] == 5000.0);
+  CHECK (ws->rows[1] == 3000.0);		/* c's own rows in b's old slot, not b's 70000 */
+  CHECK (std::string (ws->name[1]) == "t.c=?");
+  CHECK (g_probes == 2);			/* b (fails) and c (slot moved): a came from the memo */
+  CHECK (g_total_calls == 2);			/* b (gone) and c (the slot's entry is b's) */
 }
 
 /* ---------------------------------------------------------------- defect */

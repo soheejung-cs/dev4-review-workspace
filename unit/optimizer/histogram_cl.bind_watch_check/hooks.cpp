@@ -1,6 +1,8 @@
 /* appended to histogram_cl.cpp: the slot vector histogram_bind_watch_check compares, straight from
  * the TU-static walk it runs (bind_term_vector -> bind_term_walk -> bind_term_add, want_names on).
- * bind_term_ctx is TU-local, so the test gets the rows and labels copied out. */
+ * bind_term_ctx is TU-local, so the test gets the rows and labels copied out.
+ * Since 620ceaf6a (CBRD-27490 merge) the walk takes the statement's memo (BIND_TERM_MEMO); this hook
+ * passes NULL = price every predicate under the current values, the vector a fresh check sees. */
 int
 unitseam_bw_term_vector (PARSER_CONTEXT *parser, PT_NODE *statement, double *rows,
 			 char (*names)[BIND_WATCH_NAME_LEN])
@@ -8,7 +10,7 @@ unitseam_bw_term_vector (PARSER_CONTEXT *parser, PT_NODE *statement, double *row
   bind_term_ctx ctx;
   int i;
 
-  if (!bind_term_vector (parser, statement, &ctx, true))
+  if (!bind_term_vector (parser, statement, &ctx, true, NULL))
     {
       return 0;
     }

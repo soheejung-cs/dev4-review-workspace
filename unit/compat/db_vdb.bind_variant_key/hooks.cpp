@@ -17,3 +17,9 @@ unitseam_vdb_key (PT_NODE * statement)
   const char **p = db_stmt_bind_variant_key_ptr (statement);
   return (p != NULL) ? *p : NULL;
 }
+
+int
+unitseam_vdb_rebase (PARSER_CONTEXT * parser, PT_NODE * statement, BIND_WATCH_STATE * ws)
+{
+  return db_bind_variant_rebase (parser, statement, ws);
+}

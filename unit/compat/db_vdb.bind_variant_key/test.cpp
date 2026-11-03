@@ -4,6 +4,13 @@
  * parser_free_parser (pt_free_string_blocks), so a prepared statement whose executions alternate
  * between two variants grows the parser arena by one key per switch.
  *
+ * Fixed in the merge 620ceaf6a (CBRD-27490): db_bind_variant_key () builds each variant's key once per
+ * generation and keeps it in BIND_WATCH_STATE.variant_key[]; db_bind_variant_rebase () drops them with
+ * the generation. The two F2 [defect] cases are history since (suite.json defects_fixed_in); the
+ * "F2 fix" [contract] cases pin the fixed behaviour. The same merge gave histogram_bind_fingerprint ()
+ * a fifth parameter (BIND_TERM_MEMO *memo) -- the fake below has it, or the TU's call lands on the
+ * unitseam stub and aborts the run (the 2026-11-03 PR#8242 unit_regress "stale" report).
+ *
  * Unit under test: src/compat/db_vdb.c (CS_MODE) -- db_bind_variant_step / db_bind_variant_switch,
  * reached through appendix hooks. Fakes below stand in for other TUs; each mimics the branch of the
  * real function that this path takes (see the comment on each).
@@ -15,6 +22,7 @@
 #include "histogram_cl.hpp"
 #include "bind_variant.h"
 #include "xasl.h"
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <set>
@@ -24,12 +32,15 @@
 /* ---- appendix hooks (compiled inside db_vdb.c) ---- */
 int unitseam_vdb_switch (PARSER_CONTEXT * parser, PT_NODE * statement, BIND_WATCH_STATE * ws, int variant, bool compile);
 int unitseam_vdb_step (PARSER_CONTEXT * parser, PT_NODE * statement);
+int unitseam_vdb_rebase (PARSER_CONTEXT * parser, PT_NODE * statement, BIND_WATCH_STATE * ws);
 const char *unitseam_vdb_key (PT_NODE * statement);
 
 /* ---- the parser string arena, as seen by the test ---- */
 static std::vector<char *> g_arena;	/* every string pt_append_string handed out, freed only at "parser free" */
 static size_t g_arena_bytes;		/* bytes those strings occupy in the string blocks (strlen + 1 each) */
 static int g_replans;			/* do_replan_statement_internal calls (prepare round trips) */
+static int g_generation;		/* added to time_stored.sec: a new base entry after a rebase */
+static int g_replan_error;		/* != NO_ERROR: the next prepare fails with it (and leaves no XASL_ID) */
 static UINT64 g_value_hash;		/* what histogram_bind_value_hash returns for "the bound values" */
 static double g_rows;			/* the one priced predicate's expected rows under "the bound values" */
 
@@ -89,6 +100,13 @@ do_replan_statement_internal (PARSER_CONTEXT * parser, PT_NODE * statement, bool
     {
       pt_free_statement_xasl_id (statement);
     }
+  if (g_replan_error != NO_ERROR)
+    {
+      /* the failure branch: do_prepare_statement () returned an error, no XASL_ID was left */
+      int err = g_replan_error;
+      g_replan_error = NO_ERROR;
+      return err;
+    }
   XASL_ID *id = (XASL_ID *) calloc (1, sizeof (XASL_ID));
   const char *key = unitseam_vdb_key (statement);
   int variant = -1;
@@ -97,7 +115,7 @@ do_replan_statement_internal (PARSER_CONTEXT * parser, PT_NODE * statement, bool
       const char *h = strrchr (key, '#');
       variant = h ? atoi (h + 1) : -1;
     }
-  id->time_stored.sec = 1760000000;
+  id->time_stored.sec = 1760000000 + g_generation;
   id->time_stored.usec = 123456 + 1 + variant;
   statement->xasl_id = id;
   return NO_ERROR;
@@ -117,10 +135,11 @@ histogram_bind_value_hash (PARSER_CONTEXT * parser)
  */
 bool
 histogram_bind_fingerprint (PARSER_CONTEXT * parser, PT_NODE * statement, BIND_FINGERPRINT * fp,
-			    char (*names)[BIND_WATCH_NAME_LEN])
+			    char (*names)[BIND_WATCH_NAME_LEN], BIND_TERM_MEMO * memo)
 {
   (void) parser;
   (void) statement;
+  (void) memo;
   memset (fp, 0, sizeof (*fp));
   fp->terms = 1;
   fp->rows[0] = g_rows;
@@ -149,6 +168,8 @@ arena_reset ()		/* parser_free_parser: the string blocks go back */
   g_arena.clear ();
   g_arena_bytes = 0;
   g_replans = 0;
+  g_generation = 0;
+  g_replan_error = NO_ERROR;
 }
 
 static stmt_fixture
@@ -243,6 +264,102 @@ TEST_CASE ("F2 control: switch to the variant in hand returns before building a 
   REQUIRE (unitseam_vdb_switch (f.parser, f.stmt, f.ws, -1, false) == NO_ERROR);
   CHECK (unitseam_vdb_key (f.stmt) == NULL);
   CHECK (g_arena.size () - keys0 == 0);
+}
+
+/* the key text db_bind_variant_key () prints for a variant of the generation based at base_time */
+static std::string
+key_text (const stmt_fixture & f, int variant)
+{
+  char buf[96];
+  snprintf (buf, sizeof (buf), " /* bind variant %d.%06d #%d */", f.ws->base_time.sec, f.ws->base_time.usec, variant);
+  return buf;
+}
+
+TEST_CASE ("F2 fix (620ceaf6a): executions alternating between two learned variants build no key -- each variant's "
+	   "key is built once per generation and the statement carries that one copy", "[contract]")
+{
+  stmt_fixture f = fresh_select ();
+  size_t keys_before = g_arena.size ();
+  learn_two (f);
+  /* learning compiled two variants: one key each */
+  CHECK (g_arena.size () - keys_before == 2);
+  REQUIRE (f.ws->variant_key[0] != NULL);
+  REQUIRE (f.ws->variant_key[1] != NULL);
+  CHECK (std::string (f.ws->variant_key[0]) == key_text (f, 0));
+  CHECK (std::string (f.ws->variant_key[1]) == key_text (f, 1));
+  const char *k0 = f.ws->variant_key[0], *k1 = f.ws->variant_key[1];
+
+  execute (f, 1, 1e4);
+  size_t keys0 = g_arena.size ();
+  int replans0 = g_replans;
+  std::set < const char *>ptrs;
+  for (int i = 0; i < N; i++)
+    {
+      bool to_b = (i % 2) == 0;
+      execute (f, to_b ? 2 : 1, to_b ? 1e6 : 1e4);
+      REQUIRE (f.ws->cur_variant == (to_b ? 1 : 0));
+      REQUIRE (f.stmt->xasl_id->time_stored.usec == 123456 + 1 + (to_b ? 1 : 0));
+      ptrs.insert (unitseam_vdb_key (f.stmt));
+    }
+  CHECK (g_arena.size () - keys0 == 0);
+  CHECK (g_replans - replans0 == 0);
+  CHECK (ptrs.size () == 2);
+  CHECK (ptrs.count (k0) == 1);
+  CHECK (ptrs.count (k1) == 1);
+}
+
+TEST_CASE ("F2 fix boundary: a rebase (new generation) drops every cached key and the memo; the next variant key "
+	   "is built anew from the new base entry's time", "[contract]")
+{
+  stmt_fixture f = fresh_select ();
+  learn_two (f);
+  const std::string old_key0 = f.ws->variant_key[0];
+  f.ws->memo.key[0] = 42;		/* something priced in the old generation */
+  f.ws->memo.total_rows[0] = 1e6;
+
+  g_generation = 1;			/* the query's current base entry is a newer one */
+  REQUIRE (unitseam_vdb_rebase (f.parser, f.stmt, f.ws) == NO_ERROR);
+  for (int v = 0; v < BIND_VARIANT_MAX_COMPILES; v++)
+    {
+      CHECK (f.ws->variant_key[v] == NULL);
+      CHECK_FALSE (f.ws->id_known[v]);
+    }
+  CHECK (f.ws->memo.key[0] == 0);
+  CHECK (f.ws->memo.total_rows[0] == 0.0);
+  CHECK (unitseam_vdb_key (f.stmt) == NULL);	/* the base entry is prepared under no key */
+  CHECK (f.ws->cur_variant == -1);
+  CHECK (f.ws->base_known);
+  CHECK (f.ws->base_time.sec == 1760000000 + 1);
+
+  size_t keys0 = g_arena.size ();
+  REQUIRE (unitseam_vdb_switch (f.parser, f.stmt, f.ws, 0, true) == NO_ERROR);
+  CHECK (g_arena.size () - keys0 == 1);
+  REQUIRE (unitseam_vdb_key (f.stmt) != NULL);
+  CHECK (std::string (unitseam_vdb_key (f.stmt)) == key_text (f, 0));
+  CHECK (std::string (unitseam_vdb_key (f.stmt)) != old_key0);
+}
+
+TEST_CASE ("switch boundary: a failed compile of a new variant puts back the key of the variant the statement is on, "
+	   "and cur_variant stays", "[contract]")
+{
+  stmt_fixture f = fresh_select ();
+  REQUIRE (unitseam_vdb_switch (f.parser, f.stmt, f.ws, 0, true) == NO_ERROR);
+  const char *k0 = unitseam_vdb_key (f.stmt);
+  REQUIRE (k0 != NULL);
+
+  g_replan_error = ER_FAILED;
+  CHECK (unitseam_vdb_switch (f.parser, f.stmt, f.ws, 1, true) == ER_FAILED);
+  CHECK (unitseam_vdb_key (f.stmt) == k0);
+  CHECK (f.ws->cur_variant == 0);
+  CHECK_FALSE (f.ws->id_known[1]);
+  /* the key of the variant that failed stays built for the generation: the retry reuses it */
+  REQUIRE (f.ws->variant_key[1] != NULL);
+  const char *k1 = f.ws->variant_key[1];
+  size_t keys0 = g_arena.size ();
+  REQUIRE (unitseam_vdb_switch (f.parser, f.stmt, f.ws, 1, true) == NO_ERROR);
+  CHECK (unitseam_vdb_key (f.stmt) == k1);
+  CHECK (g_arena.size () - keys0 == 0);
+  CHECK (f.ws->cur_variant == 1);
 }
 
 TEST_CASE ("F2: executions alternating between two variants (A/B) allocate a new key in the parser arena each time "

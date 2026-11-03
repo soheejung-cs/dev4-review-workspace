@@ -1,0 +1,26 @@
+{
+ "name": "CBRD-27478 계획 중 읽기 row_snapshot_read — 필터에서 질의 만들기(SELECT [열]… FROM [클래스] WHERE [f] IN (?, …) AND … LIMIT ?, 바인드 = 필터 값 순서 + max_rows+1)·읽기 관문(필터 열이 앞선 정상 INDEX/UNIQUE/PK/FK — 함수·필터·비가시·온라인 빌드·역 인덱스 제외; 범위 n_card×최소 인덱스 선택도 ≤ 10×max_rows; 힌트 스캔은 max(10×max_rows, 1000) 행까지)·행 수(0 또는 max_rows 초과 = NULL)·상태 복원·오류 보고(교착 철회·서버 상실만)·중첩 읽기",
+ "file": "src/optimizer/histogram/row_snapshot_cl.cpp",
+ "mode": "cs",
+ "seams": [],
+ "test": "test.cpp",
+ "watch": [
+  "src/optimizer/histogram/row_snapshot_cl.hpp",
+  "src/parser/xasl_generation.h",
+  "src/transaction/transaction_cl.h",
+  "src/base/error_manager.h",
+  "src/object/class_object.h"
+ ],
+ "fakes": "TU 는 진짜(row_snapshot_read·row_snapshot_attr_name·row_snapshot_column_indexed·row_snapshot_free). 다른 TU 는 전부 가짜 — 각각 실제 함수의 해당 분기: 오류 스택(error_context.cpp: push = 빈 수준을 위에, pop = 맨 위 버림, pop_and_keep_error = 맨 위의 오류를 아래 수준으로 옮김(error_manager.c:2319), er_errid = 맨 위 수준). sm_ch_name = schema_manager.c:5234 본문(header->ch_name). qo_get/set_optimization_param = query_graph.c:289/336 의 QO_PARAM_LEVEL 분기(PRM_ID_OPTIMIZATION_LEVEL 대신 변수). tran_reset_wait_times = transaction_cl.c: tm_Tran_wait_msecs 를 먼저 바꾸고 log_reset_wait_msecs 가 실패할 수 있다(케이스가 정한 n 번째 요청이 er_set 후 -1) — 읽기는 반환값이 아니라 er_errid 를 본다. pt_detach/attach_xasl_supp_info = xasl_generation.c: 토큰을 주고받는다(malloc 실패는 ER_OUT_OF_VIRTUAL_MEMORY + NULL). pr_clear_value: INTEGER 는 소유 메모리 없음. 전역 query_Plan_dump_filename/fp/fp_open·do_Trigger_involved·tm_Tran_wait_msecs(TLS)는 테스트가 정의. 세션 API(db_open_buffer_local·db_compile_statement_local·db_push_values·db_execute_statement_local·db_query_first/next_tuple·db_query_get_tuple_value·db_query_end·db_close_session_local)는 케이스가 정한 행을 돌려주는 서버 — SQL 을 평가하지 않는다(질의 텍스트와 바인드는 기록해 단정한다); 실행은 실제처럼 do_Trigger_involved 를 지우고, 케이스가 정하면 컴파일·실행·fetch 오류, 또는 같은 읽기를 중첩으로 부른다(읽기 질의를 계획하다 다시 읽기). 실행 시점의 레벨·대기·trace·덤프·supp info 를 기록한다. 클래스는 SM_CLASS·SM_ATTRIBUTE·SM_CLASS_CONSTRAINT 를 필드만 채워 만든다(INT 열 a..d, id 1..4).",
+ "note": "전부 [contract], 결함 없음. 2026-11-03 PR#8242 head 6723bfd42 14/14(stub 호출 0), base d5674fe94 는 신설 파일(no-file — requires 로 건너뜀). 변이 6종(harness-out/8242/6723bfd42/unit/c.row_snapshot_read/): 읽기가 락 대기를 안 끔·범위 관문 > 를 >= 로·트리거 플래그 미복원·모든 오류 보고·인덱스 어느 키 열이든 인정·LIMIT max_rows — 각각 해당 케이스가 FAIL. 범위 밖: 질의 텍스트의 SQL 의미(실제 컴파일·실행은 가짜 서버 — [owner.class] 이름 꼴이 실제 파서에서 풀리는지는 SQL 재현 대상), row_snapshot_columns(is_histogrammable_type 는 다른 TU)와 row_snapshot_filter_prepare(파스 트리·sm_att_id·set 원소 peek 가짜가 더 필요) — 다음 확장 후보.",
+ "origin": {
+  "pr": 8242,
+  "jira": "CBRD-27478",
+  "finding": "계약 suite(결함 없음) — 하네스 리뷰 3-1(c) 핵심 신설 함수: 필터→질의 만들기·읽기 관문·상태 복원(6723bfd42 의 무대기·철회 보고·트리거 플래그 포함)",
+  "comment": null,
+  "date": "2026-11-03"
+ },
+ "requires": [
+  "row_snapshot_read"
+ ]
+}

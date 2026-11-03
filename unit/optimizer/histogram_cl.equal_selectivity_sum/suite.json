@@ -1,0 +1,31 @@
+{
+ "name": "CBRD-27478 등호 선택도 합 — histogram_get_equal_selectivity(상수 하나, head 는 histogram_equal_selectivity_with_reader 위 래퍼·base 는 본문 인라인 — 양쪽 같은 값) · histogram_get_equal_selectivity_sum(상수 n개를 순서대로 더함, NULL 건너뜀, 가격 못 매기는 상수 하나면 실패, 히스토그램 1회 열기) · row_snapshot_join_selectivity((1/k)·Σ P(other = 키)·(1 − nf_other), k 는 NULL 키 포함 전체 행, 합 0·가격 불가면 false)",
+ "file": "src/optimizer/histogram/histogram_cl.cpp",
+ "mode": "cs",
+ "seams": [
+  "histogram_init_reader_from_lhs"
+ ],
+ "extra": [
+  "src/optimizer/histogram/row_snapshot_cl.cpp"
+ ],
+ "test": "test.cpp",
+ "watch": [
+  "src/optimizer/histogram/histogram_cl.hpp",
+  "src/optimizer/histogram/histogram_reader.hpp",
+  "src/optimizer/histogram/histogram_reader.cpp",
+  "src/optimizer/histogram/row_snapshot_cl.cpp",
+  "src/optimizer/histogram/row_snapshot_cl.hpp"
+ ],
+ "fakes": "가짜는 이음매 하나: histogram_init_reader_from_lhs(histogram_cl.cpp:724, TU static) — 실제 본문에서 클래스 캐시 분기만 뺐다(그 분기는 바인드 지문 걷기 중 bind_fp_active_statement != NULL 일 때만 탄다 — 이 경로들에서는 NULL): PT_DOT_ 끝 노드(pt_get_end_path_node), PT_NAME 아니면 false, 이름 노드의 히스토그램 주석(query_graph.c qo_get_attr_info 가 다는 VARBIT 사본) 없으면 false, db_get_bit 바이트를 HistogramReader::reset — 실패면 false. 열기 횟수를 센다(g_opens). 진짜: 추정기(histogram_extract_key·histogram_key_kind_for_type·MCV/잔여 질량 식·NULL 질량 나눗셈·클램프), HistogramReader(histogram_reader.cpp 를 test.cpp 에 #include, byte_order.c 로 OR_GET_*), row_snapshot_join_selectivity(row_snapshot_cl.cpp 를 --extra 로 링크; 나머지 외부 심볼은 stub — 호출 0). blob 은 빌더와 같은 OR_* 매크로로 쓴다(histogram_builder.cpp write<>·write_value_slot·build: 헤더 48B, MCV 16B, 버킷 24B; 수치 열만이라 문자열 영역 없음). 기대값은 테스트의 오라클(같은 식을 blob 명세에 적용)과 비교한다 — 코드에서 베끼지 않는다. 상수 DB_VALUE 는 inline db_make_int/bigint/double/null, VARCHAR 는 db_make_db_char 필드를 직접 채운다. PR 이 만든 함수는 weak 선언·row_snapshot_cl.hpp 는 __has_include — 없는 리비전에서는 그 케이스가 'absent' 로 FAIL, 상수 하나 케이스는 돈다.",
+ "note": "전부 [contract]. 2026-11-03 PR#8242 head 6723bfd42 10/10, base d5674fe94 2/10(상수 하나 2건 PASS = 리팩터가 추정값을 옮기지 않음; 합·조인 8건은 신설이라 absent FAIL). 변이 4종 감도(harness-out/8242/6723bfd42/unit/c.equal_selectivity_sum/): 합이 상수마다 histogram_get_equal_selectivity 로 다시 열기 → '1회 열기' FAIL, NULL 값을 가격 매김 → 합 NULL 경계·조인 NULL 경계 FAIL, k 에서 NULL 키 빼기 → 조인 NULL 경계 FAIL, (1 − nf) 곱 제거 → 조인 식·NULL·nf 경계 3건 FAIL. '(current behaviour)' 1건: nf_other == 1.0 이면 (1 − nf) 를 곱하지 않는다 — 다른 쪽이 전부 NULL 이면 조인은 0행인데 (1/k)ΣP 그대로(PR#8029 qo_snapshot_apply 와 같은 관찰, unit query_graph.join_snapshot_selectivity). 실제 호출자 qo_row_snapshot_apply 는 other_name->info.name.null_frequency(qo_get_attr_info 가 히스토그램에서 채움, 0..1)를 넘기므로 전부 NULL 인 열이면 닿는다 — 설계 판정 대상이면 그때 이 케이스를 고친다. 상한 MIN(sel, 1) 은 P ≤ 1·(1 − nf) ≤ 1 이라 넘을 수 없어 경계(= 1.0)만 단정. 문자열 열(콜레이션 스윕)은 lang 가짜가 필요해 범위 밖 — 문자열 상수 대 INT 열의 종류 불일치(false)만 본다.",
+ "origin": {
+  "pr": 8242,
+  "jira": "CBRD-27478",
+  "finding": "계약 suite(결함 없음) — 하네스 리뷰 3-1(c) 핵심 신설 함수: 등호 선택도 합·행 스냅샷 조인 선택도",
+  "comment": null,
+  "date": "2026-11-03"
+ },
+ "requires": [
+  "histogram_get_equal_selectivity"
+ ]
+}

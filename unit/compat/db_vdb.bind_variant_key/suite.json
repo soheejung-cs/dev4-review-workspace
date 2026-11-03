@@ -14,7 +14,7 @@
   "src/optimizer/histogram/histogram_cl.hpp",
   "src/query/bind_variant.h"
  ],
- "fakes": "pt_append_string(다른 TU, 테스트가 정의) — parse_tree.c 의 old_string==NULL 분기(parser_allocate_string_buffer(strlen,1)+strcpy)를 흉내: 문자열마다 새 버퍼를 주고 strlen+1 바이트를 세며 '파서 해제'(테스트 리셋) 전에는 돌려주지 않는다(실제는 parser_free_parser→pt_free_string_blocks 에서만 반환). pt_free_statement_xasl_id(다른 TU) — parser_support.c 의 비-DELETE 분기 free_and_init(statement->xasl_id). do_replan_statement_internal(seam, 같은 TU static) — 성공 분기: 기존 XASL_ID 해제 후 do_prepare_statement 가 새 XASL_ID 를 남기는 것을, 문장에 걸린 변형 키(#k)로 이름 붙인 엔트리(time_stored.usec=base+1+k)로 흉내. 실제 prepare 가 해시 텍스트를 parser 아레나에 찍는 할당은 세지 않는다(402 행 범위 밖). histogram_bind_value_hash / histogram_bind_fingerprint(다른 TU) — 테스트가 정한 값 해시와 '히스토그램 술어 1개' 지문(terms=1, rows[0])을 돌려준다(실제의 '가격 매길 술어가 있다' 분기). db_bind_variant_step·switch·remember·key·key_ptr 와 bind_variant_nearest/distance(헤더 inline)는 진짜 코드.",
+ "fakes": "pt_append_string(다른 TU, 테스트가 정의) — parse_tree.c 의 old_string==NULL 분기(parser_allocate_string_buffer(strlen,1)+strcpy)를 흉내: 문자열마다 새 버퍼를 주고 strlen+1 바이트를 세며 '파서 해제'(테스트 리셋) 전에는 돌려주지 않는다(실제는 parser_free_parser→pt_free_string_blocks 에서만 반환). pt_free_statement_xasl_id(다른 TU) — parser_support.c 의 비-DELETE 분기 free_and_init(statement->xasl_id). do_replan_statement_internal(seam, 같은 TU static, db_vdb.c:4936) — 먼저 기존 XASL_ID 를 해제하고(실제와 같음), g_replan_error 가 있으면 do_prepare_statement 실패 분기(XASL_ID 없이 오류 반환), 아니면 성공 분기: 기존 XASL_ID 해제 후 do_prepare_statement 가 새 XASL_ID 를 남기는 것을, 문장에 걸린 변형 키(#k)로 이름 붙인 엔트리(time_stored.usec=base+1+k, sec=1760000000+g_generation — rebase 가 새 base entry 를 보게)로 흉내. 실제 prepare 가 해시 텍스트를 parser 아레나에 찍는 할당은 세지 않는다(402 행 범위 밖). histogram_bind_value_hash / histogram_bind_fingerprint(다른 TU) — 테스트가 정한 값 해시와 '히스토그램 술어 1개' 지문(terms=1, rows[0])을 돌려준다(실제의 '가격 매길 술어가 있다' 분기). histogram_bind_fingerprint 는 620ceaf6a 부터 다섯째 인자 BIND_TERM_MEMO *memo 를 받는다 — 가짜도 같은 시그니처(memo 는 읽지 않는다; 지문은 테스트가 정한다). db_bind_variant_step·switch·remember·key·key_ptr 와 bind_variant_nearest/distance(헤더 inline)는 진짜 코드. db_bind_variant_rebase(같은 TU static)는 진짜 — hooks.cpp unitseam_vdb_rebase 로 부른다.",
  "origin": {
   "pr": 8013,
   "finding": "F2",
@@ -23,5 +23,7 @@
  },
  "requires": [
   "db_bind_variant_switch"
- ]
+ ],
+ "note": "2026-11-03 (PR#8242 unit_regress 'stale'): 620ceaf6a(#8013 squash merge) 이후 낡아 있었다 — head·base 둘 다 첫 케이스에서 unitseam stub(_Z26histogram_bind_fingerprint…P14bind_term_memo) abort, 나머지 케이스는 돌지도 않음. 원인은 PR#8242 가 아니라 머지가 histogram_bind_fingerprint 에 BIND_TERM_MEMO *memo 인자를 더한 것(가짜가 4인자라 다른 맹글 이름). 가짜 시그니처를 고치자 F2 [defect] 2건은 head 6723bfd42·base d5674fe94 모두 FAIL = 머지가 F2 를 고쳤다(db_bind_variant_key 가 세대마다 변형별 키를 BIND_WATCH_STATE.variant_key[] 에 한 번만 만들고, db_bind_variant_rebase 가 세대와 함께 버린다 — db_vdb.c:371-385, 513-519). defects_fixed_in=620ceaf6a 로 이력 처리하고 고친 동작을 [contract] 3건으로 고정: 두 변형 1000회 교대 = 키 할당 0·포인터 2개, rebase 가 키·memo 를 비우고 다음 키는 새 base 시각으로, 컴파일 실패 시 이전 변형 키 복원·재시도는 만들어 둔 키 재사용. 변이 mut_no_key_cache(캐시 가드 제거 = F2 재도입): F2-fix 계약 2건 FAIL·[defect] 2건 PASS — 감도 확인 (harness-out/8242/6723bfd42/unit/stale.bind_variant_key/).",
+ "defects_fixed_in": "620ceaf6a"
 }
