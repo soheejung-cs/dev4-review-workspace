@@ -1,0 +1,10 @@
+--- a/src/transaction/locator_sr.c
++++ b/src/transaction/locator_sr.c
+@@ -4148,7 +4148,6 @@
+ 	  if (clear_pcontext == true)
+ 	    {
+ 	      partition_clear_pruning_context (&pcontext);
+-	      clear_pcontext = false;
+ 	    }
+ 	  heap_classrepr_free_and_init (classrepr, &classrepr_cacheindex);
+ 

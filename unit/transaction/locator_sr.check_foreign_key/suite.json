@@ -1,0 +1,41 @@
+{
+ "name": "PR#8394 (CBRD-27845) locator_check_foreign_key () 의 계약 - 행 INSERT·UPDATE 마다 도는 외래 키 검사: 외래 키 수와 상관없이 고정(heap_classrepr_get)과 해제 수가 같고 분할 부모의 가지치기 문맥(술어 언팩·속성 정보 고정·소유 분할 배열)이 키마다 정리된다(정상 경로와 모든 출구 - ER_FK_INVALID·로그 적용기의 계속 검사·B-tree 오류·고정과 해제 사이의 오류), 탐색 시점에는 그 키의 고정·문맥이 이미 풀려 있다(PR 설계), 바뀌지 않는 것: 반환 코드·ER_FK_INVALID 메시지(FK 이름·키)·락 S_SELECT_WITH_LOCK·검사 순서·탐색할 인덱스(가지치기가 고른 분할의 PK·OID)·NULL 키 건너뜀·FK 아닌 인덱스 건너뜀·다중 열 키값 비우기. 두 번째 커밋 196989e1a(자기 리뷰 G1-01): 다중 열 FK 의 키 값은 레코드가 DBVAL_BUFSIZE 를 넘으면 heap_attrvalue_get_key 가 할당한 버퍼를 갖는데, error 레이블이 키 값을 비워 키를 읽은 뒤의 오류 출구(가지치기·문맥 읽기·표현 고정 실패·탐색의 BTREE_ERROR_OCCURRED)도 그 버퍼를 놓고, 이미 비운 출구(키 끝·ER_FK_INVALID)는 두 번 놓지 않는다. K1-K34 결정 케이스 + R1(생성 3000개: 코드·순서·메시지·락 = 문서된 동작)·R2(생성 3000개: 어떤 출구로 끝나도 고정·문맥이 남지 않음)·R3(생성 3000개, 긴 레코드: 키 버퍼가 남지 않고 이중 해제 없음)",
+ "requires": [
+  "locator_check_foreign_key",
+  "^[[:space:]]*clear_pcontext = false;",
+  "^  pr_clear_value (&dbvalue);"
+ ],
+ "file": "src/transaction/locator_sr.c",
+ "mode": "server",
+ "seams": [],
+ "appendix": "hooks.cpp",
+ "test": "test.cpp",
+ "watch": [
+  "src/storage/heap_file.h",
+  "src/storage/heap_file.c",
+  "src/query/heap_attrinfo.h",
+  "src/query/partition_sr.h",
+  "src/query/partition.c",
+  "src/base/object_representation_sr.h",
+  "src/base/xserver_interface.h",
+  "src/storage/btree.h",
+  "src/transaction/log_impl.h"
+ ],
+ "fakes": "대상은 locator_check_foreign_key 하나(static - hooks.cpp 의 unitseam_locator_check_foreign_key 로 부른다)이고, 부르는 함수는 전부 다른 TU 라 seam 없이 test.cpp 의 같은 시그니처 가짜가 자동 stub 을 대신한다(실행 중 stub 호출 0). 가짜가 흉내 낸 실제 분기(줄은 1cc4cb1a7): heap_attrinfo_start_with_index(heap_file.c 13808-13990) = 자식 표현을 속성 캐시에 고정(last_classrepr·last_cacheindex), num_btids = n_indexes, has_single_col/has_multi_col, 반환 = 단일 열 색인 속성 수(다중 열만이면 1), 색인 속성 없음 = 0(고정 없음), 자식 표현 실패 = ER_FAILED(고정 없음) · heap_attrinfo_end(10997-11030) = num_values -1 이면 아무것도, 아니면 자식 표현 해제 · heap_attrvalue_get_key(14682-14830) = 진입 db_value 가 NULL 이 아니면 기록(실제는 assert, 14692), 다중 열은 호출자 db_value 에 MIDXKEY 를 만들어 그것을 돌려주고(버퍼 크기는 키가 아니라 레코드 길이 recdes->length - DBVAL_BUFSIZE 이하면 호출자 buf, 넘으면 할당한 버퍼(셈)에 db_make_midxkey 뒤 need_clear = true, heap_file.c 14740-14784) 단일 열은 속성 캐시 값(heap_attrinfo_access)을 돌려준다 - 그래서 호출자의 `key_dbvalue == &dbvalue` 는 다중 열만 · heap_classrepr_get(2072-) = *idx_incache = -1 먼저, 실패 = NULL, 성공 = 그 캐시 항목 fcnt++ · heap_classrepr_free(1666-1720) = 그 칸 fcnt--(*idx_incache 는 그대로), 포인터가 그 칸 것이 아니거나 fcnt 0 이면 해제 오류(이중 해제) 로 셈 · partition_init_pruning_context(partition.c 2944-2970) = 실제 본문 그대로 · partition_load_pruning_context(3029-3150) = init 먼저, root_oid, 분할 배열은 캐시(is_from_cache - 배열은 캐시 것) 또는 힙에서 읽음(문맥 소유), 술어 언팩(partition_pred·fp_cache_context - PR 본문의 xasl_stream.cpp 할당), partitions NULL = '분할 아님' NO_ERROR, 실패 = error_return 이 문맥을 정리하고 오류 반환 · partition_clear_pruning_context(3160-3205) = 소유 배열 해제(heap_clear_partition_info), 술어 해제·NULL(free_xasl_unpack_info 는 참조로 받아 NULL), is_attr_info_inited 면 속성 정보 종료(루트 표현 해제), 멱등 · partition_prune_unique_btid(4421-4466)+partition_attrinfo_get_key(4702-4795) = 문맥의 속성 정보를 한 번 시작(heap_attrinfo_start - 루트 표현 고정, 그 시작이 실패하면 시작 안 됨, 그 뒤 실패는 시작된 채 - 호출자 문맥은 정리하지 않는다), 키를 담는 분할(hash v mod n, range 첫 상한 > v) 의 OID·HFID·PK BTID, 없으면 셋 다 NULL 에 NO_ERROR(4438-4445) · xbtree_find_unique = BTID·클래스 OID·scan op·is_all_class_srch·키 포인터와 그 순간 살아 있는 이 검사의 고정·문맥 자원 수를 기록, (PK 루트, 키) 행이 있으면 FOUND, 없으면 NOTFOUND, 지정한 탐색에서 er_set(ER_LK_UNILATERALLY_ABORTED) + BTREE_ERROR_OCCURRED · btree_multicol_key_has_null = 방금 읽은 키의 NULL 원소 · pr_valstring = malloc 한 키 문자열(셈), db_private_free(_release/_debug) = 그것을 해제(셈) · pr_clear_value(object_primitive.c 1867-2023) = NULL 이면 아무것도, 아니면 MIDXKEY 는 need_clear 인 buf 를 해제(db_private_free_and_init - 가짜가 할당하지 않았거나 이미 놓은 버퍼면 잘못된 해제로 셈)하고 buf NULL, 그다음 is_null 1·need_clear false(PRIM_SET_NULL) - 같은 값을 두 번 비우면 두 번째는 아무것도 안 함 · logtb_find_client_type = 로그 적용기 시나리오면 DB_CLIENT_TYPE_LOG_APPLIER(LOG_CHECK_LOG_APPLIER) · er_set/er_errid = id 목록·ER_FK_INVALID 의 두 인자(FK 이름·값 문자열)·마지막 id. THREAD_ENTRY 는 tran_index 만 쓴 원시 저장소(다른 suite 와 같은 방식). 긴 레코드는 run() 의 RECDES 길이를 DBVAL_BUFSIZE + 64 로 둬서 만든다(W.long_record).",
+ "note": "2026-11-04 갱신(PR#8394 두 번째 커밋 196989e1a 와 develop merge b307f5819 - merge 는 이 suite 의 watch 파일을 바꾸지 않고 locator_sr.c 의 두 줄만 196989e1a 것): K27-K34·R3 추가, K21 의 pr_clear_value 호출 수 검사(2)는 뺐다(196989e1a 가 error 레이블에서 한 번 더 부른다 - 빈 값이라 무해, 횟수는 계약이 아니다). unitseam 직접 실행(release 빌드 트리 플래그 = unit_regress 와 같음): head b307f5819 37/37, 첫 커밋 1cc4cb1a7 32/37(FAIL K27 K28 K29 K30 R3 = 오류 출구에서 키 버퍼 1개 남음, R3 는 3000개 중 108개), base 226352283(develop) 19/37(그 5건 + 첫 커밋의 13건 K2 K3 K4 K5 K8 K9 K12 K13 K14 K16 K18 K24 R2). debug 빌드 트리 플래그(b307f5819 로 구워짐, assert 활성)도 같은 결과, 세 리비전 모두 stub 호출 0. K31-K34(정상 출구·ER_FK_INVALID 출구(일반·로그 적용기)·NULL 원소·마친 키 뒤의 오류에서 이중 해제 없음)는 세 리비전 모두 PASS. R3 분포: 키 버퍼가 생긴 시나리오 1264, 그중 오류 출구(ER_FK_INVALID 제외) 212(이 가운데 버퍼가 살아 있을 때 나간 108개가 1cc4cb1a7·base 에서 남김). base 값(첫 커밋 쪽): K2 첫 부모 fcnt 1, K8 hash 부모 fcnt 2 + 술어 1 + 속성 정보 1 = PR 본문 AS-IS 의 2(k-1)·restrack 항목, K3 k=4 고정 4, K9 탐색 때 자기 고정 1·2·3·문맥 2, R2 3000개 중 1518개. 감도 변이(b307f5819 에 --patch, 37건 기준): mut_no_repr_release -> 첫 커밋의 13건, mut_no_pctx_clear -> K3 K8 K9 K16 K24 R2, mut_free_no_null(끝에서 이중 해제) -> 18건, mut_release_after_search(찾은 경로에서만 탐색 뒤 해제) -> K9 K13 R2(로그 적용기의 continue 가 고정을 남김 - PR 이 탐색 앞에 둔 이유), mut_clear_btree_error_only(키 비우기를 B-tree 오류 가지에만, error 레이블엔 없음 - G1-01 이 먼저 본 출구만 고친 꼴) -> K27 K28 K29 R3(출구마다 필요), 대조 ctl_flag_kept -> 0. 1cc4cb1a7 실행이 곧 196989e1a 를 뺀 변이다. requires: 셋째 줄 `^  pr_clear_value (&dbvalue);`(error 레이블의 함수 본문 깊이 줄 - src/ 전체에서 b307f5819 의 locator_sr.c:4200 하나뿐)은 196989e1a 의 수정, 둘째 줄 `^[[:space:]]*clear_pcontext = false;`(키마다 문맥 정리 뒤 플래그 내림 - locator_sr.c:4151 하나뿐)은 1cc4cb1a7 의 수정이다. 둘 다 있어야 적용한다 - develop 과 첫 커밋 1cc4cb1a7 에서는 '(적용 안 됨)' 으로 두어, 그 리비전에서 도는 다른 PR 의 unit_regress 가 아직 들어오지 않은 수정의 TO-BE 를 'head·base 모두 FAIL(stale)' 로 잘못 보고하지 않게 한다(첫 커밋만 있는 리비전이면 K27-K30·R3 5건이 그렇게 보인다). PR#8394 가 develop 에 머지된 뒤에는 둘째·셋째 줄을 지워도 된다(다른 파일이 같은 꼴의 줄을 만들면 오적용될 수 있다 - 그때도 지운다). K25·K26 은 '(현재 동작 - develop 동일)': 자식 표현 실패 시 NO_ERROR(검사 생략, locator_sr.c 4064-4067), 로그 적용기에서 앞 키의 ER_FK_INVALID 를 뒤 분할 부모 키의 error_code = partition_load_pruning_context (...)·partition_prune_unique_btid (...) 대입이 NO_ERROR 로 덮음(4126-4127·4139) - PR 무관, 도달성 미확인(별도 이슈 후보), 고치면 이 두 케이스가 FAIL 로 보인다. 이전 기록(2026-11-03, 28건 판): head 1cc4cb1a7 28/28, base 15/28, 감도 변이는 1cc4cb1a7 에 걸어 같은 집합(free_no_null 17건).",
+ "origin": {
+  "pr": 8394,
+  "jira": "CBRD-27845",
+  "head": "b307f5819e6637dddcc047884729c7de7a332230",
+  "base": "226352283aaee7b0ae583d05a368d74f6c1b2e08",
+  "finding": "계약 suite (harness-review 3-1(c)) - PR 본문 TO-BE 와 Implementation 의 '바뀌지 않는 것', 그리고 G1-01(오류 출구의 다중 열 키 버퍼, 196989e1a 가 고침 - develop 선재)의 동적 확인",
+  "comment": "https://github.com/CUBRID/cubrid/pull/8394",
+  "artifacts": "/home/cubrid/dev/utils/harness-out/8394/1cc4cb1a7/unit/check_foreign_key/ (result.md, out_v2/<rev9>/ 세 리비전 release 플래그, out_v2_debug/<rev9>/ debug 플래그, mut_v2/ 변이 6종(b307f5819); 이전 28건 판 out/·out_debug/·mut/)",
+  "date": "2026-11-04",
+  "commits": {
+   "1cc4cb1a7cb4f8d856ebdf9dd20beddff6c2e49a": "키마다 클래스 표현·가지치기 문맥 해제",
+   "196989e1adcfe750d58f39d1b6ce47e501697139": "error 레이블에서 다중 열 키 값 비우기(자기 리뷰 G1-01)",
+   "b307f5819e6637dddcc047884729c7de7a332230": "upstream/develop merge(이 suite 의 대상·watch 파일 변화 없음)"
+  }
+ }
+}

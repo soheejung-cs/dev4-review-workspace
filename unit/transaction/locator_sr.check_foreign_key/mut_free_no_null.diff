@@ -1,0 +1,11 @@
+--- a/src/transaction/locator_sr.c
++++ b/src/transaction/locator_sr.c
+@@ -4150,7 +4150,7 @@
+ 	      partition_clear_pruning_context (&pcontext);
+ 	      clear_pcontext = false;
+ 	    }
+-	  heap_classrepr_free_and_init (classrepr, &classrepr_cacheindex);
++	  heap_classrepr_free (classrepr, &classrepr_cacheindex);
+ 
+ 	  /* a NULL btid: no partition can hold the key */
+ 	  ret = BTID_IS_NULL (&local_btid) ? BTREE_KEY_NOTFOUND

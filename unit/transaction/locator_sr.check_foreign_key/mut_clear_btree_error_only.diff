@@ -1,0 +1,19 @@
+--- a/src/transaction/locator_sr.c
++++ b/src/transaction/locator_sr.c
+@@ -4183,6 +4183,7 @@
+ 	  else if (ret == BTREE_ERROR_OCCURRED)
+ 	    {
+ 	      ASSERT_ERROR_AND_SET (error_code);
++	      pr_clear_value (&dbvalue);
+ 	      goto error;
+ 	    }
+ 	  assert (ret == BTREE_KEY_FOUND);
+@@ -4196,8 +4197,6 @@
+     }
+ 
+ error:
+-  /* the key of a multi-column foreign key can own a buffer (heap_attrvalue_get_key) when an error leaves the loop */
+-  pr_clear_value (&dbvalue);
+   if (clear_pcontext == true)
+     {
+       partition_clear_pruning_context (&pcontext);
