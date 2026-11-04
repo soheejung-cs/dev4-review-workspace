@@ -1,0 +1,29 @@
+{
+ "name": "btree_attrinfo_read_dbvalues — 커버드 읽기가 요청 attr 마다 어느 키 요소를 받는가: 일반 인덱스 MIDXKEY(위치·위치 캐시·압축 접두), 함수 인덱스의 일반 열(함수 결과 슬롯 건너뜀, j == btree_num_att 캐시), 단일 키 분기(복제·거부), PR#6466 함수 결과 attr FUNC_INDEX_RESULT_ATTRID(가운데·앞·끝·인자 하나 단일 키·압축 접두) + 결함 G4-01(인자 둘 단일 함수 키를 btree_num_att != 1 로 거부)·G4-01b(거부 출구에 er_set 없음)",
+ "requires": [
+  "btree_attrinfo_read_dbvalues"
+ ],
+ "file": "src/storage/btree.c",
+ "mode": "server",
+ "seams": [],
+ "test": "test.cpp",
+ "watch": [
+  "src/storage/btree.h",
+  "src/storage/storage_common.h",
+  "src/query/heap_attrinfo.h",
+  "src/object/object_primitive.h",
+  "src/compat/dbtype_def.h"
+ ],
+ "fakes": "대상 함수는 실코드(btree.c 단독 컴파일, seam 없음). 가짜는 그 함수가 부르는 바깥 함수 넷뿐: pr_midxkey_get_element_nocopy — 키는 테스트 배열(DB_MIDXKEY.buf → fake_key), 요소 index 를 돌려주고 (어느 키, index) 를 기록, index >= ncolumns 면 -1(object_primitive.c pr_midxkey_get_element_internal: debug 는 assert (false) 뒤 -1); pr_clone_value — setval(copy) 의 고정 길이 형 분기(INT 는 그대로 복사, 소유 없음), 횟수; pr_clear_value — INT 는 해제할 것 없이 PRIM_SET_NULL·need_clear=false, 횟수; er_set/er_errid/er_clear — 마지막 오류 id. 입력은 서버가 넘기는 값을 따라 만들었다: btree_att_ids·btree_num_att = OR_INDEX.atts·n_atts(heap_get_indexinfo_of_btid → scan_manager.c:2142), 함수 인덱스 속성 = 일반 열 + 목록에 없는 함수 인자 덧붙임(semantic_check.c:17695-17700), attr_index_start = n_atts - 덧붙인 인자, col_id = 함수 위치(execute_schema.c:3328-3329), 키 = attr_index_start + 1 요소로 col_id 자리에 함수 결과(heap_midxkey_key_generate), attr_index_start == 0 이면 MIDXKEY 아닌 함수 결과 값 하나(heap_file.c:14613, :14661-14665), 위치 캐시 [0] = -1 로 시작(btree.c:29784). PR#6466 케이스(K9-K14, G4-01, G4-01b)는 FUNC_INDEX_RESULT_ATTRID 가 있는 리비전에서만 컴파일된다 — UNIT_FUNC_ATTR_LITERAL 을 정의한 래퍼로 include 하면 -2 를 넣어 그것이 없는 리비전의 답을 본다.",
+ "note": "2026-11-04 head 05b46aefe 16/16 PASS(계약 14, [defect] G4-01·G4-01b 재현). base 4e389935d 8/8 PASS(K1-K8 = develop 동일; PR6466 케이스는 컴파일 안 됨). 래퍼(-2 리터럴)로 base: K9-K13 FAIL(develop 은 함수 결과 attr 를 모른다 = 신설), K14·G4-01·G4-01b PASS(같은 가드·같은 출구 — develop 은 함수 인덱스 커버링을 꺼서 이 입력이 생기지 않는다, query_graph.c@4e389935d:7389-7393). 변이(unitseam --patch, head): fix.diff(finding 제안 그대로) → G4-01·G4-01b FAIL, 계약 14 PASS(K14 는 값 = 키 확인 3건); mut_er_set_only → G4-01b 만 FAIL; mut_num_att_only → G4-01 만 FAIL. PR 이 클라이언트 쪽 대안(qo_is_coverage_index 에서 attr_index_start == 0 · 인자 둘 이상 커버링 거절)으로 고치면 서버 함수는 그대로라 G4-01 은 계속 PASS — 그때 defects_fixed_in 에 {\"PR6466 G4-01:\": 커밋} 을 적고 note 에 '입력 차단' 이라 남긴다. 산출 harness-out/6466/05b46aefe/unit/G4-01/.",
+ "origin": {
+  "pr": 6466,
+  "jira": "CBRD-25984",
+  "head": "05b46aefe5253cd48c5f08214634d2b39f37a068",
+  "base": "4e389935d19dba2d1c35db0520f90c7deee5e252",
+  "finding": "G4-01 [defect] 인자 둘 단일 함수 키(mod(a, b)) 커버드 읽기 거부 — 이 PR 이 입력을 만든다 · G4-01b [defect] 단일 키 거부 출구 er_set 없음(btree_dump_curr_key 의 ASSERT_ERROR, btree.c:30630 — debug abort) · 계약 K1-K14(harness-review 3-1(c))",
+  "comment": null,
+  "artifacts": "/home/cubrid/dev/utils/harness-out/6466/05b46aefe/unit/G4-01/ (fix.diff·mut_er_set_only.diff·mut_num_att_only.diff·test_literal.cpp·explore/test_mro.cpp)",
+  "date": "2026-11-04"
+ }
+}
