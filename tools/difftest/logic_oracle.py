@@ -24,7 +24,16 @@ EXISTS/NOT EXISTS/IN/NOT IN/ANY/ALL/스칼라 부질의, 조인 힌트(USE_HASH/
 검증 이력: 2026-11-04 .52 — develop 2ca10ed03 debug 1,000검사 위반 0 / 2026-08-11 빌드(9217b50ef) 600검사 위반 5
   (전부 외부 조인의 null 채움 쪽에 상관된 EXISTS/NOT EXISTS — 그 사이 develop 에서 고쳐진 결함)를 기준 빌드 없이 잡음.
 """
-import argparse, os, random, re, subprocess, sys
+import argparse, os, random, re, shutil, subprocess, sys
+
+if sys.version_info < (3, 7) and not os.environ.get("LOGIC_ORACLE_REEXEC"):
+    # argparse required subcommands and subprocess text= need 3.7; .52's python3 is 3.6 — rerun under a newer one
+    for _py in ("python3.11", "python3.10", "python3.9", "python3.8", "python3.7"):
+        _path = shutil.which(_py)
+        if _path:
+            os.environ["LOGIC_ORACLE_REEXEC"] = "1"
+            os.execv(_path, [_path] + sys.argv)
+    sys.exit("logic_oracle.py needs python 3.7+ (found %s); install python3.11 or call it explicitly" % sys.version.split()[0])
 
 TABLES = {"lo_r1": 3000, "lo_r2": 2000, "lo_r3": 500, "lo_r4": 50}   # 행 수: 조인 결과가 수만 행 안쪽이 되게
 COLS = ["a", "b", "c", "d", "e", "f", "id"]
