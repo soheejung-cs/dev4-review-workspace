@@ -9,7 +9,7 @@ description: 적대적 SQL 차분 테스트 — 같은 SQL 세트를 develop·PR
 
 **목표는 PR 을 뚫는 것이다**(사용자 지시 2026-10-12 .50: "적대적 테스트를 만들 때 develop 이 실패하는 케이스를 만들 필요는 없어"). 오라클 = **PR 안의 자기 일관성**(memo on/off·바인드 vs 리터럴·인덱스 vs 순차) + **develop 동일성**. develop 에서만 깨지는 모양은 "develop 선재" 한 줄 — TC·지적으로 만들지 않는다(별도 JIRA 는 사용자 결정). "실패하는 TC" 는 **PR 에서 실패하는 TC** 다(없으면 "없음").
 
-도구: **`tools/difftest/`** — `difftest.sh`(여러 설치본 SA 실행·정규화·diff), `modes.sh`(파라미터 모드 묶음), `concurrent.sh`(동시 vs 단독 vs 재기동), `lifetime.sh`(RSS·plandump), `fuzz_gen.py`(무작위 바인드 생성기).
+도구: **`tools/difftest/`** — `difftest.sh`(여러 설치본 SA 실행·정규화·diff), `modes.sh`(파라미터 모드 묶음), `concurrent.sh`(동시 vs 단독 vs 재기동), `lifetime.sh`(RSS·plandump), `fuzz_gen.py`(무작위 바인드 생성기), `logic_oracle.py`(기준 빌드 없는 논리 오라클 — §2-1).
 
 ## 0. 준비 — 빌드 세 개, 볼륨 하나 또는 셋
 - **기준 빌드**: PR 의 merge-base 를 품은 develop 리비전(비교 축의 파일이 그 사이에 바뀌지 않았는지 `git log <base>..<mb> -- <files>` 로 확인). **PR 빌드**: PR 헤드. 내 변경이 얹힌 **머지 빌드**가 있으면 셋째 — "내 변경이 PR 의 답을 바꾼 곳 없음" 을 함께 증명한다.
@@ -51,6 +51,15 @@ description: 적대적 SQL 차분 테스트 — 같은 SQL 세트를 develop·PR
    **보고·코멘트에 싣는 재현은 최소 테이블**이다(사용자 지시 2026-10-08). 테이블·조건을 하나씩 빼서 현상이 남는 가장 작은 모양을 쓰고, 별칭은 역할(`o` 바깥 / `i` inner)로, self join 은 꼭 필요할 때만, 부질의에만 나오는 표는 조인 대상이 아니라고(역할을) 적는다. 이슈·TC 원문 질의는 옮기지 않고 링크만 — 원문 세 테이블을 그대로 보여 주면 조인 순서부터 헷갈린다(PR#8114).
 5. 동시성은 `concurrent.sh`, 모드는 `modes.sh`, 수명은 `lifetime.sh`. 세 가지 모두 **기준도 같은 방식으로** 돌려 develop 의 선재 결함과 가른다(동시 실행은 재기동 단독이 기준 — 캐시가 남은 단독은 이미 오염돼 있다).
 6. 기록: 세트·출력·diff 는 `projects/<이슈>/repro/`, 결과는 `도메인해석-난이도테스트-<날짜>.md` 꼴의 표(축 / 재현 / PR 자기 일관성 / PR = develop / 판정 — develop 결함은 각주, 2026-10-12). 게시는 `review-response` 규약(초안 → 승인 → 인라인 또는 요약 코멘트, "왜 문제가 되는지" 포함).
+
+## 2-1. 기준 빌드 없이 — 논리 오라클 (`tools/difftest/logic_oracle.py`)
+빌드 간 diff 는 기준 빌드도 틀리면(선재 결함) 차이로 안 보인다. 이 도구는 **한 빌드의 답이 서로 맞물려야 하는 성질**로 오답·행 누락을 찾는다(사용자 승인 2026-11-04 "논리적으로 검증하는 하네스" → dev4 이관).
+- **성질**: TLP — `count(where p) + count(where not p) + count(where p 가 UNKNOWN) = count(*)`, 세 분할의 sum·min·max 를 합치면 전체. NoREC — `count(*) where p = count(case when p then 1 end)`(오른쪽은 p 를 식으로만 평가해 인덱스·조건 이동이 끼지 않는다).
+- **언제**: 기준 빌드가 없거나 너무 멀어 A/B 차이가 쏟아질 때(릴리스 전 전수 점검), 술어 평가·조인·부질의 변환·옵티마이저 재작성을 바꾼 PR 의 A/B 보강, debug 빌드로 오래 돌려 assert 까지 함께 볼 때.
+- **실행**: `python3 tools/difftest/logic_oracle.py run --install <설치본> --db <버릴 DB> --seed N --n 300 --out <dir>`(SA — 그 DB 를 서비스 중인 서버가 있으면 거부) 또는 `--cs`(떠 있는 서버). 다른 설치본의 스크래치 DB 는 `--databases <dir>`. **표 `lo_r1..lo_r4` 를 지우고 만든다** — 버릴 DB 에서.
+- **읽기**: 종료 코드 0 위반 없음 / 1 위반 / 2 실행 오류. 위반은 `<out>/lo_<seed>.violations.txt`(술어·질의). 위반 하나 = 술어 p 하나의 TLP·NoREC 불일치 → 그 p 를 §2-4 대로 최소 테이블로 줄이고, 옛 빌드로 돌려 선재인지 가른다(선재면 「목표」대로 한 줄). "건너뜀(오류)" 이 많으면 생성기가 문법을 벗어난 것 — 오류 문구로 생성기를 고친다(첫판은 ON 절 부질의 17건).
+- 시드마다 표 데이터와 술어가 다르다 — 시드를 바꿔 여러 번. debug 빌드는 검사당 1초 남짓.
+- **검증 이력**: 2026-11-04 .52 — develop `2ca10ed03` debug 위반 0 / 8-11 빌드 `9217b50ef` 600검사 위반 5(전부 외부 조인의 null 채움 쪽에 상관된 EXISTS/NOT EXISTS, 그 사이 고쳐진 결함) — 빌드 간 A/B 가 우연히 찾았던 결함을 기준 빌드 없이 잡았다.
 
 ## 3. 함정 (전부 실제로 데인 것, 2026-10-07)
 - `csql -i -` 미지원 → 임시 파일. "Too many prepared statements" → 문장마다 `DEALLOCATE PREPARE`.
