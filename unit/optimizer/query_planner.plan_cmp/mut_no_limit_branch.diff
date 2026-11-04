@@ -1,6 +1,6 @@
 --- a/src/optimizer/query_planner.c
 +++ b/src/optimizer/query_planner.c
-@@ -7283,8 +7283,7 @@
+@@ -7288,8 +7288,7 @@
        return PLAN_COMP_EQ;
      }
  

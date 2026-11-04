@@ -1,7 +1,7 @@
 --- a/src/optimizer/query_planner.c
 +++ b/src/optimizer/query_planner.c
-@@ -7182,8 +7182,7 @@
-   /* 5. the aliases in join order, then the index names */
+@@ -7187,8 +7187,7 @@
+   /* 6. the aliases in join order, then the index names */
    for (i = 0; i < a_keys.n && i < b_keys.n; i++)
      {
 -      c = strcmp (QO_NODE_NAME (a_keys.nodes[i]) != NULL ? QO_NODE_NAME (a_keys.nodes[i]) : "",

@@ -1,0 +1,10 @@
+--- a/src/optimizer/query_planner.c
++++ b/src/optimizer/query_planner.c
+@@ -7179,7 +7179,6 @@
+ 
+   /* 2-5. covering scans, unique scans of one row, index terms and index pages */
+   QO_TIE_PREFER_LESS (b_keys.covering, a_keys.covering);
+-  QO_TIE_PREFER_LESS (b_keys.unique_equi, a_keys.unique_equi);
+   QO_TIE_PREFER_LESS (b_keys.range_terms, a_keys.range_terms);
+   QO_TIE_PREFER_LESS (b_keys.filter_terms, a_keys.filter_terms);
+   QO_TIE_PREFER_LESS (a_keys.index_pages, b_keys.index_pages);

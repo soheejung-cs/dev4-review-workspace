@@ -1,6 +1,6 @@
 --- a/src/optimizer/query_planner.c
 +++ b/src/optimizer/query_planner.c
-@@ -7250,7 +7250,7 @@
+@@ -7255,7 +7255,7 @@
  	  index_entry = QO_NI_ENTRY (node_index, j)->head;
  	  /* named or forced; an ignored one (force < 0) is no candidate */
  	  if (index_entry->constraints != NULL && index_entry->constraints->filter_predicate != NULL

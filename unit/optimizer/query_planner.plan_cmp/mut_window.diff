@@ -1,6 +1,6 @@
 --- a/src/optimizer/query_planner.c
 +++ b/src/optimizer/query_planner.c
-@@ -7289,9 +7289,9 @@
+@@ -7294,9 +7294,9 @@
        return qo_plan_cmp_limit (a, b);
      }
  

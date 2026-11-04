@@ -728,6 +728,25 @@ TEST_CASE ("C21 a scan of infinite cost (qo_worst_cost ()) loses to a finite pla
   CHECK (sgn (unitseam_plan_cmp (cov_inf, cov_inf2)) == -sgn (unitseam_plan_cmp (cov_inf2, cov_inf)));
 }
 
+TEST_CASE ("C22 two index scans of one cost: a unique index whose columns all have equality terms wins over one "
+	   "with more range terms (CUBRIDSUS-12615: an empty table)", "[contract]")
+{
+  scene s (false);
+  QO_NODE *t = s.node ("foo", 0);
+  QO_INFO *i = s.info (0.0, 64);
+  QO_NODE_INDEX_ENTRY *u = s.index ("u_foo", 1), *f = s.index ("i_foo", 1);
+  QO_PLAN *by_u, *by_f;
+
+  u->head->all_unique_index_columns_are_equi_terms = true;
+  /* a = 100 on u_foo, b = 100 and c = 'aaaaa' on i_foo: the term sets do not overlap, as in the query */
+  by_u = s.iscan (t, i, u, 1.0, 0, 0, false);
+  bitset_add (&by_u->plan_un.scan.terms, 2);
+  by_f = s.iscan (t, i, f, 1.0, 2, 0, false);
+
+  CHECK (unitseam_plan_cmp (by_u, by_f) == PLAN_COMP_LT);
+  CHECK (unitseam_plan_cmp (by_f, by_u) == PLAN_COMP_GT);
+}
+
 TEST_CASE ("D1 develop: inside the band the iscan rule overrides the cost (iscan 99 beats sscan 56)", "[defect]")
 {
   scene s (false);
