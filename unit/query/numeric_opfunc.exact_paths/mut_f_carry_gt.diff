@@ -1,0 +1,11 @@
+--- a/src/query/numeric_opfunc.c
++++ b/src/query/numeric_opfunc.c
+@@ -5522,7 +5522,7 @@
+ 	{
+ 	  return false;
+ 	}
+-      if (carried >= precision)
++      if (carried > precision)
+ 	{
+ 	  precision = MIN (carried + 1, DB_MAX_NUMERIC_PRECISION);
+ 	}

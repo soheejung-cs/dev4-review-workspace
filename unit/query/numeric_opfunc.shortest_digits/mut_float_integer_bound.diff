@@ -1,0 +1,11 @@
+--- a/src/query/numeric_opfunc.c
++++ b/src/query/numeric_opfunc.c
+@@ -6020,7 +6020,7 @@ numeric_shortest_digits (double x, bool is_float, int max_digits, char *buf, int *decpt, int *sign)
+       return;
+     }
+ 
+-  if (is_float && fabs (x) < 1e15 && fabs (x) == floor (fabs (x)))
++  if (is_float && fabs (x) < 1e14 && fabs (x) == floor (fabs (x)))
+     {
+       /* _dtoa () writes an integer below 10^15 as it is, before it looks at the interval */
+       numeric_shortest_strip ((uint64_t) fabs (x), 0, &significand, &exponent);

@@ -1,0 +1,35 @@
+{
+ "name": "PR#8349(CBRD-27819) NUMERIC 덧셈·뺄셈·곱셈의 128비트 워드 경로(numeric_word_from_dbv/_add/_mul/_to_dbv 를 일반 경로보다 먼저)가 develop 의 답과 같다 — 반환 코드·NULL·오류 id·도메인/헤더 precision·scale·부호·17바이트 전부, 경계 교차곱 + 시드 고정 무작위 쌍의 다이제스트",
+ "file": "src/query/numeric_opfunc.c",
+ "mode": "server",
+ "seams": [],
+ "appendix": "",
+ "test": "test.cpp",
+ "extra": [
+  "src/compat/db_macro.c",
+  "src/object/object_primitive.c"
+ ],
+ "requires": [
+  "float_numeric_db_value_add",
+  "float_numeric_db_value_sub",
+  "float_numeric_db_value_mul"
+ ],
+ "watch": [
+  "src/query/numeric_opfunc.h",
+  "src/compat/dbtype_function.i",
+  "src/compat/db_macro.c"
+ ],
+ "fakes": "er_set/er_errid/er_clear(마지막 er_set id), tp_domain_resolve_default(tp_Numeric 도메인 — 넘침 메시지의 형 이름용), intl_is_space(ASCII 공백), prm_Def(oracle_compat_number_behavior=false). 그 밖은 실코드: numeric_opfunc.c(대상 TU), db_macro.c(db_value_domain_init — scale 범위 검사), object_primitive.c.",
+ "note": "W1 의 기대값 EXPECTED[] 는 develop 80b84317d(PR 의 base)에서 잰 다이제스트다 — 쌍 1,548,576개(경계 교차곱 1,048,576 = 크기 32종 0..10^40-1 x scale 16종 -214..252 x 부호, float NUMERIC; 무작위 500,000 = float/fixed 섞음, 둘째 scale 이 첫째 근처인 쌍 절반), 둘 다 계수 2^128 미만 1,195,721쌍. FAIL 이면: 두 리비전에서 DIFF_OUT=<파일> 로 블록(4096쌍) 다이제스트를 받아 diff → DUMP_BLOCK=<add|sub|mul>:<블록> 으로 그 블록 기록을 글자로. 판정 세션(2026-11-04, PR#8349 그룹 C)의 더 큰 대조: 쌍 8,017,600개 x {add, sub, mul, numeric_db_value_compare} 블록 다이제스트 head 735464f0d = base 80b84317d(차이 0, 무작위 블록 3개 글자 대조도 같음). 비교(numeric_db_value_compare)·정수 대 NUMERIC 은 query/numeric_opfunc.exact_paths 가 맡는다. W2 는 develop 결함(이 PR 이 유지): 두 계수 2^64 미만·선언 precision 합 55 이하·결과 scale -214 미만의 곱은 PR 이 남긴 64비트 빠른 길(float_numeric_mul_fast)로 가서 db_make_numeric () 이 scale 을 거절(ER_INVALID_SCALE 경고) — 답은 NULL, 반환 NO_ERROR. 일반 경로(계수 2^64 이상)는 ER_IT_DATA_OVERFLOW. PR 의 주석(numeric_opfunc.c:3670-3671 'below -214 it returns the product')과 다르다 — 판정 findings.C 의 주석 제안. 변이 2종(head 에 --patch) 감지: mut_w_zero_sign(numeric_word_add 의 -0 방지 삭제) → W1 add·sub, mut_w_mul_scale_max(numeric_word_mul 이 scale 252 초과를 받음) → W1 mul. 단위 바이너리는 -O0(unitseam), 한 리비전 약 30초.",
+ "origin": {
+  "pr": 8349,
+  "jira": "CBRD-27819",
+  "finding": "계약 suite(판정 그룹 C — 덧셈·뺄셈·곱셈 결과 불변 주장) — 결함 없음; [defect] W2 는 develop 동일(별도 이슈 후보)",
+  "comment": "https://github.com/CUBRID/cubrid/pull/8349",
+  "date": "2026-11-04",
+  "verified": [
+   "735464f0d: W1 PASS, W2 PASS(결함 있음 — develop 동일)",
+   "80b84317d: W1 PASS, W2 PASS"
+  ]
+ }
+}

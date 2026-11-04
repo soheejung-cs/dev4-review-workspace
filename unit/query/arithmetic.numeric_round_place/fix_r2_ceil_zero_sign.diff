@@ -1,0 +1,15 @@
+--- a/src/query/arithmetic.c
++++ b/src/query/arithmetic.c
+@@ -413,9 +413,10 @@ db_ceil_dbval (DB_VALUE * result, DB_VALUE * value)
+ 	      }
+ 	    else
+ 	      {
+-		/* the given numeric value is already an integer */
++		/* the given numeric value is already an integer; a zero is never negative, as unary minus and
++		 * numeric_db_value_floor_ceil () give it */
+ 		db_make_numeric (result, db_locate_numeric (value), p, s, DB_NUMERIC_BUF_SIZE,
+-				 DB_VALUE_NUMERIC_IS_VALUE_NEGATIVE (value), true);
++				 DB_VALUE_NUMERIC_IS_VALUE_NEGATIVE (value) && !numeric_db_value_is_zero (value), true);
+ 	      }
+ 	  }
+ 	else

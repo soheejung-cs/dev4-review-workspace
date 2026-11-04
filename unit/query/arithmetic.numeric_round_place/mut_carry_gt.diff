@@ -1,0 +1,11 @@
+--- a/src/query/numeric_opfunc.c
++++ b/src/query/numeric_opfunc.c
+@@ -5520,7 +5520,7 @@ numeric_db_value_floor_ceil (const DB_VALUE * value, bool is_floor, DB_VALUE * result)
+ 	{
+ 	  return false;
+ 	}
+-      if (carried >= precision)
++      if (carried > precision)
+ 	{
+ 	  precision = MIN (carried + 1, DB_MAX_NUMERIC_PRECISION);
+ 	}

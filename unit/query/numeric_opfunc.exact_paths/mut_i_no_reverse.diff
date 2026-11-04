@@ -1,0 +1,11 @@
+--- a/src/query/numeric_opfunc.c
++++ b/src/query/numeric_opfunc.c
+@@ -4343,7 +4343,7 @@
+     {
+       return magnitude;
+     }
+-  return magnitude == DB_LT ? DB_GT : magnitude == DB_GT ? DB_LT : DB_EQ;
++  return magnitude;
+ }
+ 
+ /*

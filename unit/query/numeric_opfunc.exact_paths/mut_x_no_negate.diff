@@ -1,0 +1,13 @@
+--- a/src/query/numeric_opfunc.c
++++ b/src/query/numeric_opfunc.c
+@@ -4195,10 +4195,6 @@
+ 	  cmp_rez = __builtin_mul_overflow (c2, _gv_numeric_agg_expr_pow10_u128[scale1 - scale2], &c2)
+ 	    ? -1 : (c1 > c2) - (c1 < c2);
+ 	}
+-      if (numeric_is_negative (dbv1))
+-	{
+-	  cmp_rez = -cmp_rez;
+-	}
+       ret = db_make_int (answer, cmp_rez);
+     }
+   else

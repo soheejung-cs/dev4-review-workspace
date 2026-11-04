@@ -1,0 +1,10 @@
+--- a/src/query/numeric_opfunc.h
++++ b/src/query/numeric_opfunc.h
+@@ -384,5 +384,5 @@ numeric_repr_fold32 (const unsigned char *buf)
+ 
+   memcpy (words, buf, sizeof (words));
+   memcpy (&last, buf + 16, 1);
+-  return words[0] ^ words[1] ^ words[2] ^ words[3] ^ last;
++  return words[0] ^ words[1] ^ words[2] ^ words[3];
+ }
+ #endif /* _NUMERIC_OPFUNC_H_ */

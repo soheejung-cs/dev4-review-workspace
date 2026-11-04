@@ -1,0 +1,11 @@
+--- a/src/query/numeric_opfunc.c
++++ b/src/query/numeric_opfunc.c
+@@ -4289,7 +4289,7 @@
+   const uint64_t c_mid = numeric_get_uint64_from_be (buf + 1);
+   const uint64_t c_lo = numeric_get_uint64_from_be (buf + 1 + sizeof (uint64_t));
+ 
+-  if (scale >= 0 && scale <= 19 && c_hi == 0)
++  if (scale >= 0 && scale <= 20 && c_hi == 0)
+     {
+       /* value * 10^scale < 2^64 * 10^19 < 2^128 */
+       const uint128_t lhs =

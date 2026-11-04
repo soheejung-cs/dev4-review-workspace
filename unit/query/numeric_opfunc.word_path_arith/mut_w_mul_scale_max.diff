@@ -1,0 +1,11 @@
+--- a/src/query/numeric_opfunc.c
++++ b/src/query/numeric_opfunc.c
+@@ -5285,7 +5285,7 @@
+     }
+ 
+   out->scale = left->scale + right->scale;
+-  if (out->scale > DB_MAX_NUMERIC_SCALE || out->scale < DB_MIN_NUMERIC_SCALE)
++  if (out->scale < DB_MIN_NUMERIC_SCALE)
+     {
+       /* pre-check the result scale. Out of the NUMERIC scale range, fall back. */
+       return false;

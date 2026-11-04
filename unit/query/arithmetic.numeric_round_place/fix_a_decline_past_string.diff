@@ -1,0 +1,14 @@
+--- a/src/query/numeric_opfunc.c
++++ b/src/query/numeric_opfunc.c
+@@ -5456,6 +5456,11 @@ numeric_db_value_round_to_place (const DB_VALUE * value, DB_BIGINT place, bool half_up, DB_VALUE * result)
+       *result = *value;
+       return true;
+     }
++  if (place < (DB_BIGINT) scale - TWICE_NUM_MAX_PREC)
++    {
++      /* past the decimal string db_round_dbval () and db_trunc_dbval () build: their answer there is theirs */
++      return false;
++    }
+   if (place < (DB_BIGINT) scale - NUMERIC_AGG_EXPR_POW10_MAX_EXP)
+     {
+       /* 39 or more digits cleared from a coefficient below 10^39: every digit goes, and the

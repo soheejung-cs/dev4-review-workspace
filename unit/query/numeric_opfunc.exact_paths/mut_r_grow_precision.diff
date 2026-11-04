@@ -1,0 +1,13 @@
+--- a/src/query/numeric_opfunc.c
++++ b/src/query/numeric_opfunc.c
+@@ -5475,6 +5475,10 @@
+ 	}
+     }
+ 
++  if (precision < 38 && coefficient >= _gv_numeric_agg_expr_pow10_u128[precision])
++    {
++      precision++;
++    }
+   numeric_make_from_u128 (result, coefficient, precision, scale, v.is_negative);
+   return true;
+ }

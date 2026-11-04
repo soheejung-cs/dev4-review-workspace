@@ -1,0 +1,11 @@
+--- a/src/query/numeric_opfunc.c
++++ b/src/query/numeric_opfunc.c
+@@ -5468,7 +5468,7 @@
+       uint128_t unit = _gv_numeric_agg_expr_pow10_u128[cleared];
+ 
+       coefficient = v.coefficient / unit * unit;
+-      if (half_up && cleared > 0 && (v.coefficient - coefficient) / _gv_numeric_agg_expr_pow10_u128[cleared - 1] >= 5
++      if (half_up && cleared > 0 && (v.coefficient - coefficient) / _gv_numeric_agg_expr_pow10_u128[cleared - 1] > 5
+ 	  && __builtin_add_overflow (coefficient, unit, &coefficient))
+ 	{
+ 	  return false;

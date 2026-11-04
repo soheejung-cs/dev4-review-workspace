@@ -1,0 +1,11 @@
+--- a/src/query/numeric_opfunc.c
++++ b/src/query/numeric_opfunc.c
+@@ -5419,7 +5419,7 @@
+   w[2] = (uint64_t) coefficient;
+   numeric_words_to_bytes (w, NUMERIC_AS_WORDS, result_buf);
+ 
+-  db_make_numeric (result, result_buf, precision, scale, DB_NUMERIC_BUF_SIZE, is_negative && coefficient != 0, true);
++  db_make_numeric (result, result_buf, precision, scale, DB_NUMERIC_BUF_SIZE, is_negative, true);
+ }
+ 
+ /*

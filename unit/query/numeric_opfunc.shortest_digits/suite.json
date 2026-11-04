@@ -1,0 +1,34 @@
+{
+ "name": "PR#8349(CBRD-27819) numeric_shortest_digits — DOUBLE/FLOAT → 문자열의 자릿수·decpt·부호가 develop _dtoa () mode 0 + ndigits 자르기(DOUBLE 16·float_type 0, FLOAT 7·float_type 1)와 같다: 0·±Inf·NaN·비정규수·2 와 10 의 거듭제곱 ±3 ulp·2^53 근처 정수·10^15 앞뒤 FLOAT 정수·무작위 비트·무작위 십진수",
+ "file": "src/query/numeric_opfunc.c",
+ "mode": "server",
+ "seams": [],
+ "appendix": "",
+ "test": "test.cpp",
+ "extra": [
+  "src/base/dtoa.c",
+  "src/base/mprec.c"
+ ],
+ "requires": [
+  "numeric_shortest_digits"
+ ],
+ "watch": [
+  "src/object/object_domain_convert.cpp",
+  "src/base/dtoa.c",
+  "src/base/mprec.c",
+  "src/query/numeric_opfunc.h"
+ ],
+ "fakes": "er_set/er_errid/er_clear, prm_Def(0). 그 밖은 실코드: numeric_opfunc.c(대상 TU — numeric_shortest_digits·Schubfach), dtoa.c·mprec.c(develop 이 쓰던 _dtoa — 이 리비전 트리에 그대로 있다, util_common.c 가 쓴다).",
+ "note": "리뷰 때(2026-11-04) 표본을 크게 잡아 735464f0d 에서 8,439,227건(경계 45,114 · 무작위 DOUBLE 5,000,000 · FLOAT 3,394,113) 불일치 0 — 산출 harness-out/8349/735464f0d/unit_review/A/dtoa_cmp. 라이브러리 판은 표본을 줄였다(무작위 DOUBLE 500,000 + 십진 400,000, FLOAT 비정규수 1/61·정수 50,000·무작위 500,000). numeric_shortest_digits 가 없는 리비전(develop 80b84317d 등)은 적용 안 됨. 변이: mut_float_integer_bound.diff(FLOAT 정수를 그대로 쓰는 경계 10^15 → 10^14) → S3 FAIL, S1·S2 PASS. 최소 정규수 2^-1022 에서도 아래 간격을 절반으로 하는 변이는 16자리 자르기에 가려 출력이 같다(관측되지 않는 변이 — 이 suite 로 잡을 수 없다).",
+ "origin": {
+  "pr": 8349,
+  "jira": "CBRD-27819",
+  "finding": "계약 suite(리뷰 2026-11-04 그룹 A) — 결함 없음",
+  "comment": "https://github.com/CUBRID/cubrid/pull/8349",
+  "date": "2026-11-04",
+  "verified": [
+   "735464f0d: S1 S2 S3 PASS",
+   "735464f0d + mut_float_integer_bound.diff: S3 FAIL"
+  ]
+ }
+}

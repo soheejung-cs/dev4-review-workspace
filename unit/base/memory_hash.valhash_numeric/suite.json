@@ -1,0 +1,37 @@
+{
+ "name": "PR#8349(CBRD-27819) mht_valhash 의 NUMERIC·BIT — 비교가 같다고 하는 NUMERIC(고정·부동, 끝자리 0, 음수 scale, precision 40, 0·음의 0)은 해시가 같고(3cece75de 의 고정 NUMERIC 정규화 포함), 2^128 미만의 다른 값은 퍼진다(develop 은 모두 0), BIT/VARBIT 은 제 바이트 길이만 해시(뒤 바이트가 0 이 아니어도) + mht_get_hash_number 의 NUMERIC 값이 develop 과 같다(해시 분할 행 배치)",
+ "file": "src/base/memory_hash.c",
+ "mode": "server",
+ "seams": [],
+ "appendix": "",
+ "test": "test.cpp",
+ "extra": [
+  "src/query/numeric_opfunc.c",
+  "src/compat/db_macro.c"
+ ],
+ "requires": [
+  "mht_valhash"
+ ],
+ "watch": [
+  "src/object/work_space.c",
+  "src/query/list_file.c",
+  "src/query/numeric_opfunc.c",
+  "src/query/numeric_opfunc.h",
+  "src/query/partition.c"
+ ],
+ "fakes": "er_set/er_errid/er_clear, prm_Def(ORACLE_COMPAT_NUMBER_BEHAVIOR 끔, 그 밖 0). 그 밖은 실코드: memory_hash.c(대상 TU), numeric_opfunc.c(float_numeric_normalize_for_hash·numeric_db_value_compare·문자열 → NUMERIC), db_macro.c.",
+ "note": "같음의 기준은 numeric_db_value_compare () — 결과 캐시의 위치별 결정된 비교(list_file.c qfile_list_cache_values_equal)와 workspace 의 tp_value_equal 이 NUMERIC 끼리는 이 비교다. V2 는 PR 이 고친 develop 동작(본문 pr-body:16 — 2^128 미만 NUMERIC 해시가 모두 0)이라 develop 에서 FAIL 이 정상이다. V4 도 develop FAIL 이 정상이다(key_size -1 이 값 뒤 0 바이트까지 읽었다 — 길이 밖 읽기, PR 이 고침). 감도: PR 의 중간 커밋 cebb57567(모든 바이트를 해시하되 고정 NUMERIC 을 정규화하지 않던 판 — greptile 지적 memory_hash.c:623, 3cece75de 가 고침)에서 V1 FAIL(같은 값 109,869쌍 중 82,696쌍 해시 갈림). V2 의 끝자리 0 이 있는 계수(79.19 와 791.90)는 정규화가 scale 을 버려 같은 해시가 된다 — 설계상 충돌(값이 다르니 비교가 가른다), 4,096개 중 3,691개 해시. V5 기대값은 80b84317d 에서 뽑은 mht_get_hash_number (2·7·1024·1000003, &v) — 210개 값 형태(0·1·5·15·150·12345·19·23·38·39·40자리, 양·음, scale -2..3, 고정 (38,s)·부동). 변이 mut_fold32_drop_last.diff(numeric_repr_fold32 가 끝 바이트를 빼고 접음) → V5 FAIL.",
+ "origin": {
+  "pr": 8349,
+  "jira": "CBRD-27819",
+  "finding": "계약 suite(리뷰 2026-11-04 그룹 A) — 결함 없음. greptile 의 고정 NUMERIC 해시 지적(memory_hash.c:623)과 3cece75de 수정이 head 에 들어 있음을 V1 로 고정",
+  "comment": "https://github.com/CUBRID/cubrid/pull/8349",
+  "date": "2026-11-04",
+  "verified": [
+   "735464f0d: V1-V5 PASS",
+   "80b84317d: V1 V3 V5 PASS, V2 V4 FAIL(PR 이 고친 develop 동작)",
+   "cebb57567(V5 추가 전 판): V1 FAIL(82,696/109,869), V2-V4 PASS",
+   "735464f0d + mut_fold32_drop_last.diff: V5 FAIL"
+  ]
+ }
+}

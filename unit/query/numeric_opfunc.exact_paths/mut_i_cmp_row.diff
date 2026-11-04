@@ -1,0 +1,11 @@
+--- a/src/query/domain_rules.c
++++ b/src/query/domain_rules.c
+@@ -1197,7 +1197,7 @@
+   };
+   const DB_TYPE integer = source1 == DB_TYPE_NUMERIC ? source0 : source1;
+ 
+-  return &exact[source1 != DB_TYPE_NUMERIC][integer == DB_TYPE_SHORT ? 0 : integer == DB_TYPE_INTEGER ? 1 : 2];
++  return &exact[source1 == DB_TYPE_NUMERIC][integer == DB_TYPE_SHORT ? 0 : integer == DB_TYPE_INTEGER ? 1 : 2];
+ }
+ 
+ static int

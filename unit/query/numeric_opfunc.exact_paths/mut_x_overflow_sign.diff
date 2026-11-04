@@ -1,0 +1,11 @@
+--- a/src/query/numeric_opfunc.c
++++ b/src/query/numeric_opfunc.c
+@@ -4188,7 +4188,7 @@
+       if (scale1 < scale2)
+ 	{
+ 	  cmp_rez = __builtin_mul_overflow (c1, _gv_numeric_agg_expr_pow10_u128[scale2 - scale1], &c1)
+-	    ? 1 : (c1 > c2) - (c1 < c2);
++	    ? -1 : (c1 > c2) - (c1 < c2);
+ 	}
+       else
+ 	{

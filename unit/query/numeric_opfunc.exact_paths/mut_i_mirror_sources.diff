@@ -1,0 +1,11 @@
+--- a/src/query/domain_rules.c
++++ b/src/query/domain_rules.c
+@@ -2351,7 +2351,7 @@
+   if (compare->cmp != NULL)
+     {
+       /* cmpval is the first value's type once converted */
+-      mirrored->cmp = domain_compare_cmp ((DB_TYPE) mirrored->source[0], (DB_TYPE) mirrored->source[1],
++      mirrored->cmp = domain_compare_cmp ((DB_TYPE) mirrored->source[1], (DB_TYPE) mirrored->source[0],
+ 					  mirrored->conv[0] != NULL ? TP_DOMAIN_TYPE (mirrored->target[0])
+ 					  : (DB_TYPE) mirrored->source[0]);
+     }

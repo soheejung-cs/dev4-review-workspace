@@ -1,0 +1,14 @@
+--- a/src/query/numeric_opfunc.c
++++ b/src/query/numeric_opfunc.c
+@@ -5361,11 +5361,6 @@
+       out->is_negative = r.is_negative;
+     }
+ 
+-  if (out->coefficient == 0)
+-    {
+-      /* prevent -0; zero is always treated as positive */
+-      out->is_negative = false;
+-    }
+ 
+   return true;
+ }
