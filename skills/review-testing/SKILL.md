@@ -21,7 +21,7 @@ description: 리뷰 검증 규율 — 이 PR 에 무엇을 돌릴지(CTP sql/med
 |---|---|---|---|
 | **옵티마이저**(조인 순서·선택도·히스토그램·비용 상수·플랜 비교기) | JOB 113 스크리닝(min-of-3) → **플랜 덤프 diff** → 바뀐 질의만 median-of-3 확정(2026-10-21 사용자 결정: 5회 대신 3회) | 바뀐 질의가 집계/스캔 지배면 TPC-H 해당 질의 | 기준 플랜과의 조인 순서 일치 여부(지표) + MAD 기준 시간, 부호 쏠림 시 순서 반전 |
 | **실행기**(스캔·집계·정렬·해시조인·병렬·임시파일) | TPC-H SF10 22 (SSOT r1 계약: 8192M/par6/warmup1+median-of-3) | JOB 은 회귀 유무만(스크리닝) | median + MAD, 결과 정합(행 수·체크섬) |
-| **스토리지·트랜잭션**(락·MVCC·카탈로그·통계 수집·복구) | CTP sql + medium **코어 여부** + **동시성 재현 스크립트**(release·debug) | 관련 shell 디렉터리(`dev4-tc-workspace/tests/shell-tc-index` 로 고른다) | 코어 0 · 시나리오 PASS · debug assert 0 |
+| **스토리지·트랜잭션**(락·MVCC·카탈로그·통계 수집·복구) | CTP sql + medium **코어 여부** + **동시성 재현 스크립트**(release·debug) | 관련 shell 디렉터리(`dev4-tc-workspace/tests/shell-tc-index` 로 고른다) · 격리·커밋·복구·브로커/CAS 를 바꾸면 **Jepsen 행렬**(`tools/jepsen-cubrid/run_matrix.sh`, 약 1시간) · 버퍼 최소(16M)+동시 페이지 작업 축(자가진화 #079) | 코어 0 · 시나리오 PASS · debug assert 0 · Jepsen 기대대로(무효는 `a-ser-none`·`b-rc-rmw` 둘만) |
 | **파서·타입·함수·SQL 의미** | CTP sql (로컬은 코어만, 답안 정렬은 CI 몫) | medium | 코어 0 |
 | **카탈로그·DDL·권한** | CTP sql + shell 관련 디렉터리 | `_db_*` 뷰 답안 변경 사유 코멘트 | 코어 0, 답안 변경은 의도 기준 |
 | **리팩터링·헤더 정리** | 빌드(release+debug) + CTP sql 코어 | 빌드 시간 비교(PHYS) | 동작 무변경 |
@@ -77,5 +77,6 @@ description: 리뷰 검증 규율 — 이 PR 에 무엇을 돌릴지(CTP sql/med
 "무엇을 어디서 어떤 계약으로 돌렸고 결과가 무엇인가" 한 문단 — 시나리오 / 수정 전 / 수정 후 표. CTP 수치는 붙이지 않는다(`review-response` §3 문체 규약). 재현 스크립트는 `projects/<JIRA키>/repro/` 와 JIRA 첨부.
 
 ## 6. 연동 도구
+- Jepsen for CUBRID: `tools/jepsen-cubrid/`(README) — 한 노드의 격리·원자성·내구성 회귀망(append·wr·bank·set × RC/RR/SERIALIZABLE × kill·pause·CAS kill). **단일 노드에서는 결함을 잘 못 찾는다**(2026-11-04 20회 0건, 사용자 평가) — 엔진 결함은 표적 부하 시험이 찾았다. 의미(문서화된 동작)가 그대로인지 보는 용도로, 트랜잭션 경계를 바꾼 PR 에서만 제안한다.
 - 실패 케이스가 이 PR 과 관련 있는지: `~/dev/docs/dev4-tc-workspace/tools/tc_relevance.py --pr <n> --failed <케이스 경로…>` (`dev4-tc-workspace/tests/shell-tc-index/index.json` 기반, 높음/낮음 + 이유).
 - 규칙 근거: `rules/성능-리뷰-규칙.md` §6(PR 의 측정·플랜 증거를 판정하는 문장).

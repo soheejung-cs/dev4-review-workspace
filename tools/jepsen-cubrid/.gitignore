@@ -1,0 +1,6 @@
+store
+target/
+logs/
+summary.txt
+.lein-*
+.nrepl-port
