@@ -1,0 +1,20 @@
+--- a/src/query/string_opfunc.c
++++ b/src/query/string_opfunc.c
+@@ -1431,7 +1431,7 @@ db_string_append (DB_VALUE * string1, const DB_VALUE * string2, int *capacity, int max_size)
+       string1->data.ch.medium.length = -1;
+       string1->domain.char_info.length =
+ 	(precision1 == TP_FLOATING_PRECISION_VALUE || precision2 == TP_FLOATING_PRECISION_VALUE)
+-	? TP_FLOATING_PRECISION_VALUE : MIN (DB_MAX_BIT_LENGTH, precision1 + precision2);
++	? DB_MAX_VARBIT_PRECISION : MIN (DB_MAX_BIT_LENGTH, precision1 + precision2);
+       return NO_ERROR;
+     }
+   else
+@@ -1538,7 +1538,7 @@ db_string_append (DB_VALUE * string1, const DB_VALUE * string2, int *capacity, int max_size)
+       string1->data.ch.medium.length = result_length;
+       string1->domain.char_info.length =
+ 	(precision1 == TP_FLOATING_PRECISION_VALUE || precision2 == TP_FLOATING_PRECISION_VALUE)
+-	? TP_FLOATING_PRECISION_VALUE : MIN (DB_MAX_VARCHAR_PRECISION, precision1 + precision2);
++	? DB_MAX_VARCHAR_PRECISION : MIN (DB_MAX_VARCHAR_PRECISION, precision1 + precision2);
+       db_string_put_cs_and_collation (string1, codeset, common_coll);
+       return NO_ERROR;
+     }

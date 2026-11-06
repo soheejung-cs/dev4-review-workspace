@@ -1,0 +1,47 @@
+{
+ "name": "PR#8375 (CBRD-27855) qo_extract_or_restrictions () 인수 게이트 -- 위험 조각(서브쿼리·rand () 등) 판정을 인수에서 conjunct 단위로 내린 뒤에도 게이트 걷기는 qo_or_extract_check_ref_pre () 로 첫 위험 노드에서 멈춘다: 여러 spec 인수에서 spec 마다 제약 파생(G1), 서브쿼리가 열 뒤에 오면 o 제약 파생(G2), 결함 D1(G4-04) -- 같은 인수를 conjunct 순서만 바꾸면 o 제약이 생기기도 하고 안 생기기도 한다",
+ "requires": [
+  "qo_extract_or_restrictions"
+ ],
+ "file": "src/optimizer/rewriter/query_rewrite_term.c",
+ "mode": "cs",
+ "seams": [
+  "qo_rewrite_terms"
+ ],
+ "appendix": "",
+ "test": "test.cpp",
+ "extra": [
+  "src/parser/parse_tree.c",
+  "src/parser/parse_tree_cl.c",
+  "src/parser/parser_support.c",
+  "src/base/language_support.c",
+  "src/base/intl_support.c",
+  "src/base/chartype.c",
+  "src/object/object_domain.c",
+  "src/object/object_primitive.c",
+  "src/query/domain_rules.c",
+  "src/compat/db_macro.c",
+  "src/base/memory_alloc.c",
+  "src/base/system_parameter.c"
+ ],
+ "watch": [
+  "src/parser/parse_tree.h",
+  "src/parser/parser.h",
+  "src/parser/parse_tree_cl.c",
+  "src/parser/parser_support.c",
+  "src/parser/cnf.c"
+ ],
+ "fakes": "진짜: query_rewrite_term.c(TU: qo_extract_or_restrictions·qo_or_extract_check_ref_pre·_flatten·_build_for_spec·_restriction_column·_or_tree_to_list·_join_parts·_for_columns·_mark_derived·qo_or_derived_shape_is_cheap·_is_cheap_restriction·_is_constant_side), parse_tree.c + parse_tree_cl.c(parser_new_node·parser_walk_tree·parser_copy_tree·parser_append_node), parser_support.c(pt_and·pt_name_equal), language_support.c + intl_support.c + chartype.c, object_domain.c + object_primitive.c + domain_rules.c, db_macro.c, memory_alloc.c, system_parameter.c. seam: qo_rewrite_terms = 빈 함수 -- 파생 항의 항 단위 정규화(RANGE·비교 쌍)는 그 spec 의 항이 파생되느냐를 정하지 않는다. 가짜: pt_count_input_markers·pt_str_compare·pt_is_keyword·er_*·pt_parser_line_col·pt_free_dblink_remote_cols·로캘·환경 초기화 = parser/cnf.keep_or_whole 과 같음(여기서는 불리지 않음). 트리: pt_cnf () 가 통째로 둔 인수 PT_OR(PT_AND(..), PT_AND(..)) 와 앞의 조인 항 o.k = i.k(둘 다 CNF_DONE), 서브쿼리는 PT_SELECT 피연산자(s 는 부질의에만 나오는 표, 조인 대상 아님), spec 은 PT_SPEC(id 1 = o, 2 = i).",
+ "note": "G2 는 base 에서 FAIL(develop 은 위험 조각이 든 인수를 통째로 건너뛰었다 -- 이 PR 이 바꾼 동작), D1 은 base 에서 FAIL(두 순서 모두 0 -- 순서 의존 없음). develop 의 절 수 100 이하 질의는 분배(cnf.c)로 o 제약을 얻었으므로 회귀는 parser/cnf.keep_or_whole 과 함께 읽는다.",
+ "origin": {
+  "pr": 8375,
+  "jira": "CBRD-27855",
+  "finding": "G4-04 게이트 걷기가 첫 위험 노드에서 멈춤 -- [defect] D1 + [contract] G1·G2",
+  "comment": null,
+  "date": "2026-11-06",
+  "reviewed_head": "8831911fb",
+  "base": "99fa309ca",
+  "artifact": "harness-out/8375/8831911fb/unit/G4-04/",
+  "result": "2026-11-06: head 8831911fb 3/3 PASS(D1 o 제약: `o.c = 1 and i.x in (...)` 1, `i.x in (...) and o.c = 1` 0 = 결함 있음), base 99fa309ca 1/3(G1 PASS, G2 FAIL = develop 은 위험 인수 전체를 건너뜀, D1 FAIL = 두 순서 0·0), stub 호출 0. 변이 2종(harness-out/8375/8831911fb/unit/G4-04/mut/*.diff): m3_gate_fallback(걷기 뒤 is_unsafe 면 refers_spec·refers_other 를 참으로) -> D1 만 FAIL, m4_gate_walker(멈추지 않는 게이트 걷기, 서브쿼리 안은 PT_LIST_WALK) -> D1 만 FAIL, 둘 다 G1·G2 PASS."
+ }
+}

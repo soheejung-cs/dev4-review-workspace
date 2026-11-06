@@ -1,0 +1,10 @@
+--- a/src/query/string_opfunc.c
++++ b/src/query/string_opfunc.c
+@@ -1475,7 +1475,6 @@ db_string_append (DB_VALUE * string1, const DB_VALUE * string2, int *capacity, int max_size)
+ 	      pr_clear_value (string1);
+ 	      *string1 = temp;
+ 	      db_make_null (&temp);
+-	      *capacity = 0;
+ 	      precision1 = DB_VALUE_PRECISION (string1);
+ 	    }
+ 	  else

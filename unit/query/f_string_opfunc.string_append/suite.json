@@ -1,0 +1,31 @@
+{
+ "name": "PR#8398 (CBRD-27926) db_string_append () / db_string_append_zero_bytes () / qstr_reserve () -- GROUP_CONCAT's in-place append leaves the accumulator develop's db_string_concatenate + clone left (every built-in collation, VARBIT 0..17 bits, oracle_style_empty_string, two collations, string_max_size_bytes, truncation inside a multibyte character), the recorded capacity never exceeds the accumulator's block, O(log N) allocations; D1 develop's bit-string truncation in bits",
+ "file": "src/object/object_domain.c",
+ "mode": "server",
+ "seams": [],
+ "appendix": "",
+ "test": "test.cpp",
+ "requires": [
+  "db_string_append",
+  "db_string_append_zero_bytes"
+ ],
+ "watch": [
+  "src/query/string_opfunc.c",
+  "src/query/string_opfunc.h",
+  "src/query/query_opfunc.c",
+  "src/query/query_aggregate.cpp",
+  "src/object/object_primitive.c",
+  "src/compat/db_macro.c",
+  "src/base/intl_support.c",
+  "src/base/language_support.c"
+ ],
+ "fakes": "As unit/query/domain_resolve.convert_numeric (the test TU #includes system_parameter.c, language_support.c, intl_support.c, chartype.c, mprec.c, dtoa.c, object_primitive.c, object_domain_convert.cpp when present, numeric_opfunc.c, db_date.c, db_macro.c, string_opfunc.c; target TU object_domain.c). Fakes: er_set/er_errid/er_clear (last id), db_private_alloc/free/realloc_release = malloc/free/realloc with a live-block size map (the capacity contract compares the recorded capacity with the block), area_create/alloc/free, envvar_get=NULL, envvar_trim_char body, cubthread::system_core_count=8, cubregex::get_engine_name, boot_Server_status=BOOT_SERVER_DOWN (prm_get_value reads the global value). The develop flow is the head TU's unchanged db_string_concatenate () + pr_clone_value () as qdata_add_chars_to_dbval () and qdata_group_concat_value () used them before the PR (clone only a non-NULL result); qdata_concatenate_dbval ()'s truncation at group_concat_max_len is copied into Z1 (query_opfunc.c not linked).",
+ "note": "Ran 2026-11-06 on ea06eca48 (PR head): E1-E5, R1, R2, Z1 PASS (E1 24,000 appends over 10 built-in collations, E3 8,000 with oracle_style_empty_string, E4 100 collation pairs, E2 12,000 VARBIT appends of 0..17 bits, Z1 ~170 truncations inside a multibyte character); R1 16,384 appends of 32 bytes: develop flow 32,768 allocations (32,514 of 4 KiB or more), head 15 (9). The equality treats TP_FLOATING_PRECISION_VALUE and DB_MAX_VARCHAR/VARBIT_PRECISION alike -- P1/P2 [defect] record where they differ (head writes -1 where develop's db_value_domain_init wrote the maximum; after a codeset coercion of the accumulator head's precision becomes its length + the value's). C1 [defect]: a BIT start value stays BIT (db_string_concatenate makes BIT of two BITs). Fix fix_precision_normalize.diff (write DB_MAX_VARCHAR_PRECISION / DB_MAX_VARBIT_PRECISION for the floating case): contracts PASS, P1 and P2 FAIL (0 raw precision differences). Mutations: mut_capacity_overclaim.diff (capacity + 1) -> E1 E3 E4 R1 R2 FAIL; mut_coerce_keeps_capacity.diff (no *capacity = 0 after the accumulator is replaced by its coerced copy) -> E4 FAIL (capacity past the block) and the binary aborts in E2 (heap corrupted by the overflow). base 0661d2c12 has no db_string_append (requires). D1 [defect] (develop as well -- db_string_limit_size_string () is unchanged by the PR): a bit string truncated at group_concat_max_len keeps new_size BITS, not bytes (100-byte VARBIT to 24 -> 24 bits; 11 x 100-byte values at max 1024 -> 1003 bytes).",
+ "origin": {
+  "pr": 8398,
+  "jira": "CBRD-27926",
+  "finding": "g34 judge: contract for the 'result unchanged' claim (pr-body 29, 37) + precision deviation (P1/P2) + BIT start comment (C1)",
+  "reviewed_head": "ea06eca48",
+  "date": "2026-11-06"
+ }
+}

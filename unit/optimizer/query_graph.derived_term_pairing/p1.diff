@@ -1,0 +1,20 @@
+--- a/src/optimizer/query_graph.c	2026-11-06 15:05:26.548600873 +0900
++++ b/src/optimizer/query_graph.c	2026-11-06 15:05:26.613600870 +0900
+@@ -9510,12 +9510,12 @@
+ 	{
+ 	  continue;		/* an empty derived range leaves nothing to divide by */
+ 	}
+-      if (QO_TERM_IS_FLAGED (derived, QO_TERM_OR_DERIVED) && QO_TERM_LOCATION (derived) > 0
+-	  && QO_TERM_CLASS (derived) != QO_TC_SARG)
++      if (QO_TERM_IS_FLAGED (derived, QO_TERM_OR_DERIVED) && QO_TERM_CLASS (derived) != QO_TC_SARG)
+ 	{
+-	  /* not counted at a node: an outer join's ON condition derives a restriction on the
+-	   * preserved side, evaluated during the join without rejecting rows, so the origin has
+-	   * no share of it to pay back */
++	  /* not counted anywhere: a sarg is counted at its node (qo_node_add_sarg ()), and the join
++	   * product skips every OR-derived term, so a restriction the outer join classification made
++	   * during-join (ON, preserved side) or after-join (WHERE, null-supplying side) charges
++	   * nothing the origin should pay back */
+ 	  continue;
+ 	}
+ 

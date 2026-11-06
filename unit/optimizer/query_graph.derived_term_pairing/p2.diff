@@ -1,0 +1,15 @@
+--- a/src/optimizer/query_graph.c	2026-11-06 15:05:26.559600872 +0900
++++ b/src/optimizer/query_graph.c	2026-11-06 15:05:26.623600870 +0900
+@@ -9402,6 +9402,12 @@
+ 	  nested = (QO_TERM_IS_FLAGED (candidate, QO_TERM_OR_DERIVED) && pt->info.expr.op == PT_OR
+ 		    && bitset_is_equivalent (&(QO_TERM_NODES (candidate)), &(QO_TERM_NODES (derived)))
+ 		    && !bitset_is_equivalent (&(QO_TERM_SEGS (candidate)), &(QO_TERM_SEGS (derived))));
++	  if (QO_TERM_IS_FLAGED (derived, QO_TERM_OR_DERIVED_EXPENSIVE)
++	      ? !bitset_is_equivalent (&(QO_TERM_NODES (candidate)), &(QO_TERM_NODES (derived)))
++	      : (nested || bitset_cardinality (&(QO_TERM_NODES (candidate))) < 2))
++	    {
++	      continue;		/* a key range: its own spec; a spec restriction: a factor over several */
++	    }
+ 	  if ((QO_TERM_IS_FLAGED (candidate, QO_TERM_OR_DERIVED) && !nested)
+ 	      || (bitset_cardinality (&(QO_TERM_NODES (candidate))) < 2 && pt->info.expr.op != PT_OR)
+ 	      || !bitset_subset (&(QO_TERM_NODES (candidate)), &(QO_TERM_NODES (derived)))

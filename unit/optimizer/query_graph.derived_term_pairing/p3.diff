@@ -1,0 +1,25 @@
+--- a/src/optimizer/query_graph.c	2026-11-06 15:05:26.569600872 +0900
++++ b/src/optimizer/query_graph.c	2026-11-06 15:05:26.619600870 +0900
+@@ -9458,7 +9458,7 @@
+ static void
+ qo_derived_term_compensate (QO_ENV * env)
+ {
+-  int i, j, n = env->nterms;
++  int i, j, k, n = env->nterms;
+   int *pair;			/* origin of each derived term, -1 when it has none */
+   double *implied;		/* per origin: product of the terms it implies, -1 when none */
+   double *before;		/* per origin: its selectivity before any division */
+@@ -9544,9 +9544,12 @@
+    * division would compare the next derived term against a selectivity already divided down,
+    * and correct a deficit that is not there -- the containment bound holds between each derived
+    * term and the origin as it was, not as it is left mid-way. */
++  for (k = 0; k < 2; k++)
+   for (j = 0; j < n; j++)
+     {
+-      if (implied[j] < 0.0 || before[j] <= 0.0)
++      /* an origin that is itself derived goes first: its own origin's correction below then
++       * scales what this division leaves instead of being overwritten by it */
++      if ((k == 0) != (pair[j] != -1) || implied[j] < 0.0 || before[j] <= 0.0)
+ 	{
+ 	  continue;
+ 	}

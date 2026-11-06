@@ -1,0 +1,11 @@
+--- a/src/query/string_opfunc.c
++++ b/src/query/string_opfunc.c
+@@ -1342,7 +1342,7 @@ qstr_reserve (DB_VALUE * value, int *capacity, int needed, size_t limit)
+   /* oracle_style_empty_string makes an empty string NULL; the accumulator is not */
+   value->domain.general_info.is_null = 0;
+   value->need_clear = true;
+-  *capacity = (int) new_capacity;
++  *capacity = (int) new_capacity + 1;
+ 
+   return NO_ERROR;
+ }

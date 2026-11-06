@@ -1,0 +1,47 @@
+{
+ "name": "PR#8375 (CBRD-27855) pt_cnf () -- OR-of-AND 를 통째 PT_OR 인수로 두는 판단(두 열 이상, cnf.c:895-897)·안쪽 or_next 사슬의 PT_OR 변환(pt_cnf_or_list_to_tree, paren·논리형·location)·한 열 인수 분배·공통 conjunct 끌어내기·AND 없는 OR 사슬·CNF 목록 안의 AND/OR 노드가 뒤 목록을 지킴(rest)·ON location 유지. 결함 D1(G4-01 AND 분기 뒤 단일 분기 450개 -> 왼쪽 깊은 PT_OR -> eval_pred 재귀 한도 400 초과)·D2(G4-02 OR-of-AND 안의 (+) 조건이 최상위 표시를 잃음)",
+ "requires": [
+  "pt_cnf"
+ ],
+ "file": "src/parser/cnf.c",
+ "mode": "cs",
+ "seams": [],
+ "appendix": "",
+ "test": "test.cpp",
+ "extra": [
+  "src/parser/parse_tree.c",
+  "src/parser/parse_tree_cl.c",
+  "src/parser/parser_support.c",
+  "src/base/language_support.c",
+  "src/base/intl_support.c",
+  "src/base/chartype.c",
+  "src/object/object_domain.c",
+  "src/object/object_primitive.c",
+  "src/query/domain_rules.c",
+  "src/compat/db_macro.c",
+  "src/base/memory_alloc.c",
+  "src/base/system_parameter.c"
+ ],
+ "watch": [
+  "src/parser/parse_tree.h",
+  "src/parser/parser.h",
+  "src/parser/parse_tree_cl.c",
+  "src/parser/parser_support.c",
+  "src/parser/xasl_generation.c",
+  "src/query/query_evaluator.c",
+  "src/parser/name_resolution.c"
+ ],
+ "fakes": "진짜: cnf.c(TU: pt_cnf·pt_and_or_form·count_and_or·pt_transform_cnf_pre/_post·pt_calculate_similarity·pt_cnf_column_pre·pt_cnf_over_one_column·pt_cnf_or_list_to_tree·pt_tag_start_of_cnf_post), parse_tree.c + parse_tree_cl.c(parser_create_parser·parser_new_node·parser_walk_tree·parser_copy_tree_list·parser_free_tree·parser_append_node·parser_print_tree), parser_support.c(pt_and·pt_name_equal·pt_datatypes_match), language_support.c + intl_support.c + chartype.c(intl_identifier_casecmp/_cmp, en_US.utf8), object_domain.c + object_primitive.c + domain_rules.c, db_macro.c, memory_alloc.c, system_parameter.c. 가짜: pt_count_input_markers = semantic_check.c:16138 본문 그대로, pt_str_compare = name_resolution.c:8441 본문 그대로, pt_is_keyword = keyword.c:1064 에서 예약어가 아닌 이름(a·b·c·x·y·z·id)의 결과 false, er_* = 오류 코드 하나(호출 안 됨), pt_parser_line_col = 위치 0(lexer 없음), pt_free_dblink_remote_cols = dblink 없는 parser 의 빈 루프, init_builtin_calendar_names·db_date_locale_init·envvar_get/_trim_char·cubregex::get_engine_name = 로캘·환경 초기화. 트리: 진짜 parser_new_node 로 문법이 채우는 필드(op·arg)와 의미 검사가 주는 논리형·이름의 spec_id 를 같게. 술어 모형 pred_model = pt_to_pred_expr_with_arg ()(xasl_generation.c:2212-2290: CNF 목록은 오른쪽 선형 B_AND, or_next 사슬은 오른쪽 선형 B_OR)와 _local_with_arg ()(1683-1698: PT_AND/PT_OR 는 두 피연산자를 목록으로 바꿔 B_AND/B_OR), forced_depth = eval_pred ()(query_evaluator.c:2066-2140)가 언제나 들어가는 첫 lhs 재귀의 깊이(진입마다 +1, 들어가기 전 깊이가 400 을 넘으면 ER_MAX_RECURSION_SQL_DEPTH).",
+ "note": "공통 conjunct 탐색은 모양이 같은 두 원소만 인쇄해 비교한다 -- 케이스는 분기마다 연산자를 달리해 인쇄가 필요 없게 짰고, K3·K5·K7 만 인쇄 경로(parser_print_tree 의 INTEGER sprintf)를 지난다. K1·K5 는 base 에서 FAIL(이 PR 이 의도한 변경), K6 은 base 에서 FAIL(f06668447 이 고친 동작 -- develop 은 분배 경로에서 node 를 next 째 해제), D1·D2 는 head PASS(결함 있음)·base FAIL.",
+ "origin": {
+  "pr": 8375,
+  "jira": "CBRD-27855",
+  "finding": "G4-01 (D1)·G4-02 (D2) 재현 + pt_cnf 계약 K1-K8",
+  "comment": null,
+  "date": "2026-11-06",
+  "reviewed_head": "8831911fb",
+  "base": "99fa309ca",
+  "artifact": "harness-out/8375/8831911fb/unit/G4/",
+  "result": "2026-11-06: head 8831911fb 10/10 PASS(D1 forced eval_pred 깊이 452 > 401, D2 숨은 (+) 항 1 = 결함 있음), base 99fa309ca 5/10(K2·K3·K4·K7·K8 PASS = 바뀌지 않은 동작, K1·K5 FAIL = 이 PR 이 의도한 변경, K6 FAIL = f06668447 이 고친 rest 유실, D1 깊이 3·D2 숨은 항 0 = develop 에 결함 없음), stub 호출 0. 변이 2종(harness-out/8375/8831911fb/unit/G4/mut/*.diff): m1_outer_mark(G4-02 제안 -- (+) 조건이 든 OR 은 분배) -> D2 만 FAIL, m2_right_linear(G4-01 의 cnf.c 쪽 제안 -- 단일 분기를 통째 인수의 오른쪽 끝에 붙임) -> D1 만 FAIL, 두 변이 모두 계약 K1-K8 PASS."
+ }
+}

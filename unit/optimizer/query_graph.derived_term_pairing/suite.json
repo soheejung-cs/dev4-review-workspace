@@ -1,0 +1,28 @@
+{
+ "name": "qo_derived_term_compensate / qo_derived_term_origin — OR 파생 절과 원본의 짝짓기·몫 갚기(CBRD-27306, PR#8375 이 넓힌 후보·옮긴 자리): 노드에서 세지 않는 파생 절, 인자 사이 오짝, nested 원본의 보정 덮어쓰기",
+ "requires": [
+  "qo_derived_term_compensate",
+  "qo_derived_term_origin",
+  "QO_TERM_OR_DERIVED"
+ ],
+ "file": "src/optimizer/query_graph.c",
+ "mode": "cs",
+ "seams": [],
+ "appendix": "hooks.cpp",
+ "test": "test.cpp",
+ "watch": [
+  "src/optimizer/query_graph.h",
+  "src/optimizer/query_bitset.c",
+  "src/optimizer/query_bitset.h",
+  "src/optimizer/rewriter/query_rewrite_term.c",
+  "src/optimizer/query_planner.c"
+ ],
+ "fakes": "없음 — 실제 TU static qo_derived_term_compensate ()/qo_derived_term_origin ()(hooks.cpp 로 호출), bitset(query_bitset.c 를 test.cpp 에 #include). 다른 TU 함수는 이 경로에서 불리지 않는다(malloc/free 만). QO_TERM 은 qo_analyze_term ()·qo_classify_outerjoin_terms () 가 남기는 필드(class·location·flag·selectivity·nodes·segments·pt_expr 의 op/or_next)만 채운다.",
+ "note": "8831911fb: C1~C4 PASS, D1·D2·D2b·D3·D4 PASS(결함 있음). 99fa309ca: C3·D1 PASS, 나머지 FAIL(develop 에는 nested·한 테이블 원본·ON 파생이 없다 — C1·C2·C4 는 이 PR 의 새 동작). 변이: p1(location>0 조건 삭제)→D1 FAIL, p2(K 표시로 EXPENSIVE 를 대신 써 K 만 같은 노드 원본·R 은 다중 테이블 원본만)→D2·D2b·D3 FAIL, p3(pass 2 를 파생-원본 먼저 두 단계로)→D4 FAIL; 세 변이 모두 C1~C4 PASS.",
+ "origin": {
+  "pr": 8375,
+  "finding": "g12-01 (after-join 파생 절의 몫 갚기), g12-02 (원본 오짝), g12-03 (nested 원본 보정 덮어쓰기)",
+  "comment": null,
+  "date": "2026-11-06"
+ }
+}
