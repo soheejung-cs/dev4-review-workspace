@@ -1,6 +1,6 @@
 --- a/src/optimizer/query_planner.c
 +++ b/src/optimizer/query_planner.c
-@@ -7931,7 +7931,6 @@
+@@ -7949,7 +7949,6 @@
  
    /* 2-5. covering scans, scans of one row, index terms and index pages */
    QO_TIE_PREFER_LESS (b_keys.covering, a_keys.covering);

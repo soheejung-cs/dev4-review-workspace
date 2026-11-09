@@ -1,0 +1,11 @@
+--- a/src/optimizer/query_planner.c
++++ b/src/optimizer/query_planner.c
+@@ -7837,7 +7837,7 @@
+ 		     && bitset_intersects (&plan->plan_un.scan.terms, &index_entryp->seg_equal_terms[j]));
+ 	}
+ 
+-      if (covered && n_equal > index_entryp->nsegs)
++      if (covered)
+ 	{
+ 	  return true;
+ 	}
