@@ -747,6 +747,64 @@ TEST_CASE ("C22 two index scans of one cost: a unique index whose columns all ha
   CHECK (unitseam_plan_cmp (by_f, by_u) == PLAN_COMP_GT);
 }
 
+TEST_CASE ("C23 two index scans of one cost: an index whose equalities cover the columns of a primary key reads one "
+	   "row too and wins by its more range terms (CBRD-25060: pk (a) vs a non-covering (a, e))", "[contract]")
+{
+  if (!unitseam_has_cost_order ())
+    {
+      WARN ("base: the rules weigh the containment of the range terms first -- not run");
+      return;
+    }
+
+  scene s (false);
+  QO_NODE *t = s.node ("tbl", 0);
+  QO_INFO *i = s.info (1.0, 64);
+  QO_NODE_INDEX_ENTRY *pk = s.index ("pk_tbl_col_a", 1), *ae = s.index ("idx_a_e", 1);
+  QO_NODE_INDEX *ni = (QO_NODE_INDEX *) s.alloc (sizeof (QO_NODE_INDEX) + sizeof (QO_NODE_INDEX_ENTRY));
+  QO_PLAN *by_pk, *by_ae;
+
+  /* col_a = 1 is term 0 on segment 0, col_e = 1 term 1 on segment 1; col_b = 1 is a sarg of both scans */
+  pk->head->constraints->type = SM_CONSTRAINT_PRIMARY_KEY;
+  pk->head->nsegs = 1;
+  pk->head->seg_idxs = (int *) s.alloc (sizeof (int));
+  pk->head->seg_idxs[0] = 0;
+  pk->head->seg_equal_terms = (BITSET *) s.alloc (sizeof (BITSET));
+  bitset_init (&pk->head->seg_equal_terms[0], s.env);
+  bitset_add (&pk->head->seg_equal_terms[0], 0);
+  pk->head->all_unique_index_columns_are_equi_terms = true;
+
+  ae->head->constraints->type = SM_CONSTRAINT_INDEX;
+  ae->head->col_num = 2;
+  ae->head->nsegs = 2;
+  ae->head->cover_segments = false;
+  ae->head->seg_idxs = (int *) s.alloc (2 * sizeof (int));
+  ae->head->seg_idxs[0] = 0;
+  ae->head->seg_idxs[1] = 1;
+  ae->head->seg_equal_terms = (BITSET *) s.alloc (2 * sizeof (BITSET));
+  bitset_init (&ae->head->seg_equal_terms[0], s.env);
+  bitset_init (&ae->head->seg_equal_terms[1], s.env);
+  bitset_add (&ae->head->seg_equal_terms[0], 0);
+  bitset_add (&ae->head->seg_equal_terms[1], 1);
+
+  ni->n = 2;
+  ni->index[0].head = pk->head;
+  ni->index[1].head = ae->head;
+  t->indexes = ni;
+
+  by_pk = s.iscan (t, i, pk, 1.0, 1, 0, false);
+  by_ae = s.iscan (t, i, ae, 1.0, 2, 0, false);
+
+  CHECK (unitseam_plan_cmp (by_ae, by_pk) == PLAN_COMP_LT);
+  CHECK (unitseam_plan_cmp (by_pk, by_ae) == PLAN_COMP_GT);
+
+  /* the key range of (a, e) without col_a = 1 covers no unique key: the primary key wins again (as C22) */
+  QO_PLAN *by_e = s.iscan (t, i, ae, 1.0, 0, 0, false);
+  bitset_add (&by_e->plan_un.scan.terms, 1);
+  bitset_add (&by_e->plan_un.scan.terms, 2);
+  CHECK (unitseam_plan_cmp (by_pk, by_e) == PLAN_COMP_LT);
+  CHECK (unitseam_plan_cmp (by_e, by_pk) == PLAN_COMP_GT);
+}
+
 TEST_CASE ("D1 develop: inside the band the iscan rule overrides the cost (iscan 99 beats sscan 56)", "[defect]")
 {
   scene s (false);

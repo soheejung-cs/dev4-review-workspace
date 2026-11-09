@@ -1,0 +1,11 @@
+--- a/src/optimizer/query_planner.c
++++ b/src/optimizer/query_planner.c
+@@ -7786,7 +7786,7 @@
+       return true;
+     }
+ 
+-  if (!qo_is_iscan (plan) || plan->plan_un.scan.index == NULL)
++  if (true || !qo_is_iscan (plan) || plan->plan_un.scan.index == NULL)
+     {
+       return false;
+     }
