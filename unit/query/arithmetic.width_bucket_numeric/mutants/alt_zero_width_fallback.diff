@@ -1,0 +1,62 @@
+--- a/src/query/arithmetic.c
++++ b/src/query/arithmetic.c
+@@ -4597,10 +4597,26 @@
+ 		  return er_status;
+ 		}
+ 
+-	      er_status = float_numeric_db_value_div (&n1, &n3, &n4);
+-	      if (er_status != NO_ERROR)
++	      if (numeric_db_value_is_zero (&n3))
+ 		{
+-		  return er_status;
++		  er_status = float_numeric_db_value_mul (&n1, value4, &n3);
++		  if (er_status != NO_ERROR)
++		    {
++		      return er_status;
++		    }
++		  er_status = float_numeric_db_value_div (&n3, &n2, &n4);
++		  if (er_status != NO_ERROR)
++		    {
++		      return er_status;
++		    }
++		}
++	      else
++		{
++		  er_status = float_numeric_db_value_div (&n1, &n3, &n4);
++		  if (er_status != NO_ERROR)
++		    {
++		      return er_status;
++		    }
+ 		}
+ 
+ 	      numeric_coerce_num_to_double (&n4, DB_VALUE_NUMERIC_HEADER_SCALE (&n4), &res);
+@@ -4663,10 +4679,26 @@
+ 		  return er_status;
+ 		}
+ 
+-	      er_status = float_numeric_db_value_div (&n1, &n3, &n4);
+-	      if (er_status != NO_ERROR)
++	      if (numeric_db_value_is_zero (&n3))
+ 		{
+-		  return er_status;
++		  er_status = float_numeric_db_value_mul (&n1, value4, &n3);
++		  if (er_status != NO_ERROR)
++		    {
++		      return er_status;
++		    }
++		  er_status = float_numeric_db_value_div (&n3, &n2, &n4);
++		  if (er_status != NO_ERROR)
++		    {
++		      return er_status;
++		    }
++		}
++	      else
++		{
++		  er_status = float_numeric_db_value_div (&n1, &n3, &n4);
++		  if (er_status != NO_ERROR)
++		    {
++		      return er_status;
++		    }
+ 		}
+ 
+ 	      numeric_coerce_num_to_double (&n4, DB_VALUE_NUMERIC_HEADER_SCALE (&n4), &res);

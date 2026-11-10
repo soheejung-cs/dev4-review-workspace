@@ -1,0 +1,52 @@
+{
+ "name": "CBRD-28024 구현(.51) — WIDTH_BUCKET 의 BIGINT·NUMERIC 경로(db_width_bucket_calculate_numeric): C develop 이 맞히던 값 유지(경계·범위 밖·내림차순·무작위 4만 건·NUMERIC 최댓값 근처·비율 언더플로), F 이 PR 이 고치는 것(F1 버킷 너비가 scale 252 아래로 0 → SIGFPE, F2 너비가 자릿수를 잃어 틀린 버킷, F3 내림차순 범위 아래가 개수+1 이 아니던 것 — 2014 부터, 11.4 같음)",
+ "file": "src/query/arithmetic.c",
+ "mode": "server",
+ "seams": [],
+ "test": "test.cpp",
+ "extra": [
+  "src/query/numeric_opfunc.c",
+  "src/compat/db_macro.c",
+  "src/object/object_primitive.c",
+  "src/object/object_domain.c",
+  "src/object/object_domain_convert.cpp"
+ ],
+ "requires": [
+  "db_width_bucket",
+  "float_numeric_db_value_div",
+  "float_numeric_db_value_mul (&n3, value4, &n4)",
+  "numeric_db_value_compare (value1, value3, &cmp_result)"
+ ],
+ "watch": [
+  "src/query/arithmetic.h",
+  "src/query/numeric_opfunc.c",
+  "src/query/numeric_opfunc.h",
+  "src/object/object_domain.c",
+  "src/object/object_domain_convert.cpp"
+ ],
+ "fakes": "arithmetic.place_edges 와 같다 — er_set/er_errid/er_clear(마지막 id 하나), prm_Def(RETURN_NULL_ON_FUNCTION_ERRORS 끔, ORACLE_COMPAT_NUMBER_BEHAVIOR 끔, 그 밖은 0), area_alloc/area_free(tp_init 전 tp_domain_new/tp_domain_free 의 TP_DOMAIN 을 calloc/free, 살아 있는 수). NUMERIC 피연산자는 CAST (<double> AS NUMERIC) 처럼 numeric_db_value_coerce_to_num () 으로 기본 정밀도(부동 NUMERIC)에 만든다. F1·F2 는 fork 한 자식에서 부르고(SIGFPE 를 기본 처리로) 부모가 신호를 읽는다.",
+ "note": "F 는 develop 에서 FAIL 이 정상(이 PR 이 고치는 동작) — requires 의 코드 줄로 이 수정 전 리비전엔 적용하지 않는다. 대안 측정(develop e30370dc0, plan 대안표의 근거): mutants/fix_ratio_first.diff 가 채택안의 첫 커밋, alt_* 셋은 발번 본문의 스케치·안전망 대안(곱 먼저 → C3 넘침 오류, 너비 0 이면 오류 → C1·F1·F2, 너비 0 일 때만 곱 먼저 → F2). 그 측정 땐 F3 이 [defect] D(PASS = 14·55)였다.",
+ "origin": {
+  "jira": "CBRD-28024",
+  "finding": "harness-implement S2 — 대안 측정(자가진화 규칙 #007)",
+  "date": "2026-11-10",
+  "verified": [
+   {
+    "rev": "e30370dc0",
+    "what": "develop — C1·C3·C4 PASS, C2 PASS(내림차순 범위 아래 제외), F1 signal 8·F2 3/201·F3 14/55 FAIL",
+    "date": "2026-11-11"
+   },
+   {
+    "rev": "e712e407e",
+    "what": "CBRD-28024 첫 커밋(비율 먼저) — F3 만 FAIL(14/55, 둘째 커밋 몫)",
+    "date": "2026-11-11"
+   },
+   {
+    "rev": "b01cc2876",
+    "what": "CBRD-28024 두 커밋 — 7 케이스 모두 PASS",
+    "date": "2026-11-11"
+   }
+  ]
+ },
+ "requires_note": "셋째·넷째는 CBRD-28024 PR 의 두 커밋에만 있는 코드 줄(비율 먼저의 곱, 내림차순 범위 아래 비교)이다. unit_regress 가 git grep -w 로 찾으므로 이 수정이 없는 리비전은 F 를 '낡은 suite' FAIL 로 읽지 않고 '(적용 안 됨)' 으로 본다. 리뷰에서 그 줄이 바뀌면 같이 고친다."
+}

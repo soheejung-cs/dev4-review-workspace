@@ -1,0 +1,26 @@
+--- a/src/query/arithmetic.c
++++ b/src/query/arithmetic.c
+@@ -4597,6 +4597,11 @@
+ 		  return er_status;
+ 		}
+ 
++	      if (numeric_db_value_is_zero (&n3))
++		{
++		  return ER_QPROC_ZERO_DIVIDE;
++		}
++
+ 	      er_status = float_numeric_db_value_div (&n1, &n3, &n4);
+ 	      if (er_status != NO_ERROR)
+ 		{
+@@ -4663,6 +4668,11 @@
+ 		  return er_status;
+ 		}
+ 
++	      if (numeric_db_value_is_zero (&n3))
++		{
++		  return ER_QPROC_ZERO_DIVIDE;
++		}
++
+ 	      er_status = float_numeric_db_value_div (&n1, &n3, &n4);
+ 	      if (er_status != NO_ERROR)
+ 		{
