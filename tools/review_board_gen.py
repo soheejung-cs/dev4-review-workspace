@@ -18,7 +18,10 @@ UI 명세 — 이 docstring 이 정본이다(2026-10-28 스킬에서 옮김, H-4
     `미착수`(요청됐고 리뷰 이력 0) / `승인 전`(리뷰했으나 APPROVED 아님). GitHub 은 리뷰를 제출하는 순간 그 사람을 reviewRequests 에서
     빼므로, 요청 목록만 보면 코멘트 한 번 남기고 승인하지 않은 리뷰어가 사라진다(2026-09-21). 재요청되면 다시 `미착수`.
     그 아래 reviewDecision.
-  - CI 는 싣지 않는다(머리말 "CI 는 보지 않음(사용자 지시)") — ci_summary() 는 남아 있지만 render 가 쓰지 않는다.
+  - TC 신호등(사용자 지시 2026-11-10 "agent-to-do 보드에 있는 테스트 결과 보는 걸 review-to-do 에도" — 2026-09 의 "CI 는 보지 않음" 을
+    대체): 엔진 PR 행의 `TC 테스트` 열에 헤드 커밋의 `gha-ci: test_sql|medium|shell` 을 초록(통과)·노랑(도는 중)·빨강(실패)·회색(런 없음)으로.
+    헤드에 결과가 없으면 앞 커밋 5개의 가장 최근 결과, 런이 큐에 있으면 노랑. 링크는 도는 런·앞 커밋 결과면 그 런, 아니면 PR checks.
+    그 밖의 체크(code-style·cppcheck·Check TC PRs …)는 싣지 않는다 — ci_summary() 는 남아 있지만 render 가 쓰지 않는다.
   - 연동된 TC PR: JIRA 키(또는 제목의 `cubrid#<n>`)가 같은 cubrid-testcases / -private-ex PR 을 엔진 PR 하위에 — 미해결 수·미착수 리뷰어.
   - 갱신·생성일.
 
@@ -102,8 +105,19 @@ def details(repo, num):
       reviewRequests(first:30){nodes{requestedReviewer{... on User{login} ... on Team{name}}}}
       latestReviews(first:30){nodes{author{login} state submittedAt}}
       reviewDecision mergeable
+      commits(last:6){nodes{commit{oid status{contexts{context state}}}}}
     }}}''' % (owner, name, num)
     d = json.loads(sh('gh', 'api', 'graphql', '-f', 'query=' + q))['data']['repository']['pullRequest']
+    # TC 신호등(사용자 지시 2026-11-10, agent-todo 보드의 것을 여기에도): 헤드 커밋의 `gha-ci: test_sql|medium|shell` 상태.
+    # 헤드에 없으면(런을 건 뒤 push) 앞 커밋 5개 중 가장 최근 결과를 쓴다 — 같은 쿼리로 받아 PR 마다 호출을 늘리지 않는다
+    ci, ci_stale = {}, None
+    commits = [n['commit'] for n in ((d.get('commits') or {}).get('nodes') or [])]
+    for k, c in enumerate(reversed(commits)):
+        got = {m.group(1): (x.get('state') or '').upper()
+               for x in ((c.get('status') or {}).get('contexts') or []) for m in [GHA_CTX.match(x.get('context') or '')] if m}
+        if got:
+            ci, ci_stale = got, (c['oid'] if k else None)
+            break
     threads = d['reviewThreads']['nodes']
     unresolved = [t for t in threads if not t['isResolved']]
     by_author = {}
@@ -126,7 +140,46 @@ def details(repo, num):
     return {'threads_total': d['reviewThreads']['totalCount'], 'unresolved': len(unresolved),
             'unresolved_by': by_author, 'requested': req, 'latest_reviews': latest,
             'approvers': approvers, 'pending_approval': pending,
-            'decision': d.get('reviewDecision') or '-', 'mergeable': d.get('mergeable') or '-'}
+            'decision': d.get('reviewDecision') or '-', 'mergeable': d.get('mergeable') or '-',
+            'ci': ci, 'ci_stale': ci_stale}
+
+GHA_CTX = re.compile(r'gha-ci: test_(sql|medium|shell)$')
+
+# gha-ci 는 `/run` 코멘트(issue_comment)로 develop 위에서 돌아 PR 브랜치로는 런을 못 찾는다 — 런 제목 "PR #N · …" 으로
+# 묶는다. 코멘트마다 생기는 skipped 런은 뺀다. 보드 생성마다 한 번만 읽는다(agent-board-gen.py 와 같은 규칙).
+_GHA_RUNS = None
+def gha_run(num):
+    global _GHA_RUNS
+    if _GHA_RUNS is None:
+        _GHA_RUNS = {}
+        try:
+            runs = json.loads(sh('gh', 'run', 'list', '--repo', 'CUBRID/cubrid', '--workflow', 'gha-ci.yml', '--limit', '300',
+                                 '--json', 'databaseId,status,conclusion,displayTitle'))
+        except Exception:
+            runs = []
+        for r in runs:   # 최신순
+            m = re.match(r'PR #(\d+) ', r.get('displayTitle') or '')
+            if m and r.get('conclusion') != 'skipped':
+                _GHA_RUNS.setdefault(int(m.group(1)), r)
+    return _GHA_RUNS.get(num)
+
+# 통과 초록, 도는 중 노랑, 실패 빨강, 런 없음 회색 — 앞 커밋 결과를 써도 '이전 head' 표시는 달지 않는다(agent-todo 보드와 같게)
+CI_LIGHT = {'SUCCESS': ('ok', '통과'), 'PENDING': ('run', '도는 중'), 'EXPECTED': ('run', '도는 중'),
+            'FAILURE': ('bad', '실패'), 'ERROR': ('bad', '실패')}
+
+def ci_lights(r):
+    run = gha_run(r['number'])
+    waiting = run is not None and run.get('status') != 'completed'
+    out = ''
+    for s in ('sql', 'medium', 'shell'):
+        st = r['ci'].get(s, '')
+        if not st and waiting:
+            st = 'PENDING'   # 런이 큐에 있어 아직 pending 상태를 달지 않았다
+        cls, word = CI_LIGHT.get(st, ('none', '런 없음'))
+        out += '<span class="light light-%s" title="%s: %s"><i></i>%s</span>' % (cls, s, word, s)
+    href = ('https://github.com/CUBRID/cubrid/actions/runs/%d' % run['databaseId'] if run and (r['ci_stale'] or waiting)
+            else 'https://github.com/CUBRID/cubrid/pull/%d/checks' % r['number'])
+    return '<a class="lights" href="%s" target="_blank" rel="noopener">%s</a>' % (esc(href), out)
 
 def agent_reviewed(repo, num):
     """이 에이전트(agent_github 로그인 또는 본문 마커)가 남긴 리뷰/코멘트: (건수, 마지막 날짜, 종류 집합)"""
@@ -315,8 +368,11 @@ def render(rows, now, orphans=()):
     for r in rows:
         by.setdefault(r['tracked'][0], []).append(r)
     css = """
-    :root{--bg:#eef0f3;--surface:#fff;--ink:#161a20;--muted:#6b7684;--line:#d5dae1;--gate:#14706b;--warn:#a85b16;--bad:#a3262b;--soft:#f6f7f9}
-    @media (prefers-color-scheme:dark){:root{--bg:#0e1218;--surface:#161b23;--ink:#e7ebf0;--muted:#8a95a3;--line:#2a323c;--gate:#46b3a8;--warn:#d98b45;--bad:#e06c70;--soft:#1b2128}}
+    :root{--bg:#eef0f3;--surface:#fff;--ink:#161a20;--muted:#6b7684;--line:#d5dae1;--gate:#14706b;--warn:#a85b16;--bad:#a3262b;--soft:#f6f7f9;--sig-ok:#2FA35B;--sig-run:#E3B505;--sig-bad:#D0453A;--sig-none:#C9D0C6}
+    @media (prefers-color-scheme:dark){:root{--bg:#0e1218;--surface:#161b23;--ink:#e7ebf0;--muted:#8a95a3;--line:#2a323c;--gate:#46b3a8;--warn:#d98b45;--bad:#e06c70;--soft:#1b2128;--sig-ok:#5CB878;--sig-run:#F2C94C;--sig-bad:#E07B6E;--sig-none:#4A5249}}
+    /* TC 신호등 (agent-todo 보드의 agent-board-style.css 와 같은 꼴) */
+    .lights{display:inline-flex;gap:8px;text-decoration:none;color:var(--muted)}.light{display:inline-flex;align-items:center;gap:4px;font-size:11px;font-family:"IBM Plex Mono",monospace}
+    .light i{width:9px;height:9px;border-radius:50%;background:var(--sig-none)}.light-ok i{background:var(--sig-ok)}.light-run i{background:var(--sig-run)}.light-bad i{background:var(--sig-bad)}
     body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.55 "IBM Plex Sans KR",system-ui,sans-serif}
     .wrap{max-width:1180px;margin:0 auto;padding:28px 20px}
     h1{font-size:24px;margin:0 0 4px;letter-spacing:-.02em} h2{font-size:17px;margin:28px 0 10px;display:flex;gap:10px;align-items:baseline}
@@ -345,7 +401,7 @@ def render(rows, now, orphans=()):
     .hidden{display:none}
     """
     h = ['<!doctype html><html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>review-to-do</title><style>%s</style></head><body><div class="wrap">' % css]
-    h.append('<h1>review-to-do</h1><div class="meta">스냅샷 %s · assignee(없으면 작성자) ∈ {%s} · open · non-draft · 미해결 스레드는 리뷰 코멘트 기준 · CI 는 보지 않음(사용자 지시) · TC PR 은 JIRA 키/cubrid#n 으로 엔진 PR 하위에 연동</div>' % (now, ', '.join(TRACKED)))
+    h.append('<h1>review-to-do</h1><div class="meta">스냅샷 %s · assignee(없으면 작성자) ∈ {%s} · open · non-draft · 미해결 스레드는 리뷰 코멘트 기준 · TC 테스트 = gha-ci test_sql·medium·shell(헤드 커밋) · TC PR 은 JIRA 키/cubrid#n 으로 엔진 PR 하위에 연동</div>' % (now, ', '.join(TRACKED)))
     # 머리 통계는 '미완료 PR 건수' 하나만 (사용자 지시 2026-10-06)
     # 미완료 = 머지 가능이 아닌 것 = 미해결 스레드가 남았거나 승인자가 0
     tot_open = sum(1 for r in rows if r['unresolved'] or not r.get('approvers'))
@@ -389,7 +445,7 @@ def render(rows, now, orphans=()):
         h.append('<section class="who"><h2>@%s <span class="meta">%d PR</span></h2>' % (esc(who), len(rs)))
         if not rs:
             h.append('<div class="muted">추적 대상 없음 (open·non-draft·assignee 또는 작성자 기준)</div></section>'); continue
-        h.append('<table><tr><th>PR</th><th>제목 / JIRA</th><th>미해결</th><th>리뷰어</th><th class="col-mine">에이전트 리뷰</th><th>갱신</th><th>연동된 테스트케이스</th><th class="col-mine">리뷰 문서(내부망)</th></tr>')
+        h.append('<table><tr><th>PR</th><th>제목 / JIRA</th><th>미해결</th><th>리뷰어</th><th class="col-mine">에이전트 리뷰</th><th>갱신</th><th>TC 테스트</th><th>연동된 테스트케이스</th><th class="col-mine">리뷰 문서(내부망)</th></tr>')
         for r in rs:
             unres = ('<span class="%s">%d</span> / %d' % ('bad' if r['unresolved'] else 'ok', r['unresolved'], r['threads_total']))
             if r['unresolved_by']:
@@ -407,11 +463,11 @@ def render(rows, now, orphans=()):
             owns = sorted(set(r.get('assignees', []) + r.get('tracked', [])))   # 담당자 (이현욱 요청 2026-10-07)
             apprs = sorted(set(r.get('approvers', [])))                          # 승인한 사람
             ready = (not r['unresolved']) and bool(apprs)                         # 승인 끝·미해결 0 = 머지 대기
-            h.append('<tr class="%s" data-unres="%s" data-ready="%s" data-rev="%s" data-pend="%s" data-own="%s" data-appr="%s"><td class="n"><a href="%s">%s#%d</a>%s</td><td>%s<div class="meta">%s · by %s%s</div></td><td class="n">%s</td><td>%s</td><td class="n col-mine">%s</td><td class="n">%s<div class="muted" style="font-size:11px">생성 %s</div></td><td class="docs" style="font-size:12px">%s</td><td class="docs col-mine">%s</td></tr>' % (
+            h.append('<tr class="%s" data-unres="%s" data-ready="%s" data-rev="%s" data-pend="%s" data-own="%s" data-appr="%s"><td class="n"><a href="%s">%s#%d</a>%s</td><td>%s<div class="meta">%s · by %s%s</div></td><td class="n">%s</td><td>%s</td><td class="n col-mine">%s</td><td class="n">%s<div class="muted" style="font-size:11px">생성 %s</div></td><td>%s</td><td class="docs" style="font-size:12px">%s</td><td class="docs col-mine">%s</td></tr>' % (
                 ('unres' if r['unresolved'] else ('ready' if ready else '')), '1' if r['unresolved'] else '0', '1' if ready else '0', esc(','.join(revs)), esc(','.join(pend_revs)), esc(','.join(owns)), esc(','.join(apprs)),
                 esc(r['url']), esc(r['repo'].split('/')[1]), r['number'], '<div class="muted" style="font-size:11px">%s</div>' % esc(r['tracked'][0]) if len(rs) and who != r['tracked'][0] else '',
                 esc(r['title']), esc(r['jira'] or '-'), esc(r['author']), ((' · assignees +' + ','.join(others)) if others else '') + (' · <span class="warn">작성자 기준(assignee 없음)</span>' if r.get('tracked_via') == 'author' else ''),
-                unres, rev, ag, esc(r['updated']), esc(r['created']), tcl, docs))
+                unres, rev, ag, esc(r['updated']), esc(r['created']), ci_lights(r), tcl, docs))
         h.append('</table></section>')
     if orphans:
         # 본문 PR 행과 같은 data-own/data-rev 속성을 붙여 툴바의 사람 필터가 여기에도 걸리게 한다 — 사람을 클릭하면
