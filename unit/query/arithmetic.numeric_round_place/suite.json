@@ -1,38 +1,41 @@
 {
- "name": "PR#8349(CBRD-27819) ROUND/TRUNC/FLOOR/CEIL 의 NUMERIC — 이진 지름길(numeric_db_value_round_to_place·numeric_db_value_floor_ceil)이 develop 문자열 코드와 같은 값·precision·scale·0 의 부호·형태(고정 그대로 vs 부동)를 내나 + [defect] 문자열 버퍼가 닿지 않는 자리수(DOUBLE 1e19·±Inf·NaN, BIGINT ≤ -2^47)에서 head 0 / develop 값 그대로 + [defect] (잠재) CEIL 의 음의 0 이 scale 1~38 에서 +0, 39 이상에서 -0(develop 은 모두 -0)",
- "file": "src/query/arithmetic.c",
- "mode": "server",
- "seams": [],
- "appendix": "",
- "test": "test.cpp",
- "extra": [
-  "src/query/numeric_opfunc.c",
-  "src/compat/db_macro.c"
- ],
- "requires": [
-  "db_round_dbval"
- ],
- "watch": [
-  "src/query/numeric_opfunc.c",
-  "src/query/numeric_opfunc.h",
-  "src/compat/dbtype_function.i",
-  "src/query/arithmetic.h"
- ],
- "fakes": "er_set/er_errid/er_clear(마지막 id 만 기록), prm_Def(RETURN_NULL_ON_FUNCTION_ERRORS·ORACLE_COMPAT_NUMBER_BEHAVIOR 끔 — 그 밖은 0), pr_clear_value(db_trunc_dbval 끝의 캐스트 보관값 정리 — 여기 값은 메모리를 갖지 않아 NULL 로만 만든다). 그 밖은 실코드: arithmetic.c(대상 TU), numeric_opfunc.c(지름길·문자열 변환·출력), db_macro.c.",
- "note": "C1(372건)·C2(70건)의 기대 문자열은 80b84317d(develop, PR base)에서 뽑았고 735464f0d 와 같다(값 6종 × 자리수 17종, 2^128 이웃 13종 × 자리수 9종, FLOOR/CEIL 35종). 자리수 -1e12 는 문자열 밖이지만 주소가 감기지 않아 두 리비전 모두 0 — C1 에 둔다. R1b 의 develop 답은 ptr = end - s + bi2 가 사용자 스택 주소(x86-64 리눅스 < 2^47) 아래로 넘어 감긴 값이라 -2^47 보다 작은 자리수만 쓴다(그 사이는 주소에 따라 0 또는 그대로). R2 의 입력(계수 0 + 부호)은 SQL 로 만드는 길을 찾지 못했다(단항 마이너스·부동 NUMERIC 산술·축소 캐스트·문자열·DOUBLE·SUM 스냅샷이 모두 +0 — serial 의 numeric_db_value_mul 만 -0) — 잠재. 변이: fix_r2_ceil_zero_sign.diff(문자열 코드의 '이미 정수' 가지도 0 이면 부호를 지움) → R2 FAIL, C1·C2 PASS / fix_a_decline_past_string.diff(지름길이 scale - TWICE_NUM_MAX_PREC 아래 자리수를 거절) → R1a·R1b FAIL, C1·C2 PASS / mut_half_up_gt5.diff → C1 FAIL / mut_carry_gt.diff → C2 FAIL. unitseam 은 -O0 으로 컴파일한다 — develop 의 포인터 비교는 -O0 에서도 운영 -O2 에서도 부호 없는 주소 비교라 R1 의 develop 답이 같다(develop 릴리스 libcubrid.so CUBRID-goto-91465a14a 의 db_round_dbval 디스어셈블: 0x457137 cmp/jae · 0x45741c cmp/jb).",
- "origin": {
-  "pr": 8349,
-  "jira": "CBRD-27819",
-  "finding": "A-01(ROUND/TRUNC 자리수가 문자열 버퍼 밖이면 head 0 / develop 값 그대로)·A-03(잠재 — CEIL 음의 0 의 부호가 scale 에 따라 갈림), 리뷰 2026-11-04 그룹 A",
-  "comment": "https://github.com/CUBRID/cubrid/pull/8349",
-  "date": "2026-11-04",
-  "verified": [
-   "735464f0d: C1 C2 PASS, R1a R1b R2 PASS(결함 있음)",
-   "80b84317d: C1 C2 PASS, R1a R1b R2 FAIL",
-   "735464f0d + fix_a: R1a R1b FAIL, R2 PASS, C1 C2 PASS",
-   "735464f0d + fix_r2: R2 FAIL, 나머지 그대로",
-   "735464f0d + mut_half_up_gt5: C1 FAIL",
-   "735464f0d + mut_carry_gt: C2 FAIL"
-  ]
- }
+  "name": "PR#8349(CBRD-27819) ROUND/TRUNC/FLOOR/CEIL 의 NUMERIC — 이진 지름길(numeric_db_value_round_to_place·numeric_db_value_floor_ceil)이 develop 문자열 코드와 같은 값·precision·scale·0 의 부호·형태(고정 그대로 vs 부동)를 내나 + [defect] 문자열 버퍼가 닿지 않는 자리수(DOUBLE 1e19·±Inf·NaN, BIGINT ≤ -2^47)에서 head 0 / develop 값 그대로 + [defect] (잠재) CEIL 의 음의 0 이 scale 1~38 에서 +0, 39 이상에서 -0(develop 은 모두 -0)",
+  "file": "src/query/arithmetic.c",
+  "mode": "server",
+  "seams": [],
+  "appendix": "",
+  "test": "test.cpp",
+  "extra": [
+    "src/query/numeric_opfunc.c",
+    "src/compat/db_macro.c"
+  ],
+  "requires": [
+    "db_round_dbval"
+  ],
+  "watch": [
+    "src/query/numeric_opfunc.c",
+    "src/query/numeric_opfunc.h",
+    "src/compat/dbtype_function.i",
+    "src/query/arithmetic.h"
+  ],
+  "fakes": "er_set/er_errid/er_clear(마지막 id 만 기록), prm_Def(RETURN_NULL_ON_FUNCTION_ERRORS·ORACLE_COMPAT_NUMBER_BEHAVIOR 끔 — 그 밖은 0), pr_clear_value(db_trunc_dbval 끝의 캐스트 보관값 정리 — 여기 값은 메모리를 갖지 않아 NULL 로만 만든다). 그 밖은 실코드: arithmetic.c(대상 TU), numeric_opfunc.c(지름길·문자열 변환·출력), db_macro.c.",
+  "note": "C1(372건)·C2(70건)의 기대 문자열은 80b84317d(develop, PR base)에서 뽑았고 735464f0d 와 같다(값 6종 × 자리수 17종, 2^128 이웃 13종 × 자리수 9종, FLOOR/CEIL 35종). 자리수 -1e12 는 문자열 밖이지만 주소가 감기지 않아 두 리비전 모두 0 — C1 에 둔다. R1b 의 develop 답은 ptr = end - s + bi2 가 사용자 스택 주소(x86-64 리눅스 < 2^47) 아래로 넘어 감긴 값이라 -2^47 보다 작은 자리수만 쓴다(그 사이는 주소에 따라 0 또는 그대로). R2 의 입력(계수 0 + 부호)은 SQL 로 만드는 길을 찾지 못했다(단항 마이너스·부동 NUMERIC 산술·축소 캐스트·문자열·DOUBLE·SUM 스냅샷이 모두 +0 — serial 의 numeric_db_value_mul 만 -0) — 잠재. 변이: fix_r2_ceil_zero_sign.diff(문자열 코드의 '이미 정수' 가지도 0 이면 부호를 지움) → R2 FAIL, C1·C2 PASS / fix_a_decline_past_string.diff(지름길이 scale - TWICE_NUM_MAX_PREC 아래 자리수를 거절) → R1a·R1b FAIL, C1·C2 PASS / mut_half_up_gt5.diff → C1 FAIL / mut_carry_gt.diff → C2 FAIL. unitseam 은 -O0 으로 컴파일한다 — develop 의 포인터 비교는 -O0 에서도 운영 -O2 에서도 부호 없는 주소 비교라 R1 의 develop 답이 같다(develop 릴리스 libcubrid.so CUBRID-goto-91465a14a 의 db_round_dbval 디스어셈블: 0x457137 cmp/jae · 0x45741c cmp/jb).",
+  "origin": {
+    "pr": 8349,
+    "jira": "CBRD-27819",
+    "finding": "A-01(ROUND/TRUNC 자리수가 문자열 버퍼 밖이면 head 0 / develop 값 그대로)·A-03(잠재 — CEIL 음의 0 의 부호가 scale 에 따라 갈림), 리뷰 2026-11-04 그룹 A",
+    "comment": "https://github.com/CUBRID/cubrid/pull/8349",
+    "date": "2026-11-04",
+    "verified": [
+      "735464f0d: C1 C2 PASS, R1a R1b R2 PASS(결함 있음)",
+      "80b84317d: C1 C2 PASS, R1a R1b R2 FAIL",
+      "735464f0d + fix_a: R1a R1b FAIL, R2 PASS, C1 C2 PASS",
+      "735464f0d + fix_r2: R2 FAIL, 나머지 그대로",
+      "735464f0d + mut_half_up_gt5: C1 FAIL",
+      "735464f0d + mut_carry_gt: C2 FAIL"
+    ]
+  },
+  "defects_fixed_in": {
+    "PR8349 R1a": "2b3bb6254"
+  }
 }

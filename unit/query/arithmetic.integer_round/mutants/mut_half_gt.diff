@@ -1,0 +1,11 @@
+--- a/src/query/arithmetic.c
++++ b/src/query/arithmetic.c
+@@ -3342,7 +3342,7 @@
+   rest = num % unit;		/* has the sign of num, and |rest| < unit <= 10^18, so 2 * rest does not overflow */
+   num -= rest;
+ 
+-  if (2 * rest >= unit)
++  if (2 * rest > unit)
+     {
+       return OR_ADD_OVERFLOW (num, unit, result);
+     }

@@ -1,0 +1,11 @@
+--- a/src/query/arithmetic.c
++++ b/src/query/arithmetic.c
+@@ -2493,7 +2493,7 @@
+ 	  bi1 = db_get_bigint (value1);
+ 	}
+ 
+-      if (FINITE (d2) && d2 == floor (d2))
++      if (d2 == floor (d2))
+ 	{
+ 	  /* an integer place rounds in integers: through a double a BIGINT loses the digits past 2^53, and a place
+ 	   * whose power of ten is not exact in binary moves the result by one */

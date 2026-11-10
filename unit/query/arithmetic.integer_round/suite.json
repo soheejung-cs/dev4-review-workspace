@@ -1,0 +1,47 @@
+{
+ "name": "PR#8474(CBRD-27843) SMALLINT·INTEGER·BIGINT ROUND 을 정수로 — round_bigint(신설 static: 0 에서 먼 쪽, BIGINT 밖이면 true; -19 는 abs(num)>=5e18 넘침·아니면 0, -20 이하 0)·db_round_dbval(정수 자릿수 = 정수 반올림·결과 타입 유지, 타입 범위 밖 = ER_IT_DATA_OVERFLOW(타입 이름), DOUBLE 정수 자릿수 = 정수 경로, NaN·+Inf 자릿수 = round_double 의 \"double\" 넘침 유지, -Inf = 타입 넘침, RETURN_NULL_ON_FUNCTION_ERRORS 면 NULL, 남은 오류가 반환값인 현재 동작)·db_width_bucket(NaN 피연산자·하한·상한 = ER_QPROC_INVALID_PARAMETER — DOUBLE·FLOAT·MONETARY 와 BIGINT·NUMERIC 의 NUMERIC 경로, NaN 버킷 수 = ER_PROC_WIDTH_BUCKET_COUNT, ±Inf 6·0·보통 값 그대로, 도메인 남김 없음)·NaN → NUMERIC 강제변환 = 넘침(9b821cbe1) + [defect] D1~D7 develop 의 감김·1 어긋남·NaN 버킷·NaN → NUMERIC 0(이력) + [defect] O1·O2 열린 선재(FLOAT·DOUBLE ROUND 결과 ±Inf)",
+ "file": "src/query/arithmetic.c",
+ "mode": "server",
+ "seams": [],
+ "appendix": "hooks.cpp",
+ "test": "test.cpp",
+ "extra": [
+  "src/query/numeric_opfunc.c",
+  "src/compat/db_macro.c",
+  "src/object/object_primitive.c",
+  "src/object/object_domain.c",
+  "src/object/object_domain_convert.cpp"
+ ],
+ "requires": [
+  "db_round_dbval",
+  "db_width_bucket",
+  "round_bigint"
+ ],
+ "watch": [
+  "src/query/arithmetic.h",
+  "src/base/object_representation.h",
+  "src/query/numeric_opfunc.c",
+  "src/object/object_domain_convert.cpp"
+ ],
+ "fakes": "er_set/er_errid/er_clear(마지막 id 하나 — 실제 er_set 이 현재 오류를 바꾸는 것과 같다; ER_IT_DATA_OVERFLOW 의 인자 하나(타입 이름 문자열)를 따로 기록), prm_Def(RETURN_NULL_ON_FUNCTION_ERRORS 를 케이스마다 켬·끔, ORACLE_COMPAT_NUMBER_BEHAVIOR 끔, 그 밖은 0 — 세션 플래그가 없어 prm_get_bool_value 가 전역 값을 읽는다), area_alloc/area_free(tp_init 전이라 tp_Domain_area 가 없다 — tp_domain_new/tp_domain_free 의 TP_DOMAIN 을 calloc/free 로, 살아 있는 수를 세어 모든 출구에서 0 인지 본다). 그 밖은 실코드: arithmetic.c(대상 TU, hooks.cpp 를 끝에 붙여 static round_bigint 를 부름), numeric_opfunc.c, db_macro.c, object_primitive.c(pr_type_name·round_double 이 보고하는 tp_Double 의 이름 \"double\"), object_domain.c·object_domain_convert.cpp(WIDTH_BUCKET NUMERIC 경로와 NUMERIC 자릿수의 tp_value_coerce — develop 의 NaN → NUMERIC 0 이 실제 변환기에서 나온다). MONETARY 는 DB_CURRENCY_DOLLAR 로 만든다(DB_CURRENCY_DEFAULT 는 lang_currency () 를 부르고 부팅된 언어가 필요). 자동 stub 함수 199·데이터 10 링크, 호출 0.",
+ "defects_fixed_in": {
+  "PR8474 D7": "9b821cbe1",
+  "PR8474 D": "dd9d27e7f"
+ },
+ "note": "R1·R2 는 hooks.cpp 의 탐침(round_bigint 를 의존 이름 호출로 찾는 SFINAE — 없으면 치환 실패로 false)이 참인 리비전에서만 등록된다(develop 실행은 develop 에 있는 것만 나열). R0 은 늘 등록돼 탐침이 '정수 경로가 있는 리비전(ROUND (BIGINT max, 0) = 그대로)' 과 같은지 본다 — round_bigint 가 이름을 바꾸면 R0 이 FAIL 해 suite 갱신을 알린다. requires 의 round_bigint 는 머지 전 가드다: 이 PR 이 들어오기 전 리비전(다른 PR 의 head)에서 D 케이스가 PASS 해 '고쳐졌던 결함 재발' 로 보이는 거짓 경보를 막는다 — 그래서 이 PR 의 unit_regress 는 base 를 돌리지 않는다(base 비교는 verified, run_suite 직접). defects_fixed_in 은 접두어 순서대로 맞춘다: D7(NaN → NUMERIC 0)은 9b821cbe1 이 고쳤고 dd9d27e7f 에는 남아 있다 — dd9d27e7f 에서 다시 돌리면 D7 이 '재발' 로, C9 가 stale 로 보이는 것은 그 리비전이 9b821cbe1 이전이라서다(정상). 머지 뒤 두 커밋을 develop 머지 커밋으로 바꿔도 된다. C3 격자: 세 타입 × (경계·무작위 값) × 자리수 -45..3·±400 × 자리수 타입 SHORT/INT/BIGINT = 815,949 호출을 128비트 십진 오라클과 대조(head 차이 0, develop 47,451). R2 = 928,914 (값, 자리수) 쌍(head 차이 0). C7 은 현재 동작: 호출 전에 오류가 남아 있으면 그 오류가 반환값이고(db_round_dbval 끝의 return er_errid ()) 넘침 분기는 자기 오류를 세우지 않는다 — er_errid () == NO_ERROR 가 'round_double () 이 이미 세웠다' 를 대신한다. 변이(mutants/, 모두 dd9d27e7f 에 적용): mut_no_type_range_check → C1·C3·C4·C6 FAIL, D1 PASS(재발로 보임) / mut_round_bigint_no_overflow → R1·R2·C1·C3 / mut_half_gt(2*rest > unit) → R1·R2·C3·C4·C6·C8 / mut_no_nan_check → W1·W4 / mut_count_check_old(d4 < 1 || d4 >= MAX) → W2·W4 / mut_overwrite_double_error(er_errid 조건 제거) → C5·C7 / 대안 alt_inf_place_integer_path(FINITE 를 빼 ±Inf 자릿수를 정수 경로로: +Inf = 값 그대로, -Inf = 0) → C5·C6 의 ±Inf 줄만 바뀜(스펙 결정용, 결함 아님). MALLOC_CHECK_=3 MALLOC_PERTURB_=165 재실행 결과 동일.",
+ "origin": {
+  "pr": 8474,
+  "jira": "CBRD-27843",
+  "finding": "리뷰 단위 단계(지적과 무관한 핵심 함수 계약 suite, 리뷰 요청 3-8) + 관찰: C7 er_errid () 조건·-Inf/분수 자릿수 넘침(설계 Q)·O1·O2 선재",
+  "comment": "https://github.com/CUBRID/cubrid/pull/8474",
+  "date": "2026-11-10",
+  "verified": [
+   "dd9d27e7f: 계약 R0 R1 R2 C1~C8 W1~W4 15/16 PASS(C9 FAIL — NaN → NUMERIC 은 9b821cbe1 몫), D1~D6 FAIL(고쳐짐), D7 PASS(남음), O1 O2 PASS(선재)",
+   "9b821cbe1(브랜치 끝): 계약 16/16 PASS, D1~D7 FAIL(고쳐짐), O1 O2 PASS",
+   "e30370dc0(develop, merge-base): R1·R2 미등록, 계약 R0 C7 C8 W3 PASS · C1~C6 C9 W1 W2 W4 FAIL(이 PR 이 고친 동작), D1~D7 PASS, O1 O2 PASS",
+   "MALLOC_CHECK_=3 MALLOC_PERTURB_=165: 세 리비전 케이스별 결과 동일",
+   "dd9d27e7f + 변이 6종: 각각 위 note 의 케이스만 FAIL",
+   "dd9d27e7f + alt_inf_place_integer_path: C5·C6 의 ±Inf 줄만 FAIL"
+  ]
+ }
+}

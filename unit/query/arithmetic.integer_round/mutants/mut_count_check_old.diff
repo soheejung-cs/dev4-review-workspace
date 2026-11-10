@@ -1,0 +1,11 @@
+--- a/src/query/arithmetic.c
++++ b/src/query/arithmetic.c
+@@ -4857,7 +4857,7 @@
+ 
+   d4 = db_get_double (value4);
+   /* a NaN fails every comparison: the count has to fall inside the range, not just miss its ends */
+-  if (!(d4 >= 1 && d4 < DB_INT32_MAX))
++  if (d4 < 1 || d4 >= DB_INT32_MAX)
+     {
+       RETURN_ERROR (ER_PROC_WIDTH_BUCKET_COUNT);
+     }

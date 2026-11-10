@@ -1,0 +1,14 @@
+--- a/src/query/arithmetic.c
++++ b/src/query/arithmetic.c
+@@ -2518,10 +2518,7 @@
+ 	{
+ 	  /* the result keeps the type of the value, so past its range it is an error, as for a CAST; a place
+ 	   * whose scale is not finite has its double overflow set by round_double () already */
+-	  if (er_errid () == NO_ERROR)
+-	    {
+-	      er_set (ER_ERROR_SEVERITY, ARG_FILE_LINE, ER_IT_DATA_OVERFLOW, 1, pr_type_name (type1));
+-	    }
++	  er_set (ER_ERROR_SEVERITY, ARG_FILE_LINE, ER_IT_DATA_OVERFLOW, 1, pr_type_name (type1));
+ 	  break;
+ 	}
+ 

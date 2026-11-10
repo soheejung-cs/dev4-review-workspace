@@ -1,0 +1,14 @@
+--- a/src/query/arithmetic.c
++++ b/src/query/arithmetic.c
+@@ -2508,11 +2508,6 @@
+ 	  bi_tmp = overflow ? 0 : (DB_BIGINT) dtmp;
+ 	}
+ 
+-      if (!overflow)
+-	{
+-	  overflow = ((type1 == DB_TYPE_SHORT && OR_CHECK_SHORT_OVERFLOW (bi_tmp))
+-		      || (type1 == DB_TYPE_INTEGER && OR_CHECK_INT_OVERFLOW (bi_tmp)));
+-	}
+ 
+       if (overflow)
+ 	{

@@ -1,0 +1,13 @@
+--- a/src/query/arithmetic.c
++++ b/src/query/arithmetic.c
+@@ -4942,10 +4942,6 @@
+ 
+   /* a NaN fails every comparison of the double path, which would pick a bucket by the order of the tests, and the
+    * NUMERIC path would coerce it to 0 */
+-  if (is_nan_number (value1) || is_nan_number (value2) || is_nan_number (value3))
+-    {
+-      RETURN_ERROR (ER_QPROC_INVALID_PARAMETER);
+-    }
+ 
+   /* the type of value1 is fixed */
+   type = DB_VALUE_DOMAIN_TYPE (value1);

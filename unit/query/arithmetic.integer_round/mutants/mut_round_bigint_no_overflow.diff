@@ -1,0 +1,18 @@
+--- a/src/query/arithmetic.c
++++ b/src/query/arithmetic.c
+@@ -3344,11 +3344,13 @@
+ 
+   if (2 * rest >= unit)
+     {
+-      return OR_ADD_OVERFLOW (num, unit, result);
++      (void) OR_ADD_OVERFLOW (num, unit, result);
++      return false;
+     }
+   else if (2 * rest <= -unit)
+     {
+-      return OR_SUB_OVERFLOW (num, unit, result);
++      (void) OR_SUB_OVERFLOW (num, unit, result);
++      return false;
+     }
+ 
+   *result = num;
