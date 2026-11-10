@@ -61,7 +61,7 @@ python3 -m tools.harness.implement_gate --plan <out>/plan.json [--base HEAD|upst
    성능 PR 에 다른 DB 대비 측정이 있으면 그 수치는 **PR 본문의 절 하나**(`(머지 메시지에 넣지 않음)` 표시)에만 쓴다 — 코드 주석·커밋 메시지·머지 메시지·코멘트·답글에는 쓰지 않는다(사용자 지시 2026-10-27, 정본 claude-workspace `memory/rules/참조DB-표기.md`, guard 규칙 9·10 이 막는다).
 2. **`/harness-review <내 PR>`** 을 그대로 돈다. 🟡 이상이 나오면 게시하지 말고 고쳐 S4 부터(상한 2회). 자기 리뷰의 finding 은 PR 본문 Remarks 에 "자기 리뷰에서 걸러낸 것" 으로 한 줄 남긴다(무엇을 고쳤나). push 전엔 `python3 -m tools.harness.run full --pr <PR> --sha <로컬 rev> --base <머지 커밋>` 으로 **미push 커밋만의 팩**을 만들어 자기 리뷰한다(2026-09-30). 게이트는 `--commits base..head` 로 커밋마다 컴파일까지.
    기존 PR 이면 draft 전환·리뷰어 지정을 건드리지 않는다. 답글 초안(스레드별)·PR 본문 갱신분·resolve 요청은 `projects/CBRD-n/리뷰대응-YYYYMMDD/` 에 두고 **게시는 사용자 승인 후**(`review-response`).
-3. 사용자 승인 후 draft 해제. TC PR(`tc/pr-<n>`) 은 Merge Gate 순서(TC 먼저) — 엔진 PR 이 CI·머지 조건을 다 갖춘 뒤 TC PR 을 머지하고 엔진 PR 을 곧바로 이어서(룰북 「The PR」). 바꿀 TC 가 없는 리포의 Draft TC PR 은 **닫지 말고** 닫을 대상이라고 사용자에게 알리고 Check TC PRs 재실행과 함께 제안한다 — 닫기·머지는 사용자 몫이다(메모리 PR브랜치-규칙 §5; 2026-11-03 .50 PR#8378 에서 에이전트가 private-ex #4710 을 닫았다가 사용자 계정이 다시 열었다).
+3. 사용자 승인 후 draft 해제. TC PR(`tc/pr-<n>`) 은 Merge Gate 순서(TC 먼저) — 엔진 PR 이 CI·머지 조건을 다 갖춘 뒤 TC PR 을 머지하고 엔진 PR 을 곧바로 이어서(룰북 「The PR」). 바꿀 TC 가 없는 리포의 Draft TC PR 은 **닫지 않고, 결정 요청·남은 일에도 넣지 않는다** — 사용자가 머지할 때 닫는다(사용자 지시 2026-11-10; 메모리 PR브랜치-규칙 §5; 2026-11-03 .50 PR#8378 에서 에이전트가 private-ex #4710 을 닫았다가 사용자 계정이 다시 열었다).
 4. 기록: `record`(세션기록·staging 미수정 표기) + `agent-board`(카드 `[CBRD-n/PR#m]` 제목 갱신·worklog). 머지되면 `post-merge`.
 5. **자가진화 루프** — `/self-evolution <PR>`(2026-10-23 사용자 지시): 자기 리뷰 지적·검증 중 데인 것을 `references/자가진화-규칙.md` 의 `[자가진화 규칙 #NNN]` 으로, 기계로 막을 수 있는 것은 `claude-workspace/하네스-패치-대기열.md` 의 H-NN 으로. 최종 보고는 그 스킬의 출력 구조([기술 분석 및 라인/함수 단위 개선안] / [회고 및 자가진화 리포트]).
 
