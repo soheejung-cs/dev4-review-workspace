@@ -1,0 +1,40 @@
+{
+ "name": "PR#8471 (CBRD-28003) qo_combine_partitions () -- 노드를 읽지 않는 [E, T) 항을 최상위 플랜(빈 SORT 플랜 아래의 첫 플랜)의 sarged_terms 에 주되, QO_TC_DURING_JOIN(외부 조인 ON 의 노드 없는 항 O4, anti 조인 ON 의 노드 없는 항 A2)은 빼고 그 조인에 둔다(planner_visit_node () 가 during-join 항으로 준다): C1 한 파티션 -- 외부 조인 위 내부 조인, C2 빈 SORT(ORDER BY 위 GROUP BY) 아래 조인, C3 두 파티션(쉼표 조인)의 교차 조인, C4 외부 조인 없는 대조군(develop 동일), C5 anti 조인 ON 의 노드 없는 항(during)은 빼고 semi 조인 ON 의 것(other)은 준다, D1(이력) develop 은 during-join 항도 최상위 플랜에 줬다",
+ "requires": [
+  "qo_combine_partitions",
+  "QO_TERM_CLASS (&planner->term\\[i\\]) != QO_TC_DURING_JOIN"
+ ],
+ "file": "src/optimizer/query_planner.c",
+ "mode": "cs",
+ "seams": [
+  "qo_alloc_info",
+  "qo_cp_new"
+ ],
+ "appendix": "hooks.cpp",
+ "test": "test.cpp",
+ "extra": [
+  "src/optimizer/query_bitset.c"
+ ],
+ "watch": [
+  "src/optimizer/query_planner.h",
+  "src/optimizer/query_graph.h",
+  "src/optimizer/query_bitset.h",
+  "src/optimizer/query_bitset.c"
+ ],
+ "fakes": "진짜: query_planner.c(TU: qo_combine_partitions·sort_partitions·qo_plan_finalize·qo_detach_info·qo_uninit_planvec), query_bitset.c(bitset_* 전부 -- 테스트가 비트를 읽는다). 가짜(두 파티션 장면만 -- C3·D1 둘째 장면, 한 파티션은 교차 조인을 만들지 않는다): qo_alloc_info = 진짜에서 qo_compute_projected_segs ()·qo_compute_projected_size ()(세그먼트로 비용만 정한다)를 뺀 것, planner->EQ = 0 이라 순서 플랜 벡터 없음, info_list 앞에 끼우는 것은 같다. qo_cp_new = qo_join_new (info, JOIN_INNER, QO_JOINMETHOD_NL_JOIN, outer, inner, 빈 join/duj/afj/hash 항, sarged_terms, pinned_subqueries) 가 만드는 교차 조인 -- 조인 항이 없어 sarg_out_terms 가 비므로 받은 sarged_terms 를 그대로 갖고, outer·inner 의 refcount 를 하나씩 올린다; 비용·파일 스캔이 아닌 inner 위 SORT_TEMP·SORT-LIMIT 플랜·qo_top_plan_new ()(ORDER BY·GROUP BY·DISTINCT 없는 장면)는 흉내 내지 않는다. 구조체: calloc. 항은 노드·클래스·location 만(클래스는 query_graph.c 가 주는 것 -- 장면마다 test.cpp 에 근거 표기), 플랜은 종류·info·sarged_terms·함수가 따라가는 링크만. 호출 전 플랜의 sarged_terms 는 고른 값이다(planner_visit_node () 가 남길 값을 흉내 내지 않는다 -- 함수는 더하기만 한다).",
+ "note": "requires 둘째 항목(PR 의 수정 줄)은 머지 전 가드다 -- 이 수정이 없는 리비전(다른 열린 PR 의 head)에서 D1 이 '재발'·C1-C3·C5 가 'suite 갱신 필요' 로 잘못 보고되지 않게 '적용 안 됨' 으로 건너뛴다. 머지 뒤: 둘째 항목을 빼고 defects_fixed_in 을 develop 머지 커밋으로 바꾼다(그래야 뒤 PR 이 그 줄을 되돌릴 때 '재발' 로 잡힌다). 2026-11-10 unitseam(.52): head b729cb5d4 [contract] 5/5 PASS·[defect] D1 FAIL(고쳐짐), base 36c7433d8 C1·C2·C3·C5 FAIL(during 항 2·1 이 최상위에 더해짐)·C4 PASS·D1 PASS, stub 호출 0, valgrind 0 errors. 변이(head 기준, 이 디렉터리 mut_*.diff): mut_skip_after_join(AFTER_JOIN 도 뺌) -> C1·C2·C3 FAIL, mut_skip_on_terms(DURING 대신 location > 0 인 ON 항 전부를 뺌) -> C1·C2·C5 FAIL(내부·semi 조인 ON 상수 항이 사라짐), mut_no_sort_skip(빈 SORT 를 건너뛰지 않음) -> C2 만 FAIL; 세 변이 모두 C4 PASS·D1 FAIL.",
+ "origin": {
+  "pr": 8471,
+  "jira": "CBRD-28003",
+  "finding": "(결함 지적 없음) 리뷰 요청 3-8 -- 이 PR 의 유일한 변경 함수에 [contract] suite, develop 동작은 [defect] D1 이력",
+  "comment": null,
+  "date": "2026-11-10",
+  "reviewed_head": "b729cb5d4",
+  "base": "36c7433d8",
+  "artifact": "harness-out/8471/b729cb5d4/unit/combine_partitions/",
+  "result": "head b729cb5d4: C1-C5 PASS, D1 FAIL(고쳐짐) / base 36c7433d8: C1 {2,4,5,7}, C2 {2,4,5,7}, C3 {1,2,3,5}, C5 {2,3} FAIL(during 항이 더해짐), C4 PASS, D1 PASS. stub 호출 0."
+ },
+ "defects_fixed_in": {
+  "PR8471 D1": "b729cb5d4"
+ }
+}
