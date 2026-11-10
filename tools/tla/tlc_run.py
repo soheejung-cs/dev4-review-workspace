@@ -47,6 +47,8 @@ DEFAULT_WORKERS = 2
 DEFAULT_TIMEOUT = 600
 # 컨테이너 메모리 한도 64GiB(메모리 rules/메모리-과다-테스트-금지). JVM 기본 최대 힙은 호스트 메모리의 1/4(188G → 47G)이라 묶는다.
 DEFAULT_HEAP = '8g'
+# v1.7.4 tla2tools.jar — 2026-11-10 .52 에 사용자가 받은 파일(크기 2274532 = GitHub 릴리스 자산 크기). 다르면 받다 깨졌거나 다른 판이다.
+PINNED_SHA256 = '936a262061c914694dfd669a543be24573c45d5aa0ff20a8b96b23d01e050e88'
 INSTALL_HINT = ('mkdir -p ~/tools/tla && curl -sSL -o ~/tools/tla/tla2tools.jar '
                 'https://github.com/tlaplus/tlaplus/releases/download/v1.7.4/tla2tools.jar')
 
@@ -190,6 +192,9 @@ def main(argv):
     if not java:
         return finish('error', 2, {'message': 'Java 11 이상을 못 찾았다 — --java 또는 JAVA=/usr/lib/jvm/java-11/bin/java'})
     result.update({'jar': a.jar, 'jar_sha256': sha256(a.jar), 'java': java})
+    if result['jar_sha256'] != PINNED_SHA256:
+        print('⚠ tla2tools.jar sha256 이 v1.7.4 고정값과 다르다(%s) — 다른 판이면 PINNED_SHA256 을 고치고, 아니면 다시 받는다'
+              % result['jar_sha256'][:12])
     base = [java, '-Xmx' + a.heap, '-XX:+UseParallelGC', '-cp', a.jar]
     log = ''
     t0 = time.time()
