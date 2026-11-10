@@ -1,0 +1,11 @@
+--- a/src/query/expr_compile.c
++++ b/src/query/expr_compile.c
+@@ -2077,7 +2077,7 @@
+       /* a cell that read a filter slot was counted with it (expr_compile_node_arith ()): the count goes with the
+        * cell, or the image claims more shared cells than it carries and its reader refuses it (CBRD-27994), and the
+        * flag goes too, or the next cell built at this index passes for a computed one */
+-      if (bctx->cell_shared[j])
++      if (true)
+ 	{
+ 	  bctx->cell_shared[j] = false;
+ 	  bctx->n_shared--;

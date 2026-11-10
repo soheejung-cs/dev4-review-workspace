@@ -1,0 +1,10 @@
+--- a/src/query/expr_compile.c
++++ b/src/query/expr_compile.c
+@@ -2079,7 +2079,6 @@
+        * flag goes too, or the next cell built at this index passes for a computed one */
+       if (bctx->cell_shared[j])
+ 	{
+-	  bctx->cell_shared[j] = false;
+ 	  bctx->n_shared--;
+ 	}
+     }

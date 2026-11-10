@@ -1,0 +1,11 @@
+--- a/src/query/expr_compile.c
++++ b/src/query/expr_compile.c
+@@ -2072,7 +2072,7 @@
+       bctx->step_prologue[j] = false;
+       bctx->step_exec_prologue[j] = false;
+     }
+-  for (j = mark->n_cells; j < bctx->n_cells; j++)
++  for (j = 0; j < bctx->n_cells; j++)
+     {
+       /* a cell that read a filter slot was counted with it (expr_compile_node_arith ()): the count goes with the
+        * cell, or the image claims more shared cells than it carries and its reader refuses it (CBRD-27994), and the
