@@ -63,9 +63,11 @@ def adjudicate(repo: str, g: CodeGraph, changed: Dict[str, List[int]], findings:
         ERROR_WORDS = r'데드락|deadlock|크래시|crash|SIGSEGV|누수|leak|오답|wrong|silently|UB|undefined|경합|race|double free|use-after-free|미초기화|uninitializ|무한|hang'
         if re.search(ERROR_WORDS, claim + ' ' + (f.get('why') or ''), re.I):
             v = f.get('verification') or {}
-            obligations['verified_if_error'] = v.get('method') in ('static', 'dynamic') and bool((v.get('result') or '').strip())
+            # model(TLA+ 반례)은 명세 디렉터리(artifact)가 있어야 확인으로 센다 — skills/harness-review/tla.md §5 (2026-11-10)
+            obligations['verified_if_error'] = bool((v.get('result') or '').strip()) and (
+                v.get('method') in ('static', 'dynamic') or (v.get('method') == 'model' and bool(v.get('artifact'))))
             if not obligations['verified_if_error']:
-                reasons.append('에러 우려인데 verification(static/dynamic 확인 결과) 없음 → severity 를 question 으로 내림')
+                reasons.append('에러 우려인데 verification(static/dynamic 확인 결과, 또는 artifact 가 있는 model) 없음 → severity 를 question 으로 내림')
                 f['severity'] = 'question'
         if file and line and _line_exists(repo, file, line): obligations['anchor_exists'] = True
         else: reasons.append('anchor file:line 이 저장소에 없다')
@@ -154,7 +156,7 @@ def adjudicate(repo: str, g: CodeGraph, changed: Dict[str, List[int]], findings:
         mr = obligations.get('mentions_resolve')
         if mr and mr[0] == mr[1]: passed.append(f'언급 함수 {mr[1]}개 모두 그래프에 있음')
         v = f.get('verification') or {}
-        if v.get('method') in ('static', 'dynamic') and (v.get('result') or '').strip():
+        if v.get('method') in ('static', 'dynamic', 'model') and (v.get('result') or '').strip():
             art = v.get('artifact')
             if art and not os.path.exists(os.path.expanduser(str(art))): reasons.append(f'verification.artifact 경로가 없다: {art}')
             elif art: passed.append(f"verification [{v['method']}] + artifact 존재")

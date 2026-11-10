@@ -87,6 +87,20 @@ class PrecheckTest(unittest.TestCase):
         self.assertEqual(st['F4']['status'], 'valid')
         self.assertEqual(st['F5']['status'], 'schema-fail')
 
+    def test_model_verification_needs_artifact(self):
+        # TLA+ 반례(model)는 명세 디렉터리가 있어야 에러 우려의 확인으로 센다 — skills/harness-review/tla.md §5 (2026-11-10)
+        bug = dict(claim='방향을 뒤집은 뒤 다른 행을 읽어 MAX 가 오답이 된다', category='버그 가능성')
+        fs = [finding('F6', 8, verification={'method': 'model', 'result': 'MaxIsRight 위반, 반례 7걸음', 'artifact': self.tmp}, **bug),
+              finding('F7', 8, verification={'method': 'model', 'result': 'MaxIsRight 위반, 반례 7걸음'}, **bug)]
+        src = os.path.join(self.out, 'findings.g8.json')
+        with open(src, 'w') as f:
+            json.dump(fs, f, ensure_ascii=False)
+        st = {r['id']: r for r in PC.run(self.out, src, self.repo)[1]}
+        self.assertEqual(st['F6']['severity'], 'non-blocking')
+        self.assertTrue(any('verification [model] + artifact 존재' in p for p in st['F6']['passed']))
+        self.assertEqual(st['F7']['severity'], 'question')
+        self.assertTrue(any('artifact 가 있는 model' in r for r in st['F7']['reasons']))
+
     def test_missing_out_is_explained(self):
         os.remove(os.path.join(self.out, 'pr.diff'))
         with self.assertRaises(SystemExit) as cm:

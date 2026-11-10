@@ -23,6 +23,10 @@ description: 통합 리뷰 하네스 실행 — `/harness-review <PR번호>`. �
    - **(b) 지적 확인**: 버그 가능성 🟡 이상은 게시 전에 동적으로 확인한다 — SQL 로 닿으면 `harness-repro`(SA), 함수 단위면 `harness-unit`. 결과는 finding `verification.method=dynamic`, `artifact=OUT/unit/<id>/`.
    - **(c) 계약 suite**: 지적이 없어도 이 PR 의 **핵심 신설·변경 함수 1~3개**에 `[contract]` 케이스(정상 경로 + 경계 1개 이상)를 만들어 `unit/<module>/<suite>/` 에 쌓는다 — 다음 PR 이 같은 파일을 건드리면 (a) 가 돌린다. 고르는 기준: 상태기계·판정 함수·경계 계산처럼 입력→출력이 정해지는 것, 서버 자원은 seam 으로 끊을 수 있는 것.
    - 보고서 §0 의 '리뷰 신뢰도' 에 단위 결과(suite 수·케이스 head/base·재현 여부)를 한 줄로 적는다. 단위로 못 닿는 지적은 그 이유(필요한 seam 이 너무 많음 등)를 적는다.
+3-2. **TLA+ 모델 검사 — 동시성·상태기계 변경이면**(사용자 지시 2026-11-10, 하위 스킬 [`tla.md`](tla.md)를 연다) — `python3 tools/tla/tla_candidates.py --pr <PR>` 가 후보를 내면
+   `tla/<모듈>/<이름>/` 의 명세를 쓰거나(이미 있으면 이 PR 판으로 맞춰) `tools/tla/tlc_run.py` 로 before(develop)·after(PR) 를 돌린다.
+   before 위반·after 성립이면 §0 '리뷰 신뢰도' 에 한 줄(명세·범위·상태 수), after 가 위반하면 반례를 코드 경로로 옮겨 지적한다(`verification.method=model`, 재현되면 `dynamic`).
+   후보인데 돌리지 않으면 그 이유를 §0 에 쓴다.
 4. `python3 -m tools.harness.run full --pr <PR> --findings OUT/findings.json` → `findings.adjudicated.json`, `requery.json`, `report.md`.
 5. `requery.json` 이 비어 있지 않으면 **한 번만** 그 항목을 다시 검토해 findings.json 을 고치고 4 를 재실행한다(그래도 inconclusive 면 보고서 "판정 보류"에 남긴다).
 6. `report.md` 를 사람 말투로 다듬되, **맨 앞에 `## 0. 먼저 알아야 할 것`** 을 둔다 — 항목의 정본은 `code-review` §5 표(9항목, 하네스 골격 report.md 에는 없다). 서브에이전트 사슬이면 synthesizer 의 `report.head.md` 를 검토·보완하고, 단일 세션이면 직접 쓴다. 그다음 `claude-workspace/projects/<JIRA>/리뷰보고서-PR<PR>.md`(비공개)에만 둔다 — 이 리포는 공개라 `examples/` 에 사본을 두지 않는다(2026-10-27: 공개 사본에 참조 구현 언급이 섞여 있었다). **게시는 하지 않는다** — 사용자에게 `comments.draft.md`(형식 정본: `tools/harness/post_review.py` 머리말) 초안을 보이고 승인 후 `post_review --draft` 로 인라인 게시 — 초안이 없는 지적이 있으면 도구가 게시를 거부한다.

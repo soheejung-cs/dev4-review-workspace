@@ -5,3 +5,5 @@ references/oracle-manual/*/
 __pycache__/
 tools/harness/__pycache__/
 examples/episodic/
+# TLA+ 모델 검사 산출물(tools/tla/tlc_run.py) — 명세·cfg·README 만 커밋한다
+tla/**/out/
