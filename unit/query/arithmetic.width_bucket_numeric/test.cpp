@@ -423,6 +423,9 @@ TEST_CASE ("CBRD-28024 F3: descending with the operand below the range is count 
   CHECK (wb (v_bigint (-3), v_int (6), v_int (0), 9) == "integer 10");
   CHECK (wb (v_bigint (-30), v_int (6), v_int (0), 9) == "integer 10");
   CHECK (wb (v_num (-3, 5, 1), v_int (6), v_int (0), 9) == "integer 10");
+  /* far below: develop's formula overflowed -- ER_QPROC_OVERFLOW_ADDITION (self-review of PR#8478) */
+  CHECK (wb (v_num (-1e20), v_int (5), v_int (0), 10) == "integer 11");
+  CHECK (wb (v_bigint (-9000000000000000000LL), v_int (5), v_int (0), 2147483646) == "integer 2147483647");
   /* on the lower bound, and just above it: develop answers these right */
   CHECK (wb (v_num (0, 5, 1), v_int (6), v_int (0), 9) == "integer 10");
   CHECK (wb (v_num (0.1, 5, 1), v_int (6), v_int (0), 9) == "integer 9");
