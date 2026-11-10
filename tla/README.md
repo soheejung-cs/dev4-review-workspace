@@ -7,4 +7,4 @@ harness-review 하위 스킬 [`skills/harness-review/tla.md`](../skills/harness-
 
 | 명세 | 대상 함수 | 이슈·PR | 종류 | 결과 |
 |---|---|---|---|---|
-| [query/scan_minmax_turn](query/scan_minmax_turn/README.md) | `scan_next_index_scan ()` S_GO_BACKWARD · `qexec_intprt_fnc ()` MIN/MAX 방향 전환 | CBRD-28007 · #8472 | 상태기계 | (실행 대기 — tla2tools 설치 뒤) |
+| [query/scan_minmax_turn](query/scan_minmax_turn/README.md) | `scan_next_index_scan ()` S_GO_BACKWARD · `qexec_intprt_fnc ()` MIN/MAX 방향 전환 | CBRD-28007 · #8472 | 상태기계 | 11-10: develop 위반(반례 7걸음) · PR 성립(17,848 상태) |

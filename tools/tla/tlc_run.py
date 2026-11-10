@@ -212,8 +212,9 @@ def main(argv):
             first = next((l.strip() for l in p.stdout.splitlines() if re.search(r'error|Error|line \d+', l)), 'SANY 실패')
             return finish('error', 2, {'message': 'SANY: ' + first + ' — tlc.log 의 SANY 절', 'seconds': time.time() - t0}, log)
         states = os.path.join(out, 'states')
-        cmd = base + ['tlc2.TLC', '-workers', str(a.workers), '-config', cfg, '-metadir', states,
-                      '-noGenerateSpecTE'] + (['-deadlock'] if a.no_deadlock else []) + [spec]
+        # SpecTE(반례 재현 명세)는 v1.7.4 에서 -generateSpecTE 를 줄 때만 만든다 — 명세 디렉터리에 파일을 남기지 않게 주지 않는다
+        cmd = base + ['tlc2.TLC', '-workers', str(a.workers), '-config', cfg, '-metadir', states] + \
+            (['-deadlock'] if a.no_deadlock else []) + [spec]
         p = subprocess.run(cmd, cwd=sdir, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                            universal_newlines=True, timeout=max(1, a.timeout - int(time.time() - t0)))
         log += '=== TLC (%s)\n' % ' '.join(cmd[len(base):]) + p.stdout

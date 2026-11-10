@@ -25,7 +25,13 @@
 - `Ends` — 스캔이 끝난다(약한 공정성).
 
 ## 결과
-(TLC 실행 뒤 채움 — `out/before/result.json`·`out/after/result.json`)
+| 날짜 | 대상 | cfg | 판정 | 상태(생성/고유) | 깊이 | 시간 | 도구 |
+|---|---|---|---|---|---|---|---|
+| 2026-11-10 (.51) | develop 동작(FIX=FALSE) | before.cfg | **MaxIsRight 위반**(기대대로) — 반례 7걸음 | 12,267 / 11,747 | 7 | 2.4s | TLC2 2.19 (tla2tools v1.7.4, sha256 `936a2620…`) |
+| 2026-11-10 (.51) | PR 헤드 `cb73834f9`(FIX=TRUE) | after.cfg | **전부 성립** — TypeOK·MaxIsRight·PtrAtOidno·PtrInBatch·Ends | 19,888 / 17,848 | 19 | 3.9s | 같음 |
+
+before 반례(가장 짧은 것): 행 3개, 버퍼 2칸, 필터가 1행만 거름(이슈 재현의 -700 거름·500·600 통과와 같은 꼴, 버퍼만 작다).
+`Before` [1,2] → `Check` 1행 거름 → `Advance` 칸 1 → `Check` 2행 통과·방향 전환(누적 2) → `GoBack` [3,2] 를 읽고 번호 0, **포인터는 칸 1 에 남음** → `Check` 칸 1 의 2행을 MAX 로 확정(기대 3). 코드로는 S_BEFORE(:6051) → lookup(:6289) → S_ON(:6160) → qexec_intprt_fnc 의 전환(query_executor.c:14816-14843) → develop 의 S_GO_BACKWARD(:6095-6112, curr_oidp 그대로) → lookup 이 그 칸을 읽음.
 
 ## 모델이 보지 않는 것
 - 인덱스가 덮는 스캔(list 를 다시 연다 — 이 PR 이 손대지 않음), `multi_range_opt`, index skip scan, 키 필터, 여러 범위(R_RANGELIST·R_KEYLIST).
