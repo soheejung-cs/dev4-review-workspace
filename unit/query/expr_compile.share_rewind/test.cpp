@@ -21,10 +21,25 @@
  *                 it carries (the invariant of expr_prog_finish ()'s new assert) and its image unpacks into it
  *             E2  [LEAST (...), c1]: the plain column at the rewound index keeps the consumer's path
  *                 (only_compute_roots) -- no program
+ *   (added 2026-11-10, self-review of head 1de189701 -- the boundaries the cases above leave out)
+ *             C6  two filter-slot cells in one rewound range: n_shared drops by both, both indexes unflagged
+ *             C7  nested marks: the inner rewind takes back its own hit only, the outer the rest
+ *             C8  the table's last index: a hit there counts, a hit on a full table does not, the rewind clears it
+ *             A1  the aggregate operand flags (expr_agg_prog_settle ()): [LEAST (...), CAST (c1 AS DOUBLE)] counts its
+ *                 one filter-slot cell and its image unpacks
+ *             A2  the aggregate operand flags: [LEAST (...), c1] -- the wired-only plain column carries no shared
+ *                 count (n_compute 0, n_shared 0: the server takes plain operands, qdata_agg_operand_prog_compile ())
+ *             E3  [LEAST (LEAST (CAST, CAST), CASE ...), c1]: two hits under the rejected root leave nothing -- no
+ *                 program (the TLA+ model's shortest develop trace, tla/query/expr_share_rewind)
+ *             E4  [LEAST (LEAST (CAST, CAST), CASE ...), CAST (c1 AS DOUBLE)]: both uncounted, the next hit is the
+ *                 program's one filter-slot cell
+ *             A3  the aggregate operand flags over E3's roots: the wired-only plain column carries n_shared 0
  *   defect    F1  (direct) the rewound cell stays counted and flagged
  *             F1  (image) the issue's list: n_shared 2 over one cell; expr_prog_image_unpack () refuses the image
  *             F2  [LEAST (...), c1]: the plain column passes for computed -- a program with n_shared 1 and no
  *                 filter-slot cell, whose image the reader accepts
+ *             F3  (2026-11-10) E3's list on develop: n_shared 2 over one VALUE cell, the image refused -- a debug
+ *                 server aborts on this list too, not only on the issue's
  *
  * The lists compile as both sides compile a value pointer list's projection (expr_valptr_prog_image_at_generation (),
  * expr_valptr_prog_settle ()): allow_fallback_roots false, allow_wired_only false, only_compute_roots true, then
@@ -45,7 +60,9 @@
  *
  * mutants/ (head, --patch): M1 keep the flag -> C2 C3 C5 E2 FAIL; M2 keep the count -> C2 C3 C5 E1 FAIL; M3 rewind
  * from index 0 -> C3 C4 FAIL; M4 uncount every rewound cell -> C4 E0 E1 FAIL.  Under debug flags M2 (E1) and M4 (E0)
- * abort in expr_prog_finish () on `prog->n_shared == n_share_cells'.
+ * abort in expr_prog_finish () on `prog->n_shared == n_share_cells'.  M5 (2026-11-10) stop after the first rewound
+ * filter-slot cell -> C6 E4 A3 FAIL (E3 passes: its list makes no program); under debug flags E4 and A3 abort in
+ * expr_prog_finish () on the same assert -- the lists a TC needs to catch a partial uncount.
  */
 #include "catch.hpp"
 
@@ -148,6 +165,8 @@ extern int unitseam_cell_src (const void *bctx, int cell);
 extern const DB_VALUE *unitseam_cell_addr (const void *bctx, int cell);
 extern int unitseam_n_share_cells (const void *bctx);
 extern EXPR_PROG *unitseam_valptr_prog_keep (EXPR_PROG * prog, const int *idx, int n);
+extern EXPR_PROG *unitseam_agg_prog_keep (EXPR_PROG * prog, const int *idx, int n);
+extern int unitseam_max_cells (void);
 
 /* ================================================================ the scene */
 
@@ -320,11 +339,27 @@ namespace
       return node (T_LEAST, &D ().d_double, cast_c1 (), simple_case ());
     }
 
+    /* LEAST (LEAST (CAST (c1 AS DOUBLE), CAST (c1 AS DOUBLE)), CASE c1 WHEN c2 THEN c0 ELSE c0 END) -- the shape the
+     * TLA+ model's shortest develop trace takes (tla/query/expr_share_rewind): two filter-slot hits under a root that
+     * is rejected (added 2026-11-10) */
+    REGU_VARIABLE *least_two_hits_rejected ()
+    {
+      return node (T_LEAST, &D ().d_double, node (T_LEAST, &D ().d_double, cast_c1 (), cast_c1 ()), simple_case ());
+    }
+
     /* the value pointer list's projection program, as both sides compile and keep it */
     EXPR_PROG *compile_list (REGU_VARIABLE ** roots, int n, int *idx)
     {
       EXPR_PROG *prog = expr_prog_compile_roots (NULL, roots, n, NULL, false, false, true, idx, spec);
       return unitseam_valptr_prog_keep (prog, idx, n);
+    }
+
+    /* an aggregate list's operand program, as expr_agg_prog_image_at_generation () and expr_agg_prog_settle ()
+     * compile and keep it: no fallback roots, wired-only programs wanted, every compiled root kept */
+    EXPR_PROG *compile_agg (REGU_VARIABLE ** roots, int n, int *idx)
+    {
+      EXPR_PROG *prog = expr_prog_compile_roots (NULL, roots, n, NULL, false, true, false, idx, spec);
+      return unitseam_agg_prog_keep (prog, idx, n);
     }
   };
 
@@ -565,7 +600,240 @@ TEST_CASE ("contract E2: a plain column compiled at the index a rejected root's 
   expr_prog_free (prog);
 }
 
+/* ================================================================ contract: boundaries added 2026-11-10 (head 1de189701)
+ * the self-review after the develop merge: the cases above rewind one filter-slot cell under one mark and compile the
+ * projection list's flags only */
+
+TEST_CASE ("contract C6: two filter-slot cells in one rewound range -- n_shared drops by both and both indexes are "
+	   "unflagged", "[contract]")
+{
+  scene s;
+  bctx_guard g (s);
+  mark_guard m (g.b);
+
+  /* a hit is taken before any CSE lookup (expr_compile_node_arith ()): the same expression twice is two cells */
+  REQUIRE (unitseam_compile (g.b, s.cast_c1 ()) == 0);
+  REQUIRE (unitseam_compile (g.b, s.cast_c1 ()) == 1);
+  REQUIRE (unitseam_cell_src (g.b, 1) == EXPR_CSRC_SHARE);
+  REQUIRE (unitseam_n_shared (g.b) == 2);
+
+  unitseam_rewind (g.b, m.m);
+
+  CHECK (unitseam_n_cells (g.b) == 0);
+  CHECK (unitseam_n_shared (g.b) == 0);
+  CHECK_FALSE (unitseam_cell_shared (g.b, 0));
+  CHECK_FALSE (unitseam_cell_shared (g.b, 1));
+}
+
+TEST_CASE ("contract C7: nested marks -- the inner rewind takes back only its own filter-slot cell, a plain cell then "
+	   "built at that index is unflagged, and the outer rewind takes back the rest", "[contract]")
+{
+  scene s;
+  bctx_guard g (s);
+  mark_guard outer (g.b);
+
+  REQUIRE (unitseam_compile (g.b, s.cast_c1 ()) == 0);
+  {
+    mark_guard inner (g.b);
+
+    REQUIRE (unitseam_compile (g.b, s.cast_c1 ()) == 1);
+    REQUIRE (unitseam_compile (g.b, s.c1 ()) == 2);
+    REQUIRE (unitseam_n_shared (g.b) == 2);
+
+    unitseam_rewind (g.b, inner.m);
+
+    CHECK (unitseam_n_cells (g.b) == 1);
+    CHECK (unitseam_n_shared (g.b) == 1);
+    CHECK (unitseam_cell_shared (g.b, 0));
+    CHECK_FALSE (unitseam_cell_shared (g.b, 1));
+    CHECK (unitseam_n_shared (g.b) == unitseam_n_share_cells (g.b));
+  }
+  REQUIRE (unitseam_compile (g.b, s.c2 ()) == 1);
+  CHECK (unitseam_cell_src (g.b, 1) == EXPR_CSRC_VALUE);
+  CHECK_FALSE (unitseam_cell_shared (g.b, 1));
+  CHECK (unitseam_n_shared (g.b) == 1);
+
+  unitseam_rewind (g.b, outer.m);
+
+  CHECK (unitseam_n_cells (g.b) == 0);
+  CHECK (unitseam_n_shared (g.b) == 0);
+  CHECK_FALSE (unitseam_cell_shared (g.b, 0));
+  CHECK_FALSE (unitseam_cell_shared (g.b, 1));
+}
+
+TEST_CASE ("contract C8: the cell table's last index -- a hit there is counted, a hit that finds the table full is not, "
+	   "and a rewind over the full table takes the last index back", "[contract]")
+{
+  scene s;
+  bctx_guard g (s);
+  const int max_cells = unitseam_max_cells ();	/* EXPR_MAX_STEPS */
+  /* max_cells - 1 distinct value-list slots: CSE keys a column leaf by its slot, so each is a cell of its own */
+  std::vector < DB_VALUE > slots (max_cells - 1);
+  std::vector < REGU_VARIABLE > leaves (max_cells - 1);
+  mark_guard m (g.b);
+
+  for (int i = 0; i < max_cells - 1; i++)
+    {
+      memset (&slots[i], 0, sizeof (DB_VALUE));
+      memset ((void *) &leaves[i], 0, sizeof (REGU_VARIABLE));
+      leaves[i].type = TYPE_CONSTANT;
+      leaves[i].domain = &D ().d_int;
+      leaves[i].value.dbvalptr = &slots[i];
+      REQUIRE (unitseam_compile (g.b, &leaves[i]) == i);
+    }
+  REQUIRE (unitseam_compile (g.b, s.cast_c1 ()) == max_cells - 1);
+  CHECK (unitseam_cell_shared (g.b, max_cells - 1));
+  CHECK (unitseam_n_shared (g.b) == 1);
+
+  /* expr_new_cell () refuses the hit: no cell, no count */
+  CHECK (unitseam_compile (g.b, s.cast_c1 ()) == -1);
+  CHECK (unitseam_n_cells (g.b) == max_cells);
+  CHECK (unitseam_n_shared (g.b) == 1);
+  CHECK (unitseam_n_shared (g.b) == unitseam_n_share_cells (g.b));
+
+  unitseam_rewind (g.b, m.m);
+
+  CHECK (unitseam_n_cells (g.b) == 0);
+  CHECK (unitseam_n_shared (g.b) == 0);
+  CHECK_FALSE (unitseam_cell_shared (g.b, max_cells - 1));
+}
+
+TEST_CASE ("contract A1: aggregate operands [LEAST (...), CAST (c1 AS DOUBLE)] (the GROUP BY-less form of the issue, "
+	   "expr_agg_prog_settle ()) -- one filter-slot cell counted once, and the image unpacks", "[contract]")
+{
+  scene s;
+  REGU_VARIABLE *roots[2] = { s.least_rejected (), s.cast_c1 () };
+  int idx[2] = { -9, -9 };
+
+  EXPR_PROG *prog = s.compile_agg (roots, 2, idx);
+
+  REQUIRE (prog != NULL);
+  CHECK (idx[0] == -1);
+  CHECK (idx[1] == 0);
+  CHECK (prog->n_cells == 1);
+  CHECK (prog->cell_src[0] == EXPR_CSRC_SHARE);
+  CHECK (prog->n_shared == n_share_cells (prog));
+  CHECK (prog->n_shared == 1);
+  {
+    round_trip rt (prog, roots, 2, idx, s.spec);
+    REQUIRE (rt.image != NULL);
+    CHECK (rt.bound != NULL);
+    if (rt.bound != NULL)
+      {
+	CHECK (rt.bound->n_shared == 1);
+	CHECK (rt.bound->cells[0] == &s.filter_slot);
+	CHECK (rt.idx == std::vector < int > ({-1, 0}));
+      }
+  }
+  expr_prog_free (prog);
+}
+
+TEST_CASE ("contract A2: aggregate operands [LEAST (...), c1] -- the plain column kept as a wired-only root carries no "
+	   "shared count, so the server takes the list as plain operands (n_compute 0 and n_shared 0, "
+	   "qdata_agg_operand_prog_compile ())", "[contract]")
+{
+  scene s;
+  REGU_VARIABLE *roots[2] = { s.least_rejected (), s.c1 () };
+  int idx[2] = { -9, -9 };
+
+  EXPR_PROG *prog = s.compile_agg (roots, 2, idx);
+
+  REQUIRE (prog != NULL);
+  CHECK (idx[0] == -1);
+  CHECK (idx[1] == 0);
+  CHECK (prog->n_cells == 1);
+  CHECK (prog->cell_src[0] == EXPR_CSRC_VALUE);
+  CHECK (prog->n_compute == 0);
+  CHECK (n_share_cells (prog) == 0);
+  CHECK (prog->n_shared == 0);
+  expr_prog_free (prog);
+}
+
+TEST_CASE ("contract E3: [LEAST (LEAST (CAST, CAST), CASE ...), c1] -- two filter-slot hits under the rejected root "
+	   "leave nothing behind: the plain column keeps the consumer's path, no program", "[contract]")
+{
+  scene s;
+  REGU_VARIABLE *roots[2] = { s.least_two_hits_rejected (), s.c1 () };
+  int idx[2] = { -9, -9 };
+
+  EXPR_PROG *prog = s.compile_list (roots, 2, idx);
+
+  CHECK (idx[0] == -1);
+  CHECK (idx[1] == -1);
+  CHECK (prog == NULL);
+  expr_prog_free (prog);
+}
+
+TEST_CASE ("contract E4: [LEAST (LEAST (CAST, CAST), CASE ...), CAST (c1 AS DOUBLE)] -- both hits under the rejected root "
+	   "are uncounted, so the next hit is the program's one filter-slot cell and the image unpacks", "[contract]")
+{
+  scene s;
+  REGU_VARIABLE *roots[2] = { s.least_two_hits_rejected (), s.cast_c1 () };
+  int idx[2] = { -9, -9 };
+
+  EXPR_PROG *prog = s.compile_list (roots, 2, idx);
+
+  REQUIRE (prog != NULL);
+  CHECK (idx[0] == -1);
+  CHECK (idx[1] == 0);
+  CHECK (prog->n_cells == 1);
+  CHECK (prog->cell_src[0] == EXPR_CSRC_SHARE);
+  CHECK (prog->n_shared == n_share_cells (prog));
+  CHECK (prog->n_shared == 1);
+  {
+    round_trip rt (prog, roots, 2, idx, s.spec);
+    REQUIRE (rt.image != NULL);
+    CHECK (rt.bound != NULL);
+  }
+  expr_prog_free (prog);
+}
+
+TEST_CASE ("contract A3: aggregate operands [LEAST (LEAST (CAST, CAST), CASE ...), c1] -- both hits uncounted: the "
+	   "wired-only plain column carries no shared count", "[contract]")
+{
+  scene s;
+  REGU_VARIABLE *roots[2] = { s.least_two_hits_rejected (), s.c1 () };
+  int idx[2] = { -9, -9 };
+
+  EXPR_PROG *prog = s.compile_agg (roots, 2, idx);
+
+  REQUIRE (prog != NULL);
+  CHECK (idx[0] == -1);
+  CHECK (idx[1] == 0);
+  CHECK (prog->n_cells == 1);
+  CHECK (prog->cell_src[0] == EXPR_CSRC_VALUE);
+  CHECK (prog->n_compute == 0);
+  CHECK (prog->n_shared == n_share_cells (prog));
+  CHECK (prog->n_shared == 0);
+  expr_prog_free (prog);
+}
+
 /* ================================================================ defect (PASS = the defect is there) */
+
+TEST_CASE ("PR8469 F3 (2026-11-10, the TLA+ model's shortest develop trace): [LEAST (LEAST (CAST, CAST), CASE ...), c1] "
+	   "-- the stale flag keeps the plain column, n_shared 2 over one cell, and expr_prog_image_unpack () refuses the "
+	   "image (a debug server aborts in expr_valptr_prog_settle ())", "[defect]")
+{
+  scene s;
+  REGU_VARIABLE *roots[2] = { s.least_two_hits_rejected (), s.c1 () };
+  int idx[2] = { -9, -9 };
+
+  EXPR_PROG *prog = s.compile_list (roots, 2, idx);
+
+  REQUIRE (prog != NULL);
+  INFO ("n_cells " << prog->n_cells << ", n_shared " << prog->n_shared << ", filter-slot cells " <<
+	n_share_cells (prog));
+  CHECK (idx[1] == 0);
+  CHECK (prog->n_cells == 1);
+  CHECK (prog->cell_src[0] == EXPR_CSRC_VALUE);
+  CHECK (prog->n_shared == 2);
+  {
+    round_trip rt (prog, roots, 2, idx, s.spec);
+    REQUIRE (rt.image != NULL);
+    CHECK (rt.bound == NULL);
+  }
+  expr_prog_free (prog);
+}
 
 TEST_CASE ("PR8469 F1: expr_build_rewind () leaves a rewound filter-slot cell counted in n_shared and flagged in "
 	   "cell_shared[]", "[defect]")

@@ -1,0 +1,22 @@
+--- a/src/transaction/log_tran_table.c
++++ b/src/transaction/log_tran_table.c
+@@ -2990,8 +2990,9 @@
+ 		if (tran_worker != NULL)
+ 		  {
+ 		    /* that worker clears its conn_entry when it ends its request, with no lock this thread holds:
+-		     * read it once */
++		     * read it once, and its session id before the wake below lets the worker end the request */
+ 		    CSS_CONN_ENTRY *tran_conn = tran_worker->conn_entry;
++		    SESSION_ID tran_session_id = (tran_conn != NULL) ? tran_conn->session_id : DB_EMPTY_SESSION;
+ 
+ 		    /* single regular SQL: wake this transaction's own suspended worker */
+ 		    thread_check_suspend_reason_and_wakeup (tran_worker, THREAD_RESUME_DUE_TO_INTERRUPT,
+@@ -3000,7 +3001,7 @@
+ 		      {
+ 			/* parallel sibling workers, or nested SLEEP() in a PL/CSQL procedure:
+ 			 * wake all suspended workers of the same session */
+-			logtb_interrupt_session_sleepers (thread_p, tran_conn->session_id);
++			logtb_interrupt_session_sleepers (thread_p, tran_session_id);
+ 		      }
+ 		  }
+ 	      }

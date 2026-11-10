@@ -1,0 +1,24 @@
+{
+ "name": "per-row list clear -- qexec_clear_all_lists () clears the correlated-subquery lists under the block it gets (its dptr, each scan's dptr, and those under its bptr and fptr blocks) and nothing of the block's next, which is the next operand of a set operation that the parallel subquery executor may be running on another thread",
+ "file": "src/query/query_executor.c",
+ "mode": "server",
+ "seams": [],
+ "appendix": "hooks.cpp",
+ "test": "test.cpp",
+ "watch": [
+  "src/query/xasl.h"
+ ],
+ "fakes": "No seam: qexec_clear_all_lists (), qexec_clear_head_lists (), qexec_clear_scan_all_lists () and qexec_clear_xasl_head () are real. Fakes (test.cpp): qfile_close_list () does nothing and qfile_destroy_list () records the list id it gets -- qexec_clear_xasl_head () calls the two for a list id that is not result-cached (query_executor.c:1563-1567 at 482608da0); xcache_uses_clones () is false, so a cleared head ends XASL_CLEARED (:1584-1599). XASL nodes are calloc'd as regu_alloc + regu_init leave them (option Q_ALL, scan_op_type S_SELECT, parallelism -1), status XASL_SUCCESS (executed), each with a calloc'd list id of its own; single_tuple NULL and no XASL_HAS_CONNECT_BY, so the head clear touches nothing else. The fixture is the issue's query: two operands of a UNION ALL (next to each other in the parent's aptr list, as pt_set_aptr () / pt_append_xasl () link them), each a join whose IN subquery -- correlated with the outer table, flagged XASL_LINK_TO_REGU_VARIABLE -- sits on the dptr_list of the inner scan (scan_ptr). The full operand adds the other branches: the block's own dptr_list (a correlated subquery, then an XASL_ZERO_CORR_LEVEL one that qexec_clear_head_lists () skips), a bptr_list of two OBJFETCH_PROC blocks with a dptr each, an fptr_list block with a dptr, and a second scan on the scan_ptr chain with a dptr.",
+ "note": "develop (953e83256) walked the block's next (query_executor.c:3755-3784): its [contract] case 'the next block ...' FAILs there (12 lists destroyed instead of 6) and the two [defect] cases PASS; the PR head 482608da0 passes the five [contract] cases and fails the two [defect] cases. defects_fixed_in is the PR head commit; the squash commit on develop gets another hash -- replace it once the PR merges.",
+ "origin": {
+  "pr": 8436,
+  "jira": "CBRD-27959",
+  "finding": "self-review contract suite (no defect in the PR); TLA+ model tla/query/clear_all_lists_sibling",
+  "reviewed_head": "482608da0",
+  "date": "2026-11-10"
+ },
+ "requires": [
+  "qexec_clear_all_lists"
+ ],
+ "defects_fixed_in": "482608da0"
+}

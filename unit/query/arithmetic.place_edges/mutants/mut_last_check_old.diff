@@ -1,0 +1,11 @@
+--- a/src/query/arithmetic.c
++++ b/src/query/arithmetic.c
+@@ -5157,7 +5157,7 @@ db_width_bucket (DB_VALUE * result, const DB_VALUE * value1, const DB_VALUE * va
+     {
+       RETURN_ERROR (ER_QPROC_OVERFLOW_DIVISION);
+     }
+-  else if (OR_CHECK_INT_OVERFLOW_FROM_FP (d_ret))
++  else if (OR_CHECK_INT_OVERFLOW (d_ret))
+     {
+       RETURN_ERROR (ER_QPROC_OVERFLOW_ADDITION);
+     }

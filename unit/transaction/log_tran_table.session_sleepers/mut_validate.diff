@@ -1,0 +1,41 @@
+--- a/src/transaction/log_tran_table.c
++++ b/src/transaction/log_tran_table.c
+@@ -2986,22 +2986,32 @@
+ #if defined (SERVER_MODE)
+ 	      /* Wake workers suspended inside the SLEEP() built-in so this cancel reaches them. */
+ 	      {
++		int tran_client_id = tdes->client_id;
+ 		THREAD_ENTRY *tran_worker = logtb_find_thread_by_tran_index_except_me (tran_index);
+ 		if (tran_worker != NULL)
+ 		  {
+ 		    /* that worker clears its conn_entry when it ends its request, with no lock this thread holds:
+ 		     * read it once */
+ 		    CSS_CONN_ENTRY *tran_conn = tran_worker->conn_entry;
++		    SESSION_ID tran_session_id = DB_EMPTY_SESSION;
+ 
+-		    /* single regular SQL: wake this transaction's own suspended worker */
+-		    thread_check_suspend_reason_and_wakeup (tran_worker, THREAD_RESUME_DUE_TO_INTERRUPT,
+-							    THREAD_SLEEP_FUNC_SUSPENDED);
+ 		    if (tran_conn != NULL)
+ 		      {
+-			/* parallel sibling workers, or nested SLEEP() in a PL/CSQL procedure:
+-			 * wake all suspended workers of the same session */
+-			logtb_interrupt_session_sleepers (thread_p, tran_conn->session_id);
++			tran_session_id = tran_conn->session_id;
++			/* the worker may have left this transaction since it was found, and a connection that closed
++			 * serves the next client: use the session only while the connection is still this client's */
++			if (tran_conn->client_id != tran_client_id)
++			  {
++			    tran_session_id = DB_EMPTY_SESSION;
++			  }
+ 		      }
++
++		    /* single regular SQL: wake this transaction's own suspended worker */
++		    thread_check_suspend_reason_and_wakeup (tran_worker, THREAD_RESUME_DUE_TO_INTERRUPT,
++							    THREAD_SLEEP_FUNC_SUSPENDED);
++		    /* parallel sibling workers, or nested SLEEP() in a PL/CSQL procedure: wake all suspended workers of the
++		     * same session (returns at once on DB_EMPTY_SESSION) */
++		    logtb_interrupt_session_sleepers (thread_p, tran_session_id);
+ 		  }
+ 	      }
+ #endif /* SERVER_MODE */

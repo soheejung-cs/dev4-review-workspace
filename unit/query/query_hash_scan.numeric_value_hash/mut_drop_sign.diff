@@ -1,0 +1,11 @@
+--- a/src/query/query_hash_scan.c
++++ b/src/query/query_hash_scan.c
+@@ -386,7 +386,7 @@
+   residue = qdata_hash_mod_prime ((uint128_t) residue * qdata_hash_pow10_mod_prime (-scale));
+   if (DB_VALUE_NUMERIC_IS_VALUE_NEGATIVE (value) && residue != 0)
+     {
+-      residue = QDATA_HASH_PRIME - residue;
++      residue = residue;
+     }
+ 
+   /* the 61 bits into 32, then mht_get_hash_number ()'s mixing (mht_get_shiftmult32 ()) and reduction (mht_reduce ()) */

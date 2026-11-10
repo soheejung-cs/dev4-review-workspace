@@ -1,0 +1,38 @@
+--- a/src/query/arithmetic.c
++++ b/src/query/arithmetic.c
+@@ -2045,6 +2045,11 @@
+     }
+ 
+   scale_up = pow (10, integer);
++  if (scale_up == 0)
++    {
++      /* the place is past every digit a double holds (pow () underflowed, -Inf too): the value rounds to 0 */
++      return 0;
++    }
+ 
+   if (!FINITE (num * scale_up))
+     {
+@@ -3259,6 +3264,11 @@
+ 
+   scale_up = pow (10, integer);
+   num_scale_up = num * scale_up;
++  if (num_scale_up == 0)
++    {
++      /* the scaled value underflowed: below one unit of the place, so it truncates to 0 */
++      return 0;
++    }
+   if (num > 0)
+     {
+       result = floor (num_scale_up);
+@@ -3294,6 +3304,11 @@
+       return num;
+     }
+ 
++  if (integer < -18)
++    {
++      /* 10^19 and up is past every BIGINT (and -INT64_MIN would overflow): the value truncates to 0 */
++      return 0;
++    }
+   integer = (DB_BIGINT) pow (10, (double) -integer);
+   num -= num % integer;
+ 

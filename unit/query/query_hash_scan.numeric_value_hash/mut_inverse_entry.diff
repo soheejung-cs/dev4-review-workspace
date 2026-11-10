@@ -1,0 +1,11 @@
+--- a/src/query/query_hash_scan.c
++++ b/src/query/query_hash_scan.c
+@@ -305,7 +305,7 @@
+ 
+ static const uint64_t qdata_hash_pow10_inverse[QDATA_HASH_POW10_MAX + 1] = {
+   UINT64_C (0x000000000000001), UINT64_C (0x1ccccccccccccccc), UINT64_C (0xfae147ae147ae14),
+-  UINT64_C (0xe5e353f7ced9168), UINT64_C (0x14a305532617c1bd), UINT64_C (0x5438088509bf9c6),
++  UINT64_C (0xe5e353f7ced9169), UINT64_C (0x14a305532617c1bd), UINT64_C (0x5438088509bf9c6),
+   UINT64_C (0x6ed2674080f98fa), UINT64_C (0x1a4aea3ecd9b28e5), UINT64_C (0x12a1176cae291db0),
+   UINT64_C (0x1dce8be116a82f8), UINT64_C (0x1362e41301bdd9e5), UINT64_C (0x11f04a01e692fc30),
+   UINT64_C (0x831a10030a84c6b), UINT64_C (0xa6b5ce66b4407a4), UINT64_C (0x10abc7d7120672a),

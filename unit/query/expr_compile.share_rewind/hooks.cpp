@@ -148,3 +148,18 @@ unitseam_valptr_prog_keep (EXPR_PROG * prog, const int *idx, int n)
 {
   return expr_valptr_prog_keep (prog, idx, n);
 }
+
+/* the aggregate operand list's keep rule (a program that covers a root is kept, wired-only included), as both
+ * expr_agg_prog_image_at_generation () and expr_agg_prog_settle () apply it -- added 2026-11-10, head 1de189701 */
+EXPR_PROG *
+unitseam_agg_prog_keep (EXPR_PROG * prog, const int *idx, int n)
+{
+  return expr_agg_prog_keep (prog, idx, n);
+}
+
+/* the size of the build context's tables (EXPR_MAX_STEPS is private to the TU) */
+int
+unitseam_max_cells (void)
+{
+  return EXPR_MAX_STEPS;
+}

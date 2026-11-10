@@ -1,0 +1,40 @@
+{
+ "name": "PR#8414(CBRD-27798) qdata_hash_scan_value 의 NUMERIC 값 해시 — 비교가 같은 NUMERIC(고정 p,s 의 문법 범위 -84..127·부동 끝자리 0·부동 -214..252·계수 2^64·2^128 이상·두 부호·0)은 어느 표 크기에서도 해시가 같고, 다른 값(1.23·12.3·123·1230·0.123·-123·-1.23, x 와 -x)은 갈리며 정형 열(돈·정수·YYYYMMDD·0.0001 걸음)이 퍼지고, 칸 줄이기는 mht_get_hash_number 와 같고, 해시 리스트 스캔 키(qdata_hash_scan_key 세 방식·step/finish)도 같고, NUMERIC 밖 형은 mht_get_hash_number 그대로",
+ "file": "src/query/query_hash_scan.c",
+ "mode": "server",
+ "seams": [],
+ "appendix": "",
+ "test": "test.cpp",
+ "extra": [
+  "src/base/memory_hash.c",
+  "src/query/numeric_opfunc.c",
+  "src/compat/db_macro.c"
+ ],
+ "requires": [
+  "qdata_hash_scan_value",
+  "qdata_hash_scan_numeric"
+ ],
+ "watch": [
+  "src/base/memory_hash.c",
+  "src/query/numeric_opfunc.h",
+  "src/query/numeric_opfunc.c",
+  "src/compat/dbtype_def.h",
+  "src/compat/dbtype_function.i"
+ ],
+ "fakes": "er_set/er_errid/er_clear(마지막 id 기억), prm_Def(ORACLE_COMPAT_NUMBER_BEHAVIOR 끔, 그 밖 0). 그 밖은 실코드: query_hash_scan.c(대상 TU), memory_hash.c(mht_get_hash_number — NUMERIC 밖 형·develop 판의 NUMERIC 해시), numeric_opfunc.c(같음의 기준 numeric_db_value_compare·문자열 → NUMERIC), db_macro.c. DATE·TIME 값은 db_date.c 를 링크하지 않으므로 인코딩된 필드로 직접 만든다(db_make_date 는 자동 stub db_date_encode 로 abort).",
+ "note": "같음의 기준은 numeric_db_value_compare () — 해시 리스트 스캔이 후보에 다시 적용하는 NUMERIC 쌍 비교는 변환 없는 NUMERIC cmpval 이다(domain_rules.c domain_compute_comparison: 같은 형이면 conv 없음). N1 은 같은 값 344,544쌍 × 표 크기 6개, 부호가 다른 0 은 비교가 가르므로 세지 않는다. N2 의 칸 부하: 4,096 값 / 1,024 칸에서 가장 찬 칸 10. requires 에 qdata_hash_scan_numeric 을 넣어 PR 이 들어오기 전 리비전에서는 '적용 안 됨'(develop 판은 아래 verified 에 남김). 변이 4종(mut_*.diff, 이 디렉터리): 역원 표 한 항(10^-3) 1비트 → N1 FAIL 46,846쌍, 부호 무시 → N2 FAIL(7개 중 5 해시, x·-x 4,096쌍 같음), byte 0 항 제거 → N1 FAIL 32,627쌍(40자리 계수), 반복 걸음 40→39 → N1 FAIL 76,454쌍(scale 41 이상). 상수표 82항은 파이썬으로 10^k·10^-k mod 2^61-1 을 다시 계산해 모두 일치(리뷰 산출물 verify_tables.py).",
+ "origin": {
+  "pr": 8414,
+  "jira": "CBRD-27798",
+  "finding": "계약 suite(자기 리뷰 2026-11-10, harness-review 3-1 c) — 결함 없음. 주석 불일치 G1-01(qdata_hash_pow10_mod_prime 의 '40 넘는 것은 부동 값뿐')은 N1 의 고정 NUMERIC(1,127)·(1,-84) 이 코드가 맞음을 보인다",
+  "comment": "https://github.com/CUBRID/cubrid/pull/8414",
+  "reviewed_head": "0f4b7019a",
+  "base": "e98bdd885",
+  "date": "2026-11-10",
+  "verified": [
+   "0f4b7019a: N1-N5 PASS(단정 495,741)",
+   "e98bdd885(develop, qdata_hash_scan_numeric 없음 — requires 없이 직접 실행): N1 FAIL(같은 값 997,770 칸 비교 갈림 — 고정 NUMERIC 은 scale 을 빼고 17바이트를 접음), N2 FAIL(1.23·12.3·123·1230·0.123·-123·-1.23 이 한 해시, x·-x 4,096쌍 같음), N4 FAIL(6), N3·N5 PASS",
+   "0f4b7019a + mut_inverse_entry.diff: N1 FAIL / mut_drop_sign.diff: N2 FAIL / mut_drop_byte0.diff: N1 FAIL / mut_loop_step.diff: N1 FAIL"
+  ]
+ }
+}

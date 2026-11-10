@@ -1,0 +1,11 @@
+--- a/src/query/expr_compile.c
++++ b/src/query/expr_compile.c
+@@ -2080,7 +2080,8 @@
+       if (bctx->cell_shared[j])
+ 	{
+ 	  bctx->cell_shared[j] = false;
+ 	  bctx->n_shared--;
++	  break;
+ 	}
+     }
+   bctx->n_steps = mark->n_steps;

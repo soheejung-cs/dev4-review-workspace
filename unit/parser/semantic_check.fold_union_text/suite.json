@@ -1,0 +1,45 @@
+{
+ "name": "PR#8428 (CBRD-27961) pt_fold_union () -- the node that takes the place of a folded set operation (the remaining arm, the derived table made around it, or the NULL value) takes the set operation's sql_user_text and sql_user_text_len with its line, column, alias and next; a set operation that is a subquery keeps the text its arms already carry; the derived table gets the set operation's ORDER BY, LIMIT and rewrite flag; nothing to fold returns the node as is; a derived table that cannot be made returns NULL with the parser error",
+ "requires": [
+  "pt_fold_union"
+ ],
+ "file": "src/parser/semantic_check.c",
+ "mode": "cs",
+ "seams": [
+  "pt_check_order_by"
+ ],
+ "appendix": "",
+ "test": "test.cpp",
+ "extra": [
+  "src/parser/parse_tree.c",
+  "src/parser/parse_tree_cl.c",
+  "src/base/language_support.c",
+  "src/base/intl_support.c",
+  "src/base/chartype.c",
+  "src/object/object_domain.c",
+  "src/object/object_primitive.c",
+  "src/query/domain_rules.c",
+  "src/compat/db_macro.c",
+  "src/base/memory_alloc.c",
+  "src/base/system_parameter.c"
+ ],
+ "watch": [
+  "src/parser/parse_tree.h",
+  "src/parser/parse_tree_cl.c",
+  "src/parser/csql_grammar.y",
+  "src/parser/view_transform.c"
+ ],
+ "fakes": "진짜: semantic_check.c(TU: pt_fold_union), parse_tree.c + parse_tree_cl.c(parser_create_parser·parser_new_node(sql_user_text = g_query_string, sql_user_text_len = g_query_string_len -- parse_tree_cl.c:2501-2502)·pt_init_*·pt_move_node·parser_free_tree·parser_free_parser), language_support.c + intl_support.c + chartype.c(en_US.utf8), object_domain.c + object_primitive.c + domain_rules.c, db_macro.c, memory_alloc.c, system_parameter.c. 가짜: g_query_string·g_query_string_len = csql_grammar.y:464-466 의 전역(C 링키지, parse_tree_cl.c:494-498) -- 케이스가 문법 동작대로 둔다: 문장 시작에 g_query_string 을 그 문장 첫 바이트로(csql_grammar.y:1844, 길이는 그대로), 문장 끝에 맨 위 노드와 g_query_string_len 에 그 문장 길이(1919-1922); '다른 파스가 돌았다' 는 전역을 다른 텍스트로(sm_virtual_queries 캐시 미스의 parser_parse_string -> parser_main 은 전역을 그 텍스트에 두고 돌아온다, csql_grammar.y:23955-23957). mq_rewrite_query_as_derived = view_transform.c:6617-6656 에서 fold 가 읽는 것만 -- parser_new_node PT_SPEC(derived_table = 질의, PT_IS_SUBQUERY) 위에 parser_new_node PT_SELECT(진짜는 질의를 parser_copy_tree 로 복사하고 열 이름 목록을 만든다), 실패면 parser->flag.has_internal_error 를 세우고 NULL. seam pt_check_order_by(semantic_check.c:15234) = 호출 횟수·대상만 기록하고 NO_ERROR. cubregex::get_engine_name·envvar_get/_trim_char·init_builtin_calendar_names·db_date_locale_init·pt_parser_line_col(위치 0)·pt_free_dblink_remote_cols·er_* = xasl_generation.session_variable_mark 와 같다.",
+ "note": "F1·F2(갈래로 접힘, 문장이 텍스트의 첫 문장 -- 갈래 길이 0)·F3(둘째 문장 -- 갈래가 앞 문장 길이 81 을 가져, develop 이면 XASL 캐시 사용자 텍스트로 65 바이트 문장에서 82 바이트를 복사 = or_pack_string_with_null_padding 의 len+1 memcpy, object_representation.c:1981-1987)·F5(NULL 값)·F7(파생 테이블, 다른 파스 뒤)·O1(집합 연산과 갈래의 텍스트가 다를 때 집합 연산 쪽 -- mq_translate_tree 의 pt_union 꼴)은 base FAIL = 이 PR 이 바꾼 동작. F6 은 base 도 PASS -- 문장 하나를 파스한 뒤 다른 파스가 없으면 전역이 그 문장을 가리켜 develop 의 파생 테이블도 텍스트를 가진다(TC cbrd_27961 Case 3 이 develop 에서도 같은 답인 이유). F4·F8·F9·F10 은 바뀌지 않은 동작.",
+ "origin": {
+  "pr": 8428,
+  "jira": "CBRD-27961",
+  "finding": "자기 리뷰 [contract] suite(harness-review 3-1(c)) -- 바뀐 함수의 텍스트 운반 계약 고정, 결함 재현 아님",
+  "comment": null,
+  "date": "2026-11-10",
+  "reviewed_head": "5c76bcfc1",
+  "base": "dcbab24d0",
+  "artifact": "harness-out/8428/5c76bcfc1/unit/semantic_check.fold_union_text/",
+  "result": "2026-11-10: head 5c76bcfc1 11/11 PASS, base dcbab24d0 5/11(F1·F2 길이 0, F3 앞 문장 길이 81, F5·F7 전역의 다른 텍스트, O1 갈래의 텍스트 -- 전부 이 PR 이 바꾼 동작; F4·F6·F8·F9·F10 PASS), stub 호출 0. 변이는 따로 두지 않았다 -- base 가 '운반하지 않음' 변이 구실을 하고 운반하는 다섯 자리(F1·F2·F3·F5·F7)가 모두 갈린다."
+ }
+}

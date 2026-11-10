@@ -1,0 +1,45 @@
+{
+ "name": "PR#8474(CBRD-27843) 자기 리뷰(.51) — integer_round 가 잡지 않은 끝: E1 정수 ROUND 의 BIGINT·SMALLINT 자릿수 끝값(INT64_MIN·-32768 = 0, INT64_MAX·32767 = 값 그대로), E2 WIDTH_BUCKET 마지막 범위 검사(OR_CHECK_INT_OVERFLOW_FROM_FP) — 너비가 0 으로 언더플로한 0 / 0 = NaN 이 ER_QPROC_OVERFLOW_ADDITION(develop INT_MIN), U1 ALTER TABLE … CHANGE 의 행별 tp_value_cast(제자리) NaN → NUMERIC(10,2) = DOMAIN_OVERFLOW·값은 NaN 그대로(develop 0.00) + 도메인 최솟값 -99999999.99, U2 같은 변환의 정수 대상은 develop 도 넘침(CBRD-27660) + [defect] 형제 TRUNC(T1 BIGINT 자릿수 INT64_MIN SIGFPE, T2 SMALLINT·INTEGER·DOUBLE -400 값 그대로, T3 BIGINT 최솟값 -19 그대로)·O3 DOUBLE·FLOAT·MONETARY ROUND -400 = NaN — 모두 develop·release/11.4 같음",
+ "file": "src/query/arithmetic.c",
+ "mode": "server",
+ "seams": [],
+ "test": "test.cpp",
+ "extra": [
+  "src/query/numeric_opfunc.c",
+  "src/compat/db_macro.c",
+  "src/object/object_primitive.c",
+  "src/object/object_domain.c",
+  "src/object/object_domain_convert.cpp"
+ ],
+ "requires": [
+  "db_round_dbval",
+  "db_trunc_dbval",
+  "db_width_bucket",
+  "round_bigint"
+ ],
+ "watch": [
+  "src/query/arithmetic.h",
+  "src/base/object_representation.h",
+  "src/query/numeric_opfunc.c",
+  "src/object/object_domain.c",
+  "src/object/object_domain_convert.cpp",
+  "src/storage/heap_file.c"
+ ],
+ "fakes": "er_set/er_errid/er_clear(마지막 id 하나, ER_IT_DATA_OVERFLOW 의 타입 이름 인자), prm_Def(RETURN_NULL_ON_FUNCTION_ERRORS 를 케이스마다 켬·끔, ORACLE_COMPAT_NUMBER_BEHAVIOR 끔, 그 밖은 0), area_alloc/area_free(tp_init 전 — tp_domain_new/tp_domain_free 의 TP_DOMAIN 을 calloc/free, 살아 있는 수). 그 밖은 실코드: arithmetic.c(대상 TU), numeric_opfunc.c, db_macro.c(db_value_domain_min), object_primitive.c, object_domain.c·object_domain_convert.cpp(tp_value_cast 의 제자리 변환·NUMERIC 변환기). integer_round(작성자 suite) 의 가짜를 그대로 따랐다. T1 은 fork 한 자식에서 부르고(SIGFPE 를 기본 처리로 되돌림) 부모가 waitpid 로 신호를 읽는다. 문자열 피연산자·문자열 자릿수는 언어 부팅이 필요해(stub abort) 넣지 않았다.",
+ "note": "requires 의 round_bigint 는 머지 전 가드다(integer_round 와 같음): E·U 계약은 develop 에서 FAIL 이 정상(이 PR 이 고친 동작)이라 PR#8474 가 들어가기 전 리비전에서는 이 suite 를 적용하지 않는다 — 머지 뒤 빼도 된다. T·O 는 develop 선재(별도 이슈 후보)라 head·base 모두 PASS(결함 있음)가 정상이고, 고치는 PR 이 들어오면 defects_fixed_in 에 그 커밋을 적는다. U1 의 ALTER 결과(strict=no 면 NaN → 도메인 최솟값)는 heap_object_upgrade_domain () 의 부호 판정(heap_file.c `db_get_double (v) >= 0`)을 정적으로 읽은 것이고 이 suite 는 그 앞(변환 상태·값 보존)과 뒤(최솟값)만 동적으로 본다. T1·T3 는 C 에서 정의되지 않은 동작(-INT64_MIN, 범위 밖 double → 정수)이라 결과는 x86-64·GCC 8.5 의 것이다 — 같은 식을 따로 -O0·-O2 로 컴파일해도 SIGFPE·INT64_MIN 이었다(2026-11-10).",
+ "origin": {
+  "pr": 8474,
+  "jira": "CBRD-27843",
+  "finding": "자기 리뷰(.51) — 단위 단계 [contract] 보강(E1·E2·U1) + 지적 G1(ALTER … CHANGE 의 NaN 부수 변화)·G2(형제 TRUNC 결함) 확인",
+  "comment": "https://github.com/CUBRID/cubrid/pull/8474",
+  "date": "2026-11-10",
+  "verified": [
+   "9b821cbe1(PR 헤드): 계약 E1 E2 U1 U2 4/4 PASS, [defect] T1 T2 T3 O3 PASS(결함 있음), stub 호출 0",
+   "e30370dc0(develop, merge-base): 계약 E1 E2 U1 FAIL(이 PR 이 고친 동작 — E1 7줄·E2 3줄·U1 3줄) · U2 PASS, [defect] T1 T2 T3 O3 PASS(선재)",
+   "MALLOC_CHECK_=3 MALLOC_PERTURB_=165: 두 리비전 케이스별 결과 동일",
+   "9b821cbe1 + mutants/mut_last_check_old.diff(5160 을 OR_CHECK_INT_OVERFLOW 로 되돌림): E2 만 FAIL",
+   "9b821cbe1 + mutants/fix_far_place.diff(round_double 의 pow 언더플로 → 0, truncate_double 의 0 스케일 → 0, truncate_bigint 의 자릿수 < -18 → 0): T1 T2 T3 O3 FAIL(고쳐짐)·E/U PASS — 같은 패치에서 integer_round 는 C5(-Inf 3줄·-400.5 1줄)·C6(-Inf 1줄)만 바뀜",
+   "T1·T3 의 식을 따로 g++ 8.5 -O0·-O2 로 컴파일: (5, INT64_MIN) SIGFPE, (INT64_MIN, -19) INT64_MIN — 두 최적화 수준 같음"
+  ]
+ }
+}

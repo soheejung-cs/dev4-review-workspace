@@ -1,0 +1,11 @@
+--- a/src/query/query_hash_scan.c
++++ b/src/query/query_hash_scan.c
+@@ -382,7 +382,7 @@
+   memcpy (&low, digits + 1 + sizeof (high), sizeof (low));
+   high = NUMERIC_BSWAP64 (high);
+   low = NUMERIC_BSWAP64 (low);
+-  residue = qdata_hash_mod_prime (((uint128_t) digits[0] << 6) + ((uint128_t) qdata_hash_mod_prime (high) << 3) + low);
++  residue = qdata_hash_mod_prime (((uint128_t) qdata_hash_mod_prime (high) << 3) + low);
+   residue = qdata_hash_mod_prime ((uint128_t) residue * qdata_hash_pow10_mod_prime (-scale));
+   if (DB_VALUE_NUMERIC_IS_VALUE_NEGATIVE (value) && residue != 0)
+     {
