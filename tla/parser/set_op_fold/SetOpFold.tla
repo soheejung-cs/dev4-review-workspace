@@ -21,6 +21,15 @@
 (* whether it has LIMIT 2 over its rows in value order (a block that       *)
 (* cannot take DISTINCT, pt_select_takes_distinct ()), and a WITH clause.  *)
 (*                                                                         *)
+(* The semantic check (pt_semantic_check_local ()) folds a nested set     *)
+(* operation, and types a parenthesized operand, before typing marks the   *)
+(* operands of a set operation (pt_eval_type_pre ()).  EarlyMark: the PR   *)
+(* marks them before the semantic check (pt_mark_union_leaf_nodes ());     *)
+(* without it the compile folds and converts them unmarked (the worst      *)
+(* case: an operand already false then, as a literal FALSE).  ValueGuard:  *)
+(* the PR keeps a set operation for its DISTINCT, or folds it into an      *)
+(* empty operand, only when that operand is still a query.                 *)
+(*                                                                         *)
 (* FIX = FALSE is develop, FIX = TRUE the PR.  README.md maps each action  *)
 (* to file:line.                                                           *)
 (***************************************************************************)
@@ -32,9 +41,12 @@ CONSTANTS
     WithChoice,    \* the values a leaf's WITH may take
     KeepAtExec,    \* the PR's first two plans: a marked set operation is never folded at execution
     IntoFix,       \* the PR folds into an operand with INTO as develop does, without DISTINCT
+    EarlyMark,     \* the PR marks the operands before the semantic check folds (pt_mark_union_leaf_nodes ())
+    ValueGuard,    \* the PR never keeps, or folds into, an empty operand already folded into a value
     FIX
 
 ASSUME Nested \in BOOLEAN /\ FIX \in BOOLEAN /\ KeepAtExec \in BOOLEAN /\ IntoFix \in BOOLEAN
+ASSUME EarlyMark \in BOOLEAN /\ ValueGuard \in BOOLEAN
 ASSUME ComplexChoice \subseteq BOOLEAN /\ ComplexChoice # {}
 ASSUME WithChoice \subseteq BOOLEAN /\ WithChoice # {}
 
@@ -125,13 +137,15 @@ Init ==
     /\ pc = "mark"
     /\ asserted = FALSE /\ outcome = "" /\ result = Empty /\ scanned = {}
 
-\* the PR: db_execute_and_keep_statement_local () marks the copied statement; pt_eval_type_pre () marks the operands
+\* the PR: db_execute_and_keep_statement_local () marks the copied statement; the operands are marked before the
+\* semantic check folds (EarlyMark: pt_mark_union_leaf_nodes ()), or by typing (pt_eval_type_pre ()) after the compile's
+\* semantic check has folded and converted them; at execution the copy carries the marks of the compile
 Mark ==
     /\ pc = "mark"
     /\ node' = [x \in Ids |->
                   IF ~FIX THEN node[x]
                   ELSE IF x = "T" THEN [node[x] EXCEPT !.mark = exec]
-                  ELSE [node[x] EXCEPT !.mark = TRUE]]
+                  ELSE [node[x] EXCEPT !.mark = EarlyMark \/ exec]]
     /\ pc' = "convert"
     /\ UNCHANGED << exec, top, expected, asserted, outcome, result, scanned >>
 
@@ -160,15 +174,19 @@ Decide(n, s) ==
                 ELSE IF a1n /\ a2n THEN "NULL"
                 ELSE IF a1n THEN (IF n[s].op = "UNION" THEN "ARG2" ELSE "NULL")
                 ELSE (IF n[s].op # "INTERSECT" THEN "ARG1" ELSE "NULL")
-        b2 == IF FIX /\ base = "NULL" /\ n[s].mark THEN (IF a1n THEN "ARG1" ELSE "ARG2") ELSE base
+        guardOk(id) == ~ValueGuard \/ IsQuery(n, id)
+        b2 == IF FIX /\ base = "NULL" /\ n[s].mark
+              THEN (IF a1n /\ guardOk(n[s].a1) THEN "ARG1" ELSE IF a2n /\ guardOk(n[s].a2) THEN "ARG2" ELSE "NULL")
+              ELSE base
         \* KeepAtExec: the statement's own set operations stay unfolded at execution (marked by the top's mark only)
         keepAtExec == FIX /\ KeepAtExec /\ exec /\ s \in KeptAtExecIds
         act == IF b2 = "ARG1" THEN n[s].a1 ELSE n[s].a2
+        emp == IF b2 = "ARG1" THEN n[s].a2 ELSE n[s].a1
     IN IF keepAtExec /\ base # "NOTHING" THEN "NOTHING:keep"
        ELSE IF b2 \in {"ARG1", "ARG2"}
        THEN (IF IsQuery(n, act) /\ n[act].with /\ n[s].with THEN "NOTHING:with"
              ELSE IF FIX /\ ~n[s].all /\ IsQuery(n, act) /\ ~Distinct(n, act) /\ ~IsNull(n, act)
-                     /\ ~(IntoFix /\ HasInto(n, act)) /\ ~TakesDistinct(n, act) THEN "NOTHING:distinct"
+                     /\ ~(IntoFix /\ HasInto(n, act)) /\ ~TakesDistinct(n, act) /\ guardOk(emp) THEN "NOTHING:distinct"
              ELSE b2)
        ELSE b2
 
@@ -177,6 +195,7 @@ Fold(n, s, parentOf) ==
     LET d == Decide(n, s)
         act == IF d = "ARG1" THEN n[s].a1 ELSE n[s].a2
         keep == FIX /\ ~n[s].all /\ ~Distinct(n, act) /\ ~IsNull(n, act) /\ ~(IntoFix /\ HasInto(n, act))
+                /\ (~ValueGuard \/ TakesDistinct(n, act))
     IN IF d = "NULL" THEN << [n EXCEPT ![s] = [kind |-> "VALUE"]], s >>
        ELSE IF d \in {"ARG1", "ARG2"}
        THEN << [x \in Ids |->
