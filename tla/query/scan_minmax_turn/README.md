@@ -22,6 +22,7 @@
 - `MaxIsRight` — 끝났을 때 결과가 필터를 통과하는 마지막 행(없으면 NULL). 질의가 내야 하는 값.
 - `PtrAtOidno` — 행을 읽는 순간 `curr_oidp` 가 `curr_oidno` 칸을 가리킨다(S_BEFORE·S_ON 이 지키는 관계).
 - `PtrInBatch` — 읽는 칸이 지금 묶음 안이다.
+- `AssertPre` — PR 이 S_GO_BACKWARD 에 넣은 assert(`curr_oidno < cnt`, 그 칸의 OID 가 유효)의 전제: 뒤집은 뒤 0번 칸을 읽을 때 묶음이 비어 있지 않고 포인터가 그 칸이다. 코드에서는 `call_get_next_index_oidset ()` 이 OID 0 개면 S_END 를 돌려(PR 헤드 `17851d328` scan_manager.c:5136-5145, ISS 는 다음 값으로 계속) S_SUCCESS 뒤에는 늘 cnt > 0 이다 — multi_range_opt(`cnt` 가 `multi_range_opt.cnt`)도 같다.
 - `Ends` — 스캔이 끝난다(약한 공정성).
 
 ## 결과
@@ -29,6 +30,10 @@
 |---|---|---|---|---|---|---|---|
 | 2026-11-10 (.51) | develop 동작(FIX=FALSE) | before.cfg | **MaxIsRight 위반**(기대대로) — 반례 7걸음 | 12,267 / 11,747 | 7 | 2.4s | TLC2 2.19 (tla2tools v1.7.4, sha256 `936a2620…`) |
 | 2026-11-10 (.51) | PR 헤드 `cb73834f9`(FIX=TRUE) | after.cfg | **전부 성립** — TypeOK·MaxIsRight·PtrAtOidno·PtrInBatch·Ends | 19,888 / 17,848 | 19 | 3.9s | 같음 |
+| 2026-11-11 (.51) | develop 동작(FIX=FALSE), base `38c931e7d` | before.cfg | **MaxIsRight 위반**(기대대로) — 반례 7걸음 | 12,265 / 11,745 | 7 | 5.1s | 같음 |
+| 2026-11-11 (.51) | PR 헤드 `17851d328`(develop 머지 뒤, scan_manager.c 변경은 `cb73834f9` 와 같음) | after.cfg + `AssertPre` | **전부 성립** — TypeOK·MaxIsRight·PtrAtOidno·PtrInBatch·AssertPre·Ends | 19,888 / 17,848 | 19 | 6.7s | 같음 |
+
+2026-11-11 계기: gha-ci run 42949787280 의 sql shard 03 에서 `_13_issues/_26_2h/cbrd_27733_predicates` 다음부터 서버에 붙지 못했다(-190). 모델 범위 안에서는 PR 의 새 포인터 설정과 assert 가 깨질 수 없다 — 서버가 죽은 원인은 이 모델로 설명되지 않는다(모델이 보지 않는 것 아래 참고, 동적 재현은 따로).
 
 before 반례(가장 짧은 것): 행 3개, 버퍼 2칸, 필터가 1행만 거름(이슈 재현의 -700 거름·500·600 통과와 같은 꼴, 버퍼만 작다).
 `Before` [1,2] → `Check` 1행 거름 → `Advance` 칸 1 → `Check` 2행 통과·방향 전환(누적 2) → `GoBack` [3,2] 를 읽고 번호 0, **포인터는 칸 1 에 남음** → `Check` 칸 1 의 2행을 MAX 로 확정(기대 3). 코드로는 S_BEFORE(:6051) → lookup(:6289) → S_ON(:6160) → qexec_intprt_fnc 의 전환(query_executor.c:14816-14843) → develop 의 S_GO_BACKWARD(:6095-6112, curr_oidp 그대로) → lookup 이 그 칸을 읽음.

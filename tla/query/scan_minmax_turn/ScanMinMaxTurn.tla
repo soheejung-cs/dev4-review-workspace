@@ -155,6 +155,11 @@ PtrAtOidno == pc = "check" => ptr = oidno
 (* the scan reads only the OIDs of the batch in the buffer *)
 PtrInBatch == pc = "check" => ptr < cnt
 
+\* PR 이 S_GO_BACKWARD 에 넣은 assert 의 전제(scan_manager.c, PR 헤드 17851d328 :6115-6127):
+\* 뒤집은 뒤 묶음의 0번 칸을 읽을 때 묶음이 비어 있지 않고 포인터가 그 칸이다 — call_get_next_index_oidset () 은
+\* OID 가 0 개면 S_END 라(:5136-5145) S_SUCCESS 뒤에는 cnt > 0 이다(모델의 GoBack 은 BatchLen > 0 일 때만 진행)
+AssertPre == (pc = "check" /\ dir = "bwd" /\ oidno = 0) => (cnt > 0 /\ ptr = 0)
+
 (* the scan ends *)
 Ends == <>(pc = "done")
 =============================================================================
