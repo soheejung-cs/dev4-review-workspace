@@ -186,7 +186,9 @@ Decide(n, s) ==
        ELSE IF b2 \in {"ARG1", "ARG2"}
        THEN (IF IsQuery(n, act) /\ n[act].with /\ n[s].with THEN "NOTHING:with"
              ELSE IF FIX /\ ~n[s].all /\ IsQuery(n, act) /\ ~Distinct(n, act) /\ ~IsNull(n, act)
-                     /\ ~(IntoFix /\ HasInto(n, act)) /\ ~TakesDistinct(n, act) /\ guardOk(emp) THEN "NOTHING:distinct"
+                     /\ ~(IntoFix /\ HasInto(n, act)) /\ ~TakesDistinct(n, act) /\ guardOk(emp)
+                     \* an empty operand with INTO (FOR UPDATE alike) folds as before too (pt_folds_without_distinct ())
+                     /\ ~(FIX /\ ValueGuard /\ HasInto(n, emp)) THEN "NOTHING:distinct"
              ELSE b2)
        ELSE b2
 
