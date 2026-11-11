@@ -115,6 +115,18 @@ def main():
     plan = json.load(open(a.plan, encoding='utf-8')); out = os.path.dirname(os.path.abspath(a.plan))
     repo = a.repo; res = {'ok': True, 'checks': {}}
     def fail(k, msg): res['ok'] = False; res['checks'].setdefault(k, []).append(msg)
+    # (0) 악영향 검토 — 사용자 지시 2026-11-11(CBRD-28019: 접기를 막자 빈 갈래가 표를 끝까지 읽었는데 승인 표에 없었다).
+    #     plan 은 바꾸는 경로마다 정확성·성능·호환의 해를 적고(S2), blocking 이 남아 있으면 구현으로 가지 않는다.
+    effects = plan.get('adverse_effects') or []
+    if not effects:
+        fail('adverse', 'plan.adverse_effects 가 없다 — S2 악영향 검토(정확성·성능·호환, 전→후·근거)를 채워 승인 표에 보인다')
+    for e in effects:
+        if not str(e.get('evidence', '')).strip():
+            fail('adverse', f"adverse_effects[{e.get('aspect')}/{e.get('where', '')[:40]}]: evidence 가 비었다 — 잰 값이나 file:line, 못 쟀으면 미측정과 이유")
+        if e.get('verdict') == 'blocking':
+            fail('adverse', f"adverse_effects[{e.get('aspect')}/{e.get('where', '')[:40]}]: blocking — plan 을 고쳐 다시 승인받는다")
+    if effects and not any(e.get('aspect') == 'performance' for e in effects):
+        res['checks'].setdefault('adverse-note', []).append('adverse_effects 에 performance 항목이 없다 — 더하거나 없애는 일(스캔·정렬·물질화·재컴파일·왕복)이 없다는 근거를 한 항목으로 적는다')
 
     # (1) 범위
     diff = sh('git', '-C', repo, 'diff', '--name-only', a.base).stdout.split() + sh('git', '-C', repo, 'ls-files', '--others', '--exclude-standard', 'src').stdout.split()

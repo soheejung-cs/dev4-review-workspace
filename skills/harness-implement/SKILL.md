@@ -34,8 +34,13 @@ python3 -m tools.harness.implement_pack --key CBRD-n --pr <PR>      # 리뷰 대
 
 ## S2. plan.json (LLM) → 사용자 승인
 **plan 을 쓰기 전에 `references/자가진화-규칙.md` 에서 해당 축의 규칙을 훑는다**(예: 수치 경계를 바꾸면 #003 동작표, 이슈 본문에 수정 스케치가 있으면 #007 — 2026-10-23).
-스키마 `harness/schemas/plan.json`. 필수: 영역 판정 문장 · INV-1~5 각각 touched 여부와 이유 · Tier · 공유/격리(공유면 계약 3요소) · **대안 ≥ 2**(채택 표시) · `changes[]`(팩의 candidate 중에서만; 관문을 건드리면 `gate_contract` 필수; 성능 경로면 `rule_ids`) · `tests[]`(재현→기대) · `regression_risks` · `needs_more_context`(비어 있지 않으면 S1 로 돌아가 팩을 넓힌다) · `questions`(닫힌 질문) · 성능 작업이면 `perf: true`(+ `structure` 경로) · **수명 있는 상태**(구조체 포인터 필드·캐시 항목·슬롯)를 더하면 `lifetime_state` 와 그 상태를 **놓는 자리 전수** `release_sites`(free·decache·retire·clear·destroy 호출부마다 released/cannot-attach/not-applicable — META-REVIEW PR#7658, H-33).
-`python3 -c "import json,jsonschema;jsonschema.validate(json.load(open('<out>/plan.json')),json.load(open('harness/schemas/plan.json')))"` 로 스키마 통과 후, **plan 을 표로 요약해 사용자에게 보이고 승인·수정을 받는다.** 설계문서가 있으면 「아이디어」·「대안표」와 어긋나는 점을 명시. 승인 전엔 코드를 고치지 않는다.
+스키마 `harness/schemas/plan.json`. 필수: 영역 판정 문장 · INV-1~5 각각 touched 여부와 이유 · Tier · 공유/격리(공유면 계약 3요소) · **대안 ≥ 2**(채택 표시) · `changes[]`(팩의 candidate 중에서만; 관문을 건드리면 `gate_contract` 필수; 성능 경로면 `rule_ids`) · `tests[]`(재현→기대) · `regression_risks` · **`adverse_effects`(악영향 검토, 아래)** · `needs_more_context`(비어 있지 않으면 S1 로 돌아가 팩을 넓힌다) · `questions`(닫힌 질문) · 성능 작업이면 `perf: true`(+ `structure` 경로) · **수명 있는 상태**(구조체 포인터 필드·캐시 항목·슬롯)를 더하면 `lifetime_state` 와 그 상태를 **놓는 자리 전수** `release_sites`(free·decache·retire·clear·destroy 호출부마다 released/cannot-attach/not-applicable — META-REVIEW PR#7658, H-33).
+**악영향 검토 — `adverse_effects`**(사용자 지시 2026-11-11, 등록부 #105): 채택안이 바꾸는 경로마다 목표 밖에서 생길 수 있는 해를 세 측면으로 적는다 — 무엇이 어디서 develop 의 무엇에서 무엇으로 바뀌고, 근거가 무엇인가.
+- **정확성**: 같은 함수를 부르는 다른 호출자·다른 패스(PREPARE/실행, csql/드라이버, 부질의/맨 위)·다른 문장 종류에서 결과·오류가 바뀌는가.
+- **성능**: 새로 생기거나 없어지는 일 — 스캔·정렬·물질화(파생 표·리스트 파일)·재컴파일·서버 왕복·락. **접기·단락·지름길을 막거나 바꾸면 그 지름길이 아끼던 일이 되살아난다**(CBRD-28019: 집합 연산을 접지 않게 하자 빈 갈래가 표를 끝까지 읽었다 — 20만 행).
+- **호환**: 결과 열 제목·INTO 대입·오류 코드·플랜/trace 출력·XASL 캐시 키.
+- 잴 수 있는 것은 **plan 승인 전에** 잰다 — develop 과 바꾼 꼴(구현 전이면 같은 모양의 기존 질의)을 CS 서버에서 `set trace on` 으로 돌려 readrows·fetch 를 비교한다(SA 의 `show trace` 는 NULL). 못 쟀으면 `measured: false` 와 이유. 판정 `blocking` 이 남으면 plan 을 고친다(implement_gate 가 막는다).
+`python3 -c "import json,jsonschema;jsonschema.validate(json.load(open('<out>/plan.json')),json.load(open('harness/schemas/plan.json')))"` 로 스키마 통과 후, **plan 을 표로 요약해 사용자에게 보이고 승인·수정을 받는다.** 승인 요청에는 plan 표 아래 **악영향 표**(측면·어디서·전→후·근거·판정)를 둔다 — 해가 없으면 '없음' 과 그 근거를 쓴다. plan 을 고쳐 다시 승인받을 때도 이 표를 다시 낸다. 설계문서가 있으면 「아이디어」·「대안표」와 어긋나는 점을 명시. 승인 전엔 코드를 고치지 않는다.
 
 ## S3. 구현
 - plan 의 `changes[]` 함수만 고친다. C 파일은 C 스타일(모던 C++ 관용구 금지), 성능규칙집은 **해당 축만**(핫패스일 때). 새 서버 요청은 3파일 계약(network.h·network_sr.c·network_interface_sr/cl).
