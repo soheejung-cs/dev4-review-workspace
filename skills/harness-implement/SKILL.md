@@ -16,7 +16,6 @@ description: 구현 하네스 — `/harness-implement <CBRD-n>`. 심볼·키워�
 ## S0. 준비
 - `projects/CBRD-n/설계문서.md` 가 있으면 그것이 입력(없고 불변조건·공유 자원을 건드릴 것 같으면 먼저 `design-doc`). 작은 버그(단일 모듈·불변조건 무관·바꿀 함수 ≤ 3)는 설계문서 없이 plan 으로 바로 간다 — **기본값**(2026-09-17).
 - 브랜치: `git fetch upstream develop && git checkout -B CBRD-n upstream/develop`(작업-생애주기 (B) 시작). 워킹트리 dirty 면 멈춘다. 빌드는 사용자가 정한다(빌드환경-규칙 §0).
-- **최신 develop 재현 — plan 보다 먼저**(규칙 #007 사례·작업-생애주기 (B), 사용자 확인 2026-11-11): 그 브랜치(= 지금의 upstream/develop)를 `goto CBRD-n` 으로 **새로** 빌드해 이슈 본문의 재현(크래시면 debug)을 돌리고, 재현된 rev·빌드·결과를 plan 과 승인 요청에 적는다. 캐시된 옛 설치본·다른 피처 브랜치 빌드로 대신하지 않는다 — "그 사이 그 파일이 안 바뀌었다" 는 diff 확인은 보조 근거일 뿐이다(2026-11-11 CBRD-28028 에서 `b01cc2876` 캐시로 스윕하고 넘어갈 뻔함). 재현이 안 되면 plan 을 쓰지 않고 사용자에게 보고한다(이미 고쳐졌거나 본문 전제가 틀림 — #007 사례 CBRD-27144). 기계화 대기 H-169.
 - **기존 PR 의 리뷰 대응(재구현)이면**: 대상은 리뷰어가 마지막으로 말한 미해결 스레드다 — `review_threads --pr <PR>`(S1 의 `implement_pack --pr` 도 만든다)의 '대응 필요' 만 보고, 작성자가 마지막인 것(resolve 대기)은 뺀다. 지적 시점 커밋이 헤드와 다르면 이미 닫힌 것부터 가른다(`review-response` §1). 브랜치가 develop 과 CONFLICTING 이면 **머지 → 빌드 → 기존 검증(A/B·CTP) → 수정** 순서가 기본(머지 자체가 컴파일 오류·훅 재이식을 낳는다 — #7866). 로컬 브랜치가 원격과 갈라져 있으면(force-push 이력) `git branch -f <br> origin/<br>` 로 맞춘 뒤 시작한다.
 - 손대는 모듈의 `AGENTS.md` + `dev4-ai-source/modules/<모듈>.md` §2·§3 를 읽는다 — 팩에도 불변조건이 들어가지만 §3(예비 이슈)은 사람이 봐야 한다.
 
