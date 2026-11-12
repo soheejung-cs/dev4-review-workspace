@@ -34,6 +34,7 @@ python3 -m tools.harness.implement_pack --key CBRD-n --pr <PR>      # 리뷰 대
 
 ## S2. plan.json (LLM) → 사용자 승인
 **plan 을 쓰기 전에 `references/자가진화-규칙.md` 에서 해당 축의 규칙을 훑는다**(예: 수치 경계를 바꾸면 #003 동작표, 이슈 본문에 수정 스케치가 있으면 #007 — 2026-10-23).
+**NUMERIC 이 아니던 계산·비교·해시·변환을 NUMERIC 으로 바꾸는 plan 은 규칙 #118** — develop 대비 측정 계획을 `adverse_effects`(performance)에 넣고, 승인 요청에 `성능 변화 확인:` 을 달고, 측정에서 느려지면 그 수치와 함께 사용자에게 먼저 알린다(사용자 지시 2026-11-12).
 스키마 `harness/schemas/plan.json`. 필수: 영역 판정 문장 · INV-1~5 각각 touched 여부와 이유 · Tier · 공유/격리(공유면 계약 3요소) · **대안 ≥ 2**(채택 표시) · `changes[]`(팩의 candidate 중에서만; 관문을 건드리면 `gate_contract` 필수; 성능 경로면 `rule_ids`) · `tests[]`(재현→기대) · `regression_risks` · **`adverse_effects`(악영향 검토, 아래)** · `needs_more_context`(비어 있지 않으면 S1 로 돌아가 팩을 넓힌다) · `questions`(닫힌 질문) · 성능 작업이면 `perf: true`(+ `structure` 경로) · **수명 있는 상태**(구조체 포인터 필드·캐시 항목·슬롯)를 더하면 `lifetime_state` 와 그 상태를 **놓는 자리 전수** `release_sites`(free·decache·retire·clear·destroy 호출부마다 released/cannot-attach/not-applicable — META-REVIEW PR#7658, H-33).
 **악영향 검토 — `adverse_effects`**(사용자 지시 2026-11-11, 등록부 #105): 채택안이 바꾸는 경로마다 목표 밖에서 생길 수 있는 해를 세 측면으로 적는다 — 무엇이 어디서 develop 의 무엇에서 무엇으로 바뀌고, 근거가 무엇인가.
 - **정확성**: 같은 함수를 부르는 다른 호출자·다른 패스(PREPARE/실행, csql/드라이버, 부질의/맨 위)·다른 문장 종류에서 결과·오류가 바뀌는가.
