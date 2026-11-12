@@ -1,0 +1,50 @@
+{
+ "name": "PR#8242 (CBRD-27478) G3 -- DELETE / UPDATE / SELECT 프린터가 찍은 힌트 블록을 스캐너가 같은 힌트로 다시 읽는가(트리거 동작 저장본·dblink DML 글이 다시 파싱된다), pt_print_delete () 가 대상 목록 자리에 자기 대상을 찍는가(XASL 캐시 키·트리거 저장본)",
+ "requires": [
+  "pt_check_hint",
+  "pt_get_hint"
+ ],
+ "file": "src/parser/scanner_support.c",
+ "mode": "cs",
+ "seams": [],
+ "appendix": "",
+ "test": "test.cpp",
+ "extra": [
+  "src/parser/parse_tree.c",
+  "src/parser/parse_tree_cl.c",
+  "src/parser/keyword.c",
+  "src/base/language_support.c",
+  "src/base/intl_support.c",
+  "src/base/chartype.c",
+  "src/object/object_domain.c",
+  "src/object/object_primitive.c",
+  "src/query/domain_rules.c",
+  "src/compat/db_macro.c",
+  "src/base/memory_alloc.c",
+  "src/base/system_parameter.c"
+ ],
+ "watch": [
+  "src/parser/parse_tree_cl.c",
+  "src/parser/csql_grammar.y",
+  "src/parser/csql_lexer.l",
+  "src/parser/parse_tree.h"
+ ],
+ "fakes": "진짜: scanner_support.c(TU: pt_initialize_hint·pt_check_hint·find_hint_token·read_hint_args·get_hint_args_func·pt_get_hint·this_parser), parse_tree.c + parse_tree_cl.c(parser_create_parser·parser_new_node·parser_print_tree·parser_print_tree_with_quotes·pt_print_delete/_update/_select/_spec/_name/_with_clause/_cte), keyword.c(pt_is_keyword -- PT_PRINT_QUOTES 의 이름 인용), language_support.c + intl_support.c + chartype.c(en_US.utf8), object_domain.c + object_primitive.c + domain_rules.c, db_macro.c, memory_alloc.c, system_parameter.c. 힌트 표: csql_grammar.y parser_hint_table 을 그대로 복사(CBRD-27478 두 줄은 parse_tree.h 가 비트를 정의할 때만). 재파싱: csql_lexer.l BLOCK_HINT('/*+' 부터 '*/' 앞까지를 '+' 뒤에 모음) -> parser_check_hint(pt_check_hint, 힌트가 하나도 없으면 SQL_HINT 아님) -> csql_grammar.y hint_list(pt_get_hint 를 같은 종류의 새 노드에). 트리: csql_grammar.y delete 문(target_classes·spec 두 개)·update 문(spec)·select(1 FROM a, b)·opt_with_clause(PT_WITH_CLAUSE/PT_CTE)를 parser_new_node 로. 캐시 키 본문: do_prepare_delete 의 CUSTOM_PRINT_4_SHA_COMPUTE | PT_PRINT_LOWER 중 본문을 바꾸는 PT_CONVERT_RANGE | PT_PRINT_QUOTES | PT_PRINT_LOWER(PT_PRINT_USER·_HOST_VAR_COUNT·_DBLINK_INFO 는 한 세션의 두 문장에 같은 꼬리만 붙인다 -- workspace 가 없어 뺐다). 가짜: cubregex::get_engine_name·envvar_get/_trim_char·init_builtin_calendar_names·db_date_locale_init·pt_free_dblink_remote_cols(xasl_generation.session_variable_mark 와 같음), er_set/er_errid/er_clear(값만 보관).",
+ "note": "base d5674fe94 의 parse_tree_cl.c·scanner_support.c 는 PR 의 실제 부모 1802aa581 과 같다(git diff 없음). ROW_SNAPSHOT 케이스는 #if defined (PT_HINT_ROW_SNAPSHOT) 로 base 에서 빠진다.",
+ "origin": {
+  "pr": 8242,
+  "jira": "CBRD-27478",
+  "finding": "G3-01 (버그 가능성) DELETE/UPDATE 힌트 블록에서 ROW_SNAPSHOT/NO_ROW_SNAPSHOT(과 기존 NO_PARALLEL_HASH_JOIN)이 NO_LOGGING/BIND_SENSITIVE 에 붙어 재파싱 때 둘 다 사라짐 · G3-02 (확인 질문, develop 동일) pt_print_delete 가 대상 목록 자리에 마지막 힌트 인자·WITH 절을 찍음",
+  "comment": null,
+  "date": "2026-11-03",
+  "reviewed_head": "6723bfd42",
+  "base": "d5674fe94",
+  "artifact": "harness-out/8242/6723bfd42/unit/G3-01/",
+  "result": "2026-11-03: head 6723bfd42 9/9 PASS([contract] 5 + [defect] 4 재현: G3-01, develop NO_PARALLEL_HASH_JOIN, G3-02 힌트 인자·WITH), base d5674fe94 6/6 PASS([contract] 3 + [defect] 3 — ROW_SNAPSHOT 3케이스는 컴파일 제외; develop NO_PARALLEL_HASH_JOIN·G3-02 두 건 재현 = 선재). stub 호출 0. 변이 2종(head): fix_g3_01_separator.diff -> G3-01·NO_PARALLEL_HASH_JOIN [defect] 2건 FAIL(닫힘), 나머지 7건 PASS / fix_g3_02_target.diff -> G3-02 [defect] 2건 FAIL(닫힘), 나머지 7건 PASS. / 2026-11-12 develop 569f3cad6: [contract] 5/5 PASS, G3-01·develop NO_PARALLEL_HASH_JOIN [defect] FAIL = 고쳐진 결함(이력 d0a3384f9), G3-02 [defect] 2건 PASS = CBRD-27899 결함 남음.",
+  "moved": "2026-11-12 .51 harness-out/8242/6723bfd42/unit/G3-01 → unit/parser/parse_tree_cl.print_roundtrip (.50 요청: CBRD-27899 담당이 pt_print_delete () 를 고칠 때 리포에서 바로 돌리도록). G3-01·develop NO_PARALLEL_HASH_JOIN 은 PR#8242 머지(d0a3384f9)에서 고쳐짐(defects_fixed_in), G3-02 두 건이 CBRD-27899 의 열린 결함. 수정 후보 mutants/fix_g3_02_target.diff"
+ },
+ "defects_fixed_in": {
+  "G3-01": "d0a3384f9",
+  "G3 (develop) NO_PARALLEL_HASH_JOIN": "d0a3384f9"
+ }
+}
