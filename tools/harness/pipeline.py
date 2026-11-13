@@ -59,7 +59,10 @@ def n_perf_claims(c, a):
     body = c['meta'].get('body') or ''; fids = c.need('changed_fids')
     fn = c['g'].function(fids[0]) if fids else None
     auto = PC.analyze(body, fn.file if fn else (sorted(c['changed'])[0] if c['changed'] else 'PR'), fn.start_line if fn else 1)
-    json.dump(auto, open(os.path.join(c['out'], 'findings.auto.json'), 'w'), ensure_ascii=False, indent=1); c['log'](f'perf claims: {len(auto)} auto findings'); return auto
+    auto, notes = PC.split_by_title(auto, c['meta'].get('title') or '')     # 정확성 수정 PR 의 MEAS 오탐은 참고로(H-167)
+    json.dump(notes, open(os.path.join(c['out'], 'perf_claims.notes.json'), 'w'), ensure_ascii=False, indent=1)
+    json.dump(auto, open(os.path.join(c['out'], 'findings.auto.json'), 'w'), ensure_ascii=False, indent=1)
+    c['log'](f'perf claims: {len(auto)} auto findings' + (f' · 참고 {len(notes)}(제목에 성능 신호 없음 — perf_claims.notes.json)' if notes else '')); return auto
 def n_or_buf(c, a):
     """OR_ALIGNED_BUF 선언 크기 vs or_(un)pack_* 체인의 실제 배치. 산술이라 LLM 없이 결정론으로 돈다(PR#7899).
     findings.auto.json 은 perf_claims 가 이미 썼으므로 **덮어쓰지 않고 append** 한다."""

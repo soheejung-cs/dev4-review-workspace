@@ -1,8 +1,24 @@
 """PR 본문의 성능 주장을 결정론적으로 검사해 MEAS 규칙 finding(layer=설계)을 만든다.
 검사: 표에 중앙값/median 이 있는데 MAD·표준편차·rep 별 값이 없다(MEAS-07) · 반복 횟수 언급 없음(MEAS-04) · 회귀 테스트(CTP) 근거 없음(MEAS-05) ·
-'빠르다/느리다/개선' 주장에 수치 표가 전혀 없음(MEAS-01). anchor 는 첫 변경 함수의 시작 줄, evidence 는 pr-body:<줄>."""
+'빠르다/느리다/개선' 주장에 수치 표가 전혀 없음(MEAS-01). anchor 는 첫 변경 함수의 시작 줄, evidence 는 pr-body:<줄>.
+오탐 줄이기(H-167 — PR#8472·#8427 정확성 수정에 MEAS 자동 지적 2건씩): 성능 낱말이 있어도 "그대로·같다·유지·변화 없" 이 같은 줄이면
+회귀 없음 진술이라 주장으로 세지 않는다 · 표·단위는 숫자 바로 뒤의 단위만, 대소문자 구분(`AS-IS`·`TO-BE` 머리글 표는 측정 표가 아니다) ·
+`tps` 는 낱말로만(https) · MEAS-04 는 성능 주장이 있을 때만 · 제목에 성능 신호가 없으면 split_by_title() 이 지적을 참고(notes)로 돌린다."""
 import re
 from typing import Dict, List
+
+# 한국어 활용형(빨라·느려)·성능 명사도 잡는다 (.52 2026-09-17). tps 는 낱말로만 — https 의 'tps' (H-167, PR#8484)
+PERF_WORDS = r'빠르|빨라|느리|느려|개선|회귀|향상|단축|처리율|성능|붕괴|회복|병목|경합|\d+\s*배|speed|faster|slower|regress|wall[- ]?time|throughput|\btps\b|latency|timeout'
+NO_CHANGE = r'그대로|같다|같습니다|같음|동일|유지|변화\s*(가\s*)?없|달라지지\s*않|unchanged|no\s+change|same\s+as'
+PERF_TITLE = r'빠르|빨라|느리|느려|성능|속도|최적화|개선|단축|비용|병목|perf|speed|faster|slow|optimi[sz]|throughput|latency|cache|batch|parallel|병렬|vector'
+
+
+def split_by_title(findings: List[Dict], title: str):
+    """제목에 성능 신호가 없으면(정확성 수정 PR) MEAS 자동 지적을 참고(notes)로 돌린다 — (findings, notes)."""
+    if not title or re.search(PERF_TITLE, title, re.I):
+        return findings, []
+    return [], [dict(f, note='제목에 성능 신호가 없어 지적 대신 참고(H-167)') for f in findings]
+
 
 def analyze(body: str, anchor_file: str, anchor_line: int) -> List[Dict]:
     lines = body.split('\n'); out = []
@@ -10,8 +26,16 @@ def analyze(body: str, anchor_file: str, anchor_line: int) -> List[Dict]:
         for i, l in enumerate(lines, 1):
             if re.search(pat, l, re.I): return i
         return 0
-    perf_claim = ln(r'빠르|빨라|느리|느려|개선|회귀|향상|단축|처리율|성능|붕괴|회복|병목|경합|\d+\s*배|speed|faster|slower|regress|wall[- ]?time|throughput|tps|latency|timeout')   # 한국어 활용형(빨라·느려)·성능 명사도 잡는다 (.52 2026-09-17)
-    table = ln(r'^\|.*(median|중앙값|ms|초|s\b|배|%).*\|') or ln(r'\d+(\.\d+)?\s*(초|ms|s\b|sec|분\b|시간|배|%|건/초|rows?/s)')   # 표 또는 단위 붙은 수치 (한국어 단위 배·%·건/초·분·시간 포함)
+    def ln_cs(pat):   # 대소문자 구분 — 단위(s·ms)를 `AS-IS` 같은 머리글과 가르려고
+        for i, l in enumerate(lines, 1):
+            if re.search(pat, l): return i
+        return 0
+    perf_claim = 0
+    for i, l in enumerate(lines, 1):   # 같은 줄에 "그대로·같다·유지·변화 없" 이 있으면 회귀 없음 진술이지 성능 주장이 아니다(H-167)
+        if re.search(PERF_WORDS, l, re.I) and not re.search(NO_CHANGE, l, re.I):
+            perf_claim = i; break
+    unit = r'\d(?:\.\d+)?\s*(?:ms|s|sec|초|분|시간|배|%|건/초|rows?/s)(?![A-Za-z가-힣])'
+    table = ln_cs(r'^\|.*((?i:median)|중앙값|' + unit + r').*\|') or ln_cs(unit)   # 표 또는 단위 붙은 수치 — 단위는 숫자 바로 뒤에서만
     median = ln(r'median|중앙값')
     disp = ln(r'\bMAD\b|표준편차|stddev|σ|rep\s*별|편차')
     reps = ln(r'\d+\s*회|min-of-|median-of-|warm-?up|\d+\s*runs?|\d+\s*반복|반복\s*\d+')
@@ -35,7 +59,7 @@ def analyze(body: str, anchor_file: str, anchor_line: int) -> List[Dict]:
         return {'id': fid, 'layer': '설계', 'file': anchor_file, 'line': anchor_line, 'claim': claim, 'why': WHY[rule], 'proposal': PROP[rule], 'category': '측정 요청', 'importance': '중간', 'evidence': [f'pr-body:{ev or 1}'], 'rule_ids': [rule], 'severity': 'non-blocking', 'auto': True}
     if perf_claim and not table: out.append(F('MEAS-01-auto', 'MEAS-01', '성능 주장은 있는데 측정 표(타이밍/프로파일)가 본문에 없다 — 측정 먼저', perf_claim))
     if median and not disp: out.append(F('MEAS-07-auto', 'MEAS-07', '중앙값만 있고 산포(MAD/표준편차/rep 별 값)가 없다 — 개선폭이 잡음 범위 안인지 판정 불가', median))
-    if table and not reps: out.append(F('MEAS-04-auto', 'MEAS-04', '측정 표에 반복 횟수(min-of-N/median-of-N/warmup) 언급이 없다 — 1회 실행값이면 기준선 오염을 구분 못 한다', table))
+    if perf_claim and table and not reps: out.append(F('MEAS-04-auto', 'MEAS-04', '측정 표에 반복 횟수(min-of-N/median-of-N/warmup) 언급이 없다 — 1회 실행값이면 기준선 오염을 구분 못 한다', table))
     if perf_claim and not ctp: out.append(F('MEAS-05-auto', 'MEAS-05', '성능 변경인데 기능 회귀 테스트(CTP) 통과 근거가 본문에 없다', perf_claim))
     if perf_claim and rate_only: out.append(F('MEAS-06-auto', 'MEAS-06', '개선 근거가 율(%·배)만이고 절대량(초·행·바이트·횟수)이 없다', rate_only))
     return out
