@@ -71,6 +71,42 @@ slots (int n)
   void *p = NULL;
   return p;
 }
+
+int
+learn_repr (int ok)
+{
+  int err_before = er_errid_if_has_error ();
+  if (!ok && err_before == NO_ERROR && er_errid_if_has_error () != NO_ERROR)
+    {
+      er_clear ();
+    }
+  return ok;
+}
+
+int
+status_var (int a)
+{
+  int ret = er_errid ();
+  ret = step_one (a);
+  if (ret != NO_ERROR)
+    {
+      return ret;
+    }
+  else
+    {
+      er_clear ();
+    }
+  return 0;
+}
+
+int
+hash_key (DB_VALUE * v, unsigned int *h)
+{
+  TP_DOMAIN *dom = tp_domain_resolve_default (DB_TYPE_DOUBLE);
+  double d = db_get_double (v);
+  *h = (unsigned int) d;
+  return dom != NULL;
+}
 """
 
 HEAD_C = BASE_C.replace("""  *out = (short) d;
@@ -102,7 +138,15 @@ HEAD_C = BASE_C.replace("""  *out = (short) d;
     {
       return NULL;
     }
-  return p;""")
+  return p;""").replace("""  int err_before = er_errid_if_has_error ();
+  if (!ok && err_before == NO_ERROR && er_errid_if_has_error () != NO_ERROR)""", """  int err_before = er_errid ();
+  if (!ok && err_before == NO_ERROR && er_errid () != NO_ERROR)""").replace("""  ret = step_one (a);
+  if (ret != NO_ERROR)""", """  ret = step_one (a + 1);
+  if (NO_ERROR != ret)""").replace("""  TP_DOMAIN *dom = tp_domain_resolve_default (DB_TYPE_DOUBLE);
+  double d = db_get_double (v);
+  *h = (unsigned int) d;""", """  TP_DOMAIN *dom = tp_domain_resolve_default (DB_TYPE_NUMERIC);
+  int rc = numeric_db_value_hash (v, h);   /* was DB_TYPE_DOUBLE */
+  (void) rc;""")
 
 TMPL = """template <int DST, typename T>
 static bool
@@ -200,6 +244,20 @@ class StaticLintTest(unittest.TestCase):
         self.assertEqual(len(fs), 1)
         self.assertIn('posix_memalign', fs[0]['claim'])
 
+    def test_errid_warning_gap(self):
+        # learn_repr: 앞 상태를 er_errid () 로 재게 바뀜 → 적중. status_var: ret 은 다른 호출 결과도 받는 상태 변수 → 넘김
+        fs = self.by.get('errid-warning-gap', [])
+        self.assertEqual([f['claim'].split('`')[1] for f in fs], ['err_before = er_errid ()'], fs)
+        self.assertEqual((fs[0]['severity'], fs[0]['category']), ('question', '확인 질문'))
+
+    def test_numeric_path_switch(self):
+        fs = self.by.get('numeric-path-switch', [])
+        self.assertEqual(len(fs), 1, fs)
+        self.assertIn('`hash_key`', fs[0]['claim'])
+        self.assertEqual((fs[0]['category'], fs[0]['severity']), ('측정 요청', 'question'))
+        self.assertIn('db_get_double', fs[0]['verification']['result'])
+        self.assertNotIn('learn_repr', fs[0]['claim'])
+
     def test_template_guard_and_inline(self):
         st = {}
         hits = SL.scan_file('src/x/t.cpp', TMPL.encode(), SL.GitSrc(self.repo, 'HEAD'), ['fp-range-outside'], st)
@@ -244,3 +302,30 @@ class StaticLintTest(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class NumericSwitchDiffTest(unittest.TestCase):
+    """tree-sitter 없이 도는 diff 수준 판정(H-180): 같은 hunk·함수에서 DOUBLE 경로를 지우고 NUMERIC 경로를 더한 것만, 주석 줄은 무시."""
+    D = """diff --git a/src/q/x.c b/src/q/x.c
+--- a/src/q/x.c
++++ b/src/q/x.c
+@@ -10,2 +10,3 @@ int f (void)
+-  dom = tp_domain_resolve_default (DB_TYPE_DOUBLE);   /* hash as double */
+-  d = db_get_double (v);
++  dom = tp_domain_resolve_default (DB_TYPE_NUMERIC);
++  rc = float_numeric_normalize_for_hash (v, &n);
++  /* DB_TYPE_DOUBLE was used before */
+@@ -40,1 +41,1 @@ int g (void)
+-  x = DB_TYPE_DOUBLE;
++  y = 1;
+@@ -60,1 +61,1 @@ int h (void)
+-  /* db_get_double () is gone */
++  z = numeric_db_value_add (a, b, c);
+"""
+
+    def test_switch_by_hunk_and_function(self):
+        r = SL.numeric_switches(self.D)
+        self.assertEqual([(s['line'], s['double'], s['numeric']) for s in r],
+                         [(10, ['DB_TYPE_DOUBLE', 'db_get_double'], ['DB_TYPE_NUMERIC', 'float_numeric_normalize_for_hash'])])
+        r = SL.numeric_switches(self.D, lambda f, l: 'f' if l < 30 else ('g' if l < 50 else 'h'))
+        self.assertEqual([s['function'] for s in r], ['f'])

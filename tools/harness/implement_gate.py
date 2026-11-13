@@ -7,6 +7,8 @@
           plan.release_sites 에 그 상태를 놓는 자리 전수의 판정(released/cannot-attach/not-applicable)이 있어야 하고, 그래프가 뽑은
           해제 경로 후보(free·decache·retire·clear·destroy… 이름 + 그 구조체 타입을 쓰거나 새 필드를 만지는 함수) 하나하나가
           release_sites 에 나와야 한다(META-REVIEW PR#7658 — '만드는 곳' 이 아니라 '놓는 곳' 을 전수로, H-33)
+      (0-1) plan.develop_repro — 최신 develop 을 새로 빌드한 설치본에서의 재현(rev·BUILD_REV 대조, H-169)
+      (2-2) 앞 상태를 er_errid () 로 재는 er_clear () 분기 — 참고(H-181)  (7) NUMERIC 경로 전환이면 performance 악영향 항목 필수(H-180)
 결과: <out>/gate.json + 표준출력 요약. 실패 = 코드를 고쳐 다시(재질의 1회 규칙은 스킬이 관리)."""
 import argparse, sys, json, os, subprocess, sys, tempfile, shutil
 import re as _re
@@ -22,6 +24,61 @@ PTR_MEMBER = _re.compile(r'^\s*(?:(?:const|struct|unsigned|signed|volatile|class
 
 
 _LINES = {}
+
+
+def develop_repro_check(plan, repo):
+    """(0-1) plan.develop_repro 판정(H-169) — [(키, 메시지)]. 키 'develop-repro' 는 실패, 'develop-repro-note' 는 참고.
+    CBRD-28028(11-11): 캐시된 설치본(develop + 다른 작업 커밋)으로 스윕하고 diff 만 보고 plan 으로 가려 했다 — S0 의 '최신 develop 을 새로
+    빌드해 재현' 을 plan 이 증거로 들고 오게 한다. rev 는 upstream/develop 의 커밋이면서 이 브랜치의 조상, 설치본 BUILD_REV 첫 줄 rev 가 같아야 한다."""
+    dr = plan.get('develop_repro')
+    if not dr:
+        return [('develop-repro', 'plan.develop_repro 가 없다 — S0: 브랜치의 merge-base(upstream/develop)를 새로 빌드한 설치본에서 재현한 '
+                                  'rev·install·result·artifact 를 적는다(재현할 증상이 없는 작업이면 result=not-applicable 과 note)')]
+    out, result = [], dr.get('result')
+    if result == 'not-reproduced':
+        out.append(('develop-repro', 'develop_repro.result=not-reproduced — 최신 develop 에서 재현되지 않으면 plan 으로 가지 않는다(S0) — 사용자에게 보고'))
+    if result == 'not-applicable':
+        if not str(dr.get('note', '')).strip():
+            out.append(('develop-repro', 'develop_repro.result=not-applicable 이면 note 에 이유(기능 추가·성능 작업 등)를 적는다'))
+        return out
+    if not str(dr.get('artifact', '')).strip():
+        out.append(('develop-repro', 'develop_repro.artifact(재현 스크립트·출력 경로)가 비었다'))
+    rev = str(dr.get('rev', '')).strip()
+    full = sh('git', '-C', repo, 'rev-parse', '--verify', '-q', rev + '^{commit}').stdout.strip() if rev else ''
+    if not full:
+        out.append(('develop-repro', 'develop_repro.rev `%s` 를 리포에서 찾지 못했다 — upstream/develop 의 rev(9자 이상)를 적는다' % rev))
+        return out
+    if sh('git', '-C', repo, 'merge-base', '--is-ancestor', full, 'upstream/develop').returncode:
+        out.append(('develop-repro', 'develop_repro.rev %s 는 upstream/develop 의 커밋이 아니다 — 작업 커밋이 섞인 빌드로 재현했다(H-169)' % rev))
+    if sh('git', '-C', repo, 'merge-base', '--is-ancestor', full, 'HEAD').returncode:
+        out.append(('develop-repro', 'develop_repro.rev %s 가 이 브랜치(HEAD)의 조상이 아니다 — 재현한 develop 에서 브랜치를 만든다' % rev))
+    mb = sh('git', '-C', repo, 'merge-base', 'HEAD', 'upstream/develop').stdout.strip()
+    if mb and full != mb:
+        out.append(('develop-repro-note', 'develop_repro.rev %s ≠ 지금 merge-base %s — 브랜치가 그 뒤 develop 을 받았다(재현은 그 전 기준)' % (rev, mb[:9])))
+    inst = os.path.expanduser(str(dr.get('install', '')))
+    br = os.path.join(inst, 'BUILD_REV')
+    if os.path.isfile(br):
+        with open(br, encoding='utf-8', errors='replace') as fp:
+            first = fp.readline().strip()
+        m = _re.search(r'\b([0-9a-f]{7,40})\b', first.replace('rev=', ' '))
+        if not m or not full.startswith(m.group(1)):
+            out.append(('develop-repro', '설치본 %s 의 BUILD_REV 첫 줄 `%s` 이 develop_repro.rev %s 와 다르다 — 그 rev 를 새로 빌드한 설치본으로 재현한다'
+                        % (inst, first[:60], rev)))
+    else:
+        out.append(('develop-repro-note', '설치본 %s 에 BUILD_REV 가 없다(지웠거나 경로가 틀림) — 빌드 rev 대조를 건너뜀' % (inst or '(빈 경로)')))
+    return out
+
+
+def numeric_switch_check(plan, diff_text, fn_of):
+    """(7) NUMERIC 경로 전환(H-180, 자가진화 #118) — (스위치 목록, [(키, 메시지)]). performance 악영향 항목이 없으면 실패."""
+    from .static_lint import numeric_switches
+    sw = numeric_switches(diff_text, fn_of)
+    msgs = [('numeric-switch-note', '⚠ NUMERIC 경로 전환 — %s:%d %s: 지움 %s → 더함 %s — develop 대비 측정·사용자 보고(규칙 #118)'
+             % (s['file'], s['line'], s['function'] or '', s['double'], s['numeric'])) for s in sw]
+    if sw and not any(e.get('aspect') == 'performance' for e in (plan.get('adverse_effects') or [])):
+        msgs.append(('numeric-switch', 'NUMERIC 경로 전환이 있는데 plan.adverse_effects 에 performance 항목이 없다 — develop 대비 측정 계획·결과를 적고 '
+                                       '승인 요청에 `성능 변화 확인:` 을 단다(규칙 #118, 사용자 지시 2026-11-12)'))
+    return sw, msgs
 
 
 def _lines(repo, file):
@@ -125,6 +182,12 @@ def main():
             fail('adverse', f"adverse_effects[{e.get('aspect')}/{e.get('where', '')[:40]}]: evidence 가 비었다 — 잰 값이나 file:line, 못 쟀으면 미측정과 이유")
         if e.get('verdict') == 'blocking':
             fail('adverse', f"adverse_effects[{e.get('aspect')}/{e.get('where', '')[:40]}]: blocking — plan 을 고쳐 다시 승인받는다")
+    # (0-1) 최신 develop 재현 — H-169
+    for k, m in develop_repro_check(plan, repo):
+        if k == 'develop-repro':
+            fail(k, m)
+        else:
+            res['checks'].setdefault(k, []).append(m)
     if effects and not any(e.get('aspect') == 'performance' for e in effects):
         res['checks'].setdefault('adverse-note', []).append('adverse_effects 에 performance 항목이 없다 — 더하거나 없애는 일(스캔·정렬·물질화·재컴파일·왕복)이 없다는 근거를 한 항목으로 적는다')
 
@@ -167,6 +230,12 @@ def main():
                                                             sorted({r[0] for r in rows})):
             fail('fallthrough', f'{f}:{ln}: case fall through 를 주석({t[:50]})으로만 표시 — `[[fallthrough]];` 로'
                  + (' (앞 문장이 assert 뿐: release 는 무해, debug 빌드만 위험)' if only_assert else ''))
+    # (2-2) 앞 상태를 er_errid () 로 재고 er_clear () 를 고르는 분기 — 경고 뒤의 오류를 못 지운다(자가진화 #120 → H-181). 참고(실패 아님)
+    from .static_lint import errid_gap_hits
+    for f, rows in _ft_added(diff_text).items():
+        for h in errid_gap_hits(repo, f, {r[0] for r in rows}):
+            res['checks'].setdefault('errid-note', []).append('%s:%d %s: `%s = er_errid ()` 로 잰 앞 상태로 er_clear () 를 고른다 — 앞서 남은 경고 뒤의 오류를 '
+                                                             '못 지운다, er_errid_if_has_error () 로(규칙 #120)' % (h.file, h.line, h.fn, h.facts['var']))
     # (3) -fsyntax-only
     sc = AD.self_check_build(repo, [f for f in changed_files if f.endswith(('.c', '.cpp', '.cc'))])
     res['checks']['syntax'] = sc
@@ -216,6 +285,18 @@ def main():
         for m in rf: fail('lifetime', m)
         for m in rn: res['checks'].setdefault('lifetime-note', []).append(m)
         if rc: res['lifetime_candidates'] = rc
+    # (7) NUMERIC 경로 전환 — 같은 함수에서 DOUBLE 경로를 지우고 NUMERIC 경로를 더했으면 performance 악영향 항목이 있어야 한다(H-180)
+    def _fn_of(f, line):
+        fs = g_after.functions_in(f, [line]) if g_after is not None else []
+        return fs[0].name if fs else None
+    sw, msgs = numeric_switch_check(plan, diff_text, _fn_of)
+    if sw:
+        res['numeric_switch'] = sw
+    for k, m in msgs:
+        if k == 'numeric-switch':
+            fail(k, m)
+        else:
+            res['checks'].setdefault(k, []).append(m)
     res['changed_files'] = changed_files; res['touched_functions'] = touched
     json.dump(res, open(os.path.join(out, 'gate.json'), 'w'), ensure_ascii=False, indent=1)
     verdict = 'GATE FAIL' if not res['ok'] else ('GATE OK' if not res.get('skipped') else 'GATE OK* (건너뛴 검사 있음 — 컴파일을 확인한 것이 아니다)')

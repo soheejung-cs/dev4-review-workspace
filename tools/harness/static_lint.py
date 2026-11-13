@@ -16,6 +16,12 @@
   comment-fallthrough     switch 의 case 사이 fall through 를 주석(`/* fall through */`·`/* FALLTHRU */`)으로만 표시한다 — 주석을 지우고
                           컴파일하는 빌드(Jenkins cubridci 의 ccache 3.1.x)에서 -Werror=implicit-fallthrough 로 Release 빌드가 깨진다
                           (CUBRIDQA-1703, PR#8388: #8318·#8196 이 넣은 두 곳). develop 의 나머지 137곳처럼 `[[fallthrough]];` 를 쓴다. 변경 줄만.
+  errid-warning-gap       `X = er_errid ()` 로 잰 앞 상태가 NO_ERROR 일 때만 er_clear () 한다 — er_errid 는 경고도 세므로(NUMERIC 산술의
+                          ER_IT_DATA_OVERFLOW 는 경고) 앞서 남은 경고 뒤에 세운 오류를 못 지운다(자가진화 #120 — CBRD-28049 PR#8515 의
+                          expr_batch_run·scan_batch_open_internal·expr_batch_plan_learn_repr, H-181). 변경 줄만, 확인 질문.
+  numeric-path-switch     같은 함수에서 DOUBLE 경로 줄(DB_TYPE_DOUBLE·db_get_double·numeric_coerce_num_to_double …)을 지우고 NUMERIC 경로
+                          줄(DB_TYPE_NUMERIC·numeric_*()·float_numeric_*() …)을 더했다 — NUMERIC 계산은 느릴 수 있어 develop 대비 측정·사용자
+                          보고가 필요하다(자가진화 #118 — CBRD-27798 PR#8414 첫 판, H-180). diff 수준, 측정 요청. implement_gate 도 같은 함수로 본다.
   join-shape-checklist    카디널리티·선택도 모델 함수가 바뀌면 조인 형상 체크리스트를 테스트 제안으로 싣는다 — preamble 의
                           「자동 finding」 절로 리뷰 단계에 주입된다(META-REVIEW PR#7937 → H-33). 파이프라인에서만.
 
@@ -50,8 +56,8 @@ from .codegraph import TS_LIB, _normalize_split_headers
 
 SRC_EXT = ('.c', '.cpp', '.cc', '.cxx', '.h', '.hpp', '.hh')
 CHECKERS = ('fp-range-outside', 'discarded-status', 'error-path-continues', 'untracked-aligned-alloc', 'comment-fallthrough',
-            'join-shape-checklist')
-DIFF_ONLY = {'error-path-continues', 'untracked-aligned-alloc', 'comment-fallthrough'}      # 선재분까지 내면 저장소 전체의 관행을 다시 리뷰하게 된다
+            'errid-warning-gap', 'numeric-path-switch', 'join-shape-checklist')
+DIFF_ONLY = {'error-path-continues', 'untracked-aligned-alloc', 'comment-fallthrough', 'errid-warning-gap'}      # 선재분까지 내면 저장소 전체의 관행을 다시 리뷰하게 된다
 # error-path-continues 의 '블록을 빠져나가 계속'·'반복 끝' 은 develop 표본(2026-10-28, 15건)에서 대부분 의도된 '기록하고 계속'(정리 후 반환·
 # 일관성 검사기의 전수 수집)이었다 — 파이프라인에서는 지적으로 내지 않고 static_lint.json 의 notes 에만 남긴다
 NOTE_ONLY = {'fall-through', 'loop-end'}
@@ -885,8 +891,112 @@ def check_fallthrough(ctx: FileCtx, f: Fn, stats) -> List[Hit]:
             for ln, t, only_assert in fallthrough_comment_lines(lines, range(f.start, f.end + 1))]
 
 
+# ------------------------------------------------------------------ checker 6: errid-warning-gap (CBRD-28049 PR#8515, 자가진화 #120 → H-181)
+ERRID_ASSIGN = re.compile(r'\b([A-Za-z_]\w*)\s*=\s*er_errid\s*\(\s*\)')      # er_errid_if_has_error () 는 '_' 가 이어져 맞지 않는다
+
+
+def check_errid_gap(ctx: FileCtx, f: Fn, stats) -> List[Hit]:
+    """`X = er_errid ()` 로 잰 앞 상태로 er_clear () 를 고르는 분기 — `X == NO_ERROR` 의 then, `X != NO_ERROR` 의 else 에 er_clear () 가 있다."""
+    body = f.node.child_by_field_name('body')
+    if body is None:
+        return []
+    btxt = text(ctx.src, body)
+    if 'er_clear' not in btxt or 'er_errid' not in btxt:
+        return []
+    names = {}
+    for m in ERRID_ASSIGN.finditer(btxt):
+        names.setdefault(m.group(1), body.start_point[0] + 1 + btxt.count('\n', 0, m.start()))
+    # 앞 상태를 재는 변수만 — 함수 안의 대입이 전부 er_errid () 인 것. `error`·`ret` 처럼 여러 호출의 결과를 받는 상태 변수는
+    # 그 분기가 '앞 상태' 를 묻는 것이 아니다(develop a7f220d5d 표본: numeric_db_value_add·update_object_tuple 등 4곳 오탐)
+    for v in list(names):
+        rhs = [' '.join(m.group(1).split()) for m in re.finditer(r'\b%s\s*=(?!=)\s*([^;]*);' % re.escape(v), btxt)]
+        if any(r.replace(' ', '') != 'er_errid()' for r in rhs):
+            del names[v]
+    out = []
+    for n in _walk(body) if names else []:
+        if n.type != 'if_statement':
+            continue
+        cond = n.child_by_field_name('condition')
+        ctext = text(ctx.src, cond) if cond is not None else ''
+        for v, aline in names.items():
+            if re.search(r'\b%s\s*==\s*NO_ERROR\b|\bNO_ERROR\s*==\s*%s\b' % (v, v), ctext):
+                branch = n.child_by_field_name('consequence')
+            elif re.search(r'\b%s\s*!=\s*NO_ERROR\b|\bNO_ERROR\s*!=\s*%s\b' % (v, v), ctext):
+                branch = n.child_by_field_name('alternative')
+            else:
+                continue
+            clr = next((x for x in (_walk(branch) if branch is not None else []) if x.type == 'call_expression'
+                        and x.child_by_field_name('function') is not None and text(ctx.src, x.child_by_field_name('function')) == 'er_clear'), None)
+            if clr is not None:
+                out.append(Hit('errid-warning-gap', ctx.rel, n.start_point[0] + 1, f.name, ctext[:120], 'low',
+                               facts={'var': v, 'cond': ' '.join(ctext.split())[:120], 'aline': aline, 'cline': clr.start_point[0] + 1}))
+                break
+    return out
+
+
+def errid_gap_hits(repo: str, rel: str, lines) -> List[Hit]:
+    """implement_gate 용: 작업 트리 파일 rel 에서 lines(추가 줄 번호)를 품은 함수의 errid-warning-gap 적중 중, 분기·대입·er_clear 줄 하나라도
+    lines 에 있는 것."""
+    path = os.path.join(repo, rel)
+    if not rel.endswith(SRC_EXT) or not os.path.isfile(path):
+        return []
+    with open(path, 'rb') as fp:
+        ctx = FileCtx(rel, fp.read(), GitSrc(repo, None))
+    lines = set(lines)
+    out = []
+    for f in ctx.fns:
+        if any(f.start <= l <= f.end for l in lines):
+            out += [h for h in check_errid_gap(ctx, f, {}) if lines & {h.line, h.facts['aline'], h.facts['cline']}]
+    return out
+
+
+# ------------------------------------------------------------------ diff 수준: numeric-path-switch (자가진화 #118 → H-180)
+DOUBLE_PATH = re.compile(r'\bDB_TYPE_DOUBLE\b|\bdb_get_double\b|\bdb_make_double\b|\bnumeric_coerce_num_to_double\b|\btp_Double_domain\b')
+NUMERIC_PATH = re.compile(r'\bDB_TYPE_NUMERIC\b|\b(?:float_)?numeric_\w+(?=\s*\()|\bDB_DEFAULT_NUMERIC_PRECISION\b|\btp_Numeric_domain\b|\bdb_(?:make|get)_numeric\b')
+_COMMENT = re.compile(r'/\*.*?\*/|//.*$')
+
+
+def _code_part(line: str) -> str:
+    s = line.strip()
+    return '' if s.startswith(('*', '/*')) else _COMMENT.sub('', line)
+
+
+def numeric_switches(diff_text: str, fn_of=None) -> List[Dict]:
+    """같은 함수(fn_of(file, head_line) → 이름; 없거나 모르면 같은 hunk)에서 DOUBLE 경로 줄을 지우고 NUMERIC 경로 줄을 더했나.
+    돌려주는 것: [{file, function, line(첫 NUMERIC 추가 줄), double:[…], numeric:[…]}]. 주석 줄·줄 끝 주석은 보지 않는다."""
+    groups, cur, n, hunk_new = {}, None, 0, 0
+
+    def grp(file, at):
+        fn = fn_of(file, at) if fn_of else None
+        return groups.setdefault((file, fn or '@%d' % hunk_new), {'file': file, 'function': fn, 'line': None, 'double': set(), 'numeric': set()})
+    for ln in diff_text.splitlines():
+        if ln.startswith('+++ '):
+            cur = ln[6:] if ln.startswith('+++ b/') else None
+            continue
+        if ln.startswith('--- ') or cur is None or not cur.endswith(SRC_EXT):
+            continue
+        m = HUNK.match(ln)
+        if m:
+            n = hunk_new = int(m.group(2))
+            continue
+        if ln.startswith('-'):
+            hits = {x.group(0) for x in DOUBLE_PATH.finditer(_code_part(ln[1:]))}
+            if hits:
+                grp(cur, max(hunk_new, 1))['double'] |= hits
+        elif ln.startswith('+'):
+            hits = {x.group(0) for x in NUMERIC_PATH.finditer(_code_part(ln[1:]))}
+            if hits:
+                g = grp(cur, n)
+                g['numeric'] |= hits
+                g['line'] = g['line'] or n
+            n += 1
+        elif not ln.startswith('\\'):
+            n += 1
+    return [dict(g, double=sorted(g['double']), numeric=sorted(g['numeric'])) for g in groups.values() if g['double'] and g['numeric']]
+
+
 RUN = {'fp-range-outside': check_fp_range, 'discarded-status': check_discarded, 'error-path-continues': check_error_path,
-       'untracked-aligned-alloc': check_aligned, 'comment-fallthrough': check_fallthrough}
+       'untracked-aligned-alloc': check_aligned, 'comment-fallthrough': check_fallthrough, 'errid-warning-gap': check_errid_gap}
 
 
 def scan_file(rel: str, raw: bytes, gs: GitSrc, checkers, stats, only_lines=None, resolve=None) -> List[Hit]:
@@ -996,6 +1106,14 @@ TEXT = {
              '앞선 리뷰는 "래퍼는 operator new/delete 만 감싼다" 는 틀린 전제로 넘겼다.'),
         proposal=('정렬 할당은 `cub_aligned_alloc (alignment, size, __FILE__, __LINE__)`(src/base/memory_cwrapper.h)로 받고 free () 로 놓는다 — '
                   'SERVER_MODE 에서는 모니터가 기록하고 다른 모드에서는 posix_memalign 과 같다. 추적하지 않아야 할 이유가 있으면 그 이유를 주석으로 남긴다.')),
+    'errid-warning-gap': dict(
+        claim='`{var} = er_errid ()` 로 잰 앞 상태가 `NO_ERROR` 일 때만 `er_clear ()` 한다 — 앞서 남은 경고가 있으면 지워야 할 오류를 남긴다',
+        why=('er_errid () 는 마지막 er_set 의 코드를 등급과 상관없이 돌려준다. NUMERIC 산술은 ER_IT_DATA_OVERFLOW(-427)를 ER_WARNING_SEVERITY 로 '
+             '세우므로, 그 뒤에 이 호출이 실패해 오류를 세우면 `{var}` 가 경고 코드라 `{cond}` 의 갈래가 바뀌어 er_clear () 를 건너뛴다 — 남은 오류로 '
+             '뒤 단계(힙 삽입의 bestspace::find, 병렬 정렬 병합 assert)가 실패한다(CBRD-28049 PR#8515, 자가진화 #120).'),
+        proposal=('앞뒤 모두 오류 등급만 세는 `er_errid_if_has_error ()` 로 잰다.\n\n```c\nint {var} = er_errid_if_has_error ();\n…\n'
+                  'if ({var} == NO_ERROR && er_errid_if_has_error () != NO_ERROR)\n  {{\n    er_clear ();\n  }}\n```\n\n'
+                  '앞서 남은 경고까지 지키려는 의도면 그 이유를 주석으로 남긴다.')),
     'comment-fallthrough': dict(
         claim='case 사이 fall through 를 주석(`{comment}`)으로만 표시했다 — 주석을 지우고 컴파일하는 빌드에서 Release 빌드가 깨진다',
         why=('gcc 의 -Wimplicit-fallthrough 는 주석 표시를 전처리 전 소스에서만 알아본다. Jenkins 이미지(cubridci, ccache 3.1.x)처럼 주석을 지운 '
@@ -1026,6 +1144,9 @@ def _finding(h: Hit, layer: str, line: int, pre: bool, base_ev: Optional[str]) -
                  'fall-through': 'return·goto 없이 블록을 빠져나가 다음 문장으로 계속 진행한다'}[fx['verdict']]
         kw = dict(sev=fx['severity'], code=fx['code'], after=after, code_or_errid=fx['code'] if fx['code'].startswith('ER_') else 'er_errid ()')
         ver = 'er_set 다음 문장: %s → %s' % (' ; '.join(fx['after']) or '(없음)', fx['verdict'])
+    elif h.checker == 'errid-warning-gap':
+        kw = dict(var=fx['var'], cond=fx['cond'][:80])
+        ver = '`%s = er_errid ()`(:%d) → `%s` 의 갈래에 er_clear ()(:%d)' % (fx['var'], fx['aline'], fx['cond'][:80], fx['cline'])
     elif h.checker == 'comment-fallthrough':
         kw = dict(comment=fx['comment'][:60])
         ver = '주석 다음 코드 줄이 case/default 라벨이고 [[fallthrough]]; 가 없다'
@@ -1116,6 +1237,22 @@ def _join_finding(fns, changed) -> Optional[Dict]:
             'auto': True, 'checker': 'join-shape-checklist'}
 
 
+def _numeric_switch_finding(s: Dict) -> Dict:
+    where = '`%s`' % s['function'] if s['function'] else '이 hunk'
+    return {'id': 'LINT-numeric-path-switch-%s-%d' % (re.sub(r'\W+', '_', s['function'] or os.path.basename(s['file'])), s['line']),
+            'layer': '코드', 'file': s['file'], 'line': s['line'],
+            'claim': '%s 가 DOUBLE 경로(%s)를 지우고 NUMERIC 경로(%s)를 더했다 — develop 대비 측정이 있나' % (where, ', '.join(s['double'][:4]), ', '.join(s['numeric'][:4])),
+            'why': ('NUMERIC 계산·비교·해시·변환은 DOUBLE 보다 비싸다(가변 길이 계수, 정규화·자릿수 세기). 정확성 때문에 경로를 바꿨어도 흔한 입력에서 '
+                    '느려질 수 있다 — CBRD-27798 PR#8414 첫 판은 공용 해시가 모든 NUMERIC 값을 해시하게 돼 흔한 경로가 +1.4~4.6% 느려졌다. '
+                    '이런 전환은 develop 대비로 재고, 느려지면 수치와 함께 사용자에게 먼저 알린다(사용자 지시 2026-11-12, 자가진화 #118).'),
+            'proposal': ('바뀐 경로를 타는 질의를 develop 과 이 PR 에서 같은 계약으로 잰다(교대·반복, 명령어 수 또는 시간 중앙값). '
+                         '정확성에 필요한 입력(부동 NUMERIC 쌍 등)으로만 NUMERIC 경로를 타게 좁힐 수 있는지도 본다 — 그 밖의 입력은 DOUBLE 경로 그대로.'),
+            'category': '측정 요청', 'importance': '중간', 'severity': 'question',
+            'evidence': ['%s:%d' % (s['file'], s['line'])],
+            'verification': {'method': 'static', 'result': '삭제 줄의 DOUBLE 경로 %s / 추가 줄의 NUMERIC 경로 %s (같은 함수)' % (s['double'], s['numeric'])},
+            'auto': True, 'checker': 'numeric-path-switch'}
+
+
 def analyze(repo_root: str, g, changed: Dict[str, List[int]], changed_fids: List[str], diff_text: str = '',
             checkers=CHECKERS, gs: Optional[GitSrc] = None) -> Tuple[List[Dict], Dict]:
     """파이프라인용: 변경 함수만 훑어 auto finding 과 집계를 돌려준다.
@@ -1154,7 +1291,7 @@ def analyze(repo_root: str, g, changed: Dict[str, List[int]], changed_fids: List
         hits = scan_file(rel, raw, gs, [c for c in checkers if c in RUN], stats, only_lines=starts, resolve=resolve)
         lines = set(changed.get(rel, []))
         for h in hits:
-            on_changed = h.line in lines
+            on_changed = h.line in lines or (h.checker == 'errid-warning-gap' and bool(lines & {h.facts['aline'], h.facts['cline']}))
             if h.checker in DIFF_ONLY and not on_changed:
                 continue
             if h.checker == 'error-path-continues' and h.facts.get('verdict') in NOTE_ONLY:
@@ -1182,6 +1319,13 @@ def analyze(repo_root: str, g, changed: Dict[str, List[int]], changed_fids: List
             if sibs:
                 out.append(_sibling_finding(rel, sibs, sorted(changed.get(rel, []))))
                 stats['fp-range-outside']['siblings'] = stats['fp-range-outside'].get('siblings', 0) + len(sibs)
+    if 'numeric-path-switch' in checkers and diff_text:
+        def fn_of(rel, line):
+            return next((x.name for x in byfile.get(rel, []) if x.start_line <= line <= x.end_line), None)
+        for s in numeric_switches(diff_text, fn_of):
+            out.append(_numeric_switch_finding(s))
+            stats['numeric-path-switch']['hits'] += 1
+            stats['numeric-path-switch']['reported'] += 1
     if 'join-shape-checklist' in checkers:
         jf = _join_finding(fns, changed)
         if jf:

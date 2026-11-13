@@ -14,7 +14,7 @@ description: 구현 하네스 — `/harness-implement <CBRD-n>`. 심볼·키워�
 - 성능 작업에서: 프로파일 없이 원인 추측(시간 지도 먼저), 할당기·래치를 "빠르게" 하려는 시도(횟수와 수명 구조 먼저), 병렬 플랜에 직렬 단계 추가, 거시 벤치 합계만으로 판정, 위험 종류가 다른 변경을 이득이 작은데 한 PR 에 붙이기.
 
 ## S0. 준비
-- **먼저 최신 develop 에서 재현한다**: `git fetch upstream develop && git checkout -B CBRD-n upstream/develop`(워킹트리 dirty 면 멈춘다) → 그 브랜치를 `goto CBRD-n` 으로 새로 빌드(크래시면 debug) → 이슈 재현을 돌려 재현 rev 와 결과를 사용자에게 보고한다. 재현되지 않으면 plan 으로 가지 않는다.
+- **먼저 최신 develop 에서 재현한다**: `git fetch upstream develop && git checkout -B CBRD-n upstream/develop`(워킹트리 dirty 면 멈춘다) → 그 브랜치를 `goto CBRD-n` 으로 새로 빌드(크래시면 debug) → 이슈 재현을 돌려 재현 rev 와 결과를 사용자에게 보고한다. 재현되지 않으면 plan 으로 가지 않는다. 그 rev·설치본·결과·산출물은 plan 의 **`develop_repro`** 에 적는다 — 게이트가 rev 가 upstream/develop 커밋이면서 브랜치의 조상인지, 설치본 `BUILD_REV` 첫 줄이 같은 rev 인지 보고 `not-reproduced` 면 막는다(H-169; 재현할 증상이 없는 기능·성능 작업은 `not-applicable` + note).
 - `projects/CBRD-n/설계문서.md` 가 있으면 그것이 입력(없고 불변조건·공유 자원을 건드릴 것 같으면 먼저 `design-doc`). 작은 버그(단일 모듈·불변조건 무관·바꿀 함수 ≤ 3)는 설계문서 없이 plan 으로 바로 간다 — **기본값**(2026-09-17).
 - **기존 PR 의 리뷰 대응(재구현)이면**: 대상은 리뷰어가 마지막으로 말한 미해결 스레드다 — `review_threads --pr <PR>`(S1 의 `implement_pack --pr` 도 만든다)의 '대응 필요' 만 보고, 작성자가 마지막인 것(resolve 대기)은 뺀다. 지적 시점 커밋이 헤드와 다르면 이미 닫힌 것부터 가른다(`review-response` §1). 브랜치가 develop 과 CONFLICTING 이면 **머지 → 빌드 → 기존 검증(A/B·CTP) → 수정** 순서가 기본(머지 자체가 컴파일 오류·훅 재이식을 낳는다 — #7866). 로컬 브랜치가 원격과 갈라져 있으면(force-push 이력) `git branch -f <br> origin/<br>` 로 맞춘 뒤 시작한다.
 - 손대는 모듈의 `AGENTS.md` + `dev4-ai-source/modules/<모듈>.md` §2·§3 를 읽는다 — 팩에도 불변조건이 들어가지만 §3(예비 이슈)은 사람이 봐야 한다.
@@ -34,7 +34,7 @@ python3 -m tools.harness.implement_pack --key CBRD-n --pr <PR>      # 리뷰 대
 
 ## S2. plan.json (LLM) → 사용자 승인
 **plan 을 쓰기 전에 `references/자가진화-규칙.md` 에서 해당 축의 규칙을 훑는다**(예: 수치 경계를 바꾸면 #003 동작표, 이슈 본문에 수정 스케치가 있으면 #007 — 2026-10-23).
-**NUMERIC 이 아니던 계산·비교·해시·변환을 NUMERIC 으로 바꾸는 plan 은 규칙 #118** — develop 대비 측정 계획을 `adverse_effects`(performance)에 넣고, 승인 요청에 `성능 변화 확인:` 을 달고, 측정에서 느려지면 그 수치와 함께 사용자에게 먼저 알린다(사용자 지시 2026-11-12).
+**NUMERIC 이 아니던 계산·비교·해시·변환을 NUMERIC 으로 바꾸는 plan 은 규칙 #118** — develop 대비 측정 계획을 `adverse_effects`(performance)에 넣고, 승인 요청에 `성능 변화 확인:` 을 달고, 측정에서 느려지면 그 수치와 함께 사용자에게 먼저 알린다(사용자 지시 2026-11-12). 게이트·리뷰 팩이 같은 함수에서 DOUBLE 경로를 지우고 NUMERIC 경로를 더한 diff 를 `⚠ NUMERIC 경로 전환` 으로 짚고, performance 항목이 없으면 게이트가 막는다(H-180).
 스키마 `harness/schemas/plan.json`. 필수: 영역 판정 문장 · INV-1~5 각각 touched 여부와 이유 · Tier · 공유/격리(공유면 계약 3요소) · **대안 ≥ 2**(채택 표시) · `changes[]`(팩의 candidate 중에서만; 관문을 건드리면 `gate_contract` 필수; 성능 경로면 `rule_ids`) · `tests[]`(재현→기대) · `regression_risks` · **`adverse_effects`(악영향 검토, 아래)** · `needs_more_context`(비어 있지 않으면 S1 로 돌아가 팩을 넓힌다) · `questions`(닫힌 질문) · 성능 작업이면 `perf: true`(+ `structure` 경로) · **수명 있는 상태**(구조체 포인터 필드·캐시 항목·슬롯)를 더하면 `lifetime_state` 와 그 상태를 **놓는 자리 전수** `release_sites`(free·decache·retire·clear·destroy 호출부마다 released/cannot-attach/not-applicable — META-REVIEW PR#7658, H-33).
 **악영향 검토 — `adverse_effects`**(사용자 지시 2026-11-11, 등록부 #105): 채택안이 바꾸는 경로마다 목표 밖에서 생길 수 있는 해를 세 측면으로 적는다 — 무엇이 어디서 develop 의 무엇에서 무엇으로 바뀌고, 근거가 무엇인가.
 - **정확성**: 같은 함수를 부르는 다른 호출자·다른 패스(PREPARE/실행, csql/드라이버, 부질의/맨 위)·다른 문장 종류에서 결과·오류가 바뀌는가.
@@ -54,7 +54,7 @@ python3 -m tools.harness.implement_pack --key CBRD-n --pr <PR>      # 리뷰 대
 ```bash
 python3 -m tools.harness.implement_gate --plan <out>/plan.json [--base HEAD|upstream/develop]
 ```
-① 범위 — 바뀐 파일·함수 ⊆ plan.changes ② `codestyle.sh` 로 포맷 차이 0 ③ 컴파일 — `compile_commands.json` 이 있으면 `-fsyntax-only`, 없으면(goto 빌드 디렉터리는 비어 있다) **ninja 오브젝트 타깃으로 실제 컴파일** ④ 바뀐 함수의 **관문 카운트 불균형**이 있는데 `gate_contract` 가 없으면 실패 ⑤ **성능 작업이면 `structure.json`**(`structure_check --stage gate`: 도착 증거·미시 벤치 결과까지 채워져 있어야) ⑥ **수명 있는 상태 — 해제 경로 전수**: diff 가 구조체에 원시 포인터 필드를 더했거나 `lifetime_state` 가 있으면, 그래프가 뽑은 해제 경로 후보(놓는 이름 + 그 구조체를 쓰거나 새 필드를 만지는 함수) 하나하나가 `release_sites` 에 있어야 통과(`gate.json` `lifetime_candidates`). 건너뛴 검사가 있으면 `GATE OK*` 로 찍힌다 — `*` 가 있으면 컴파일을 확인한 것이 아니다.
+① 범위 — 바뀐 파일·함수 ⊆ plan.changes ② `codestyle.sh` 로 포맷 차이 0 ③ 컴파일 — `compile_commands.json` 이 있으면 `-fsyntax-only`, 없으면(goto 빌드 디렉터리는 비어 있다) **ninja 오브젝트 타깃으로 실제 컴파일** ④ 바뀐 함수의 **관문 카운트 불균형**이 있는데 `gate_contract` 가 없으면 실패 ⑤ **성능 작업이면 `structure.json`**(`structure_check --stage gate`: 도착 증거·미시 벤치 결과까지 채워져 있어야) ⑥ **수명 있는 상태 — 해제 경로 전수**: diff 가 구조체에 원시 포인터 필드를 더했거나 `lifetime_state` 가 있으면, 그래프가 뽑은 해제 경로 후보(놓는 이름 + 그 구조체를 쓰거나 새 필드를 만지는 함수) 하나하나가 `release_sites` 에 있어야 통과(`gate.json` `lifetime_candidates`). ⑦ **`develop_repro`**(H-169) ⑧ **NUMERIC 경로 전환**이면 performance 악영향 항목 필수(H-180) — 참고로 앞 상태를 `er_errid ()` 로 재고 `er_clear ()` 를 고르는 분기도 짚는다(H-181, 규칙 #120). 건너뛴 검사가 있으면 `GATE OK*` 로 찍힌다 — `*` 가 있으면 컴파일을 확인한 것이 아니다.
 커밋을 나눴으면 **커밋마다** 컴파일: `python3 -m tools.harness.compile_check --commits <base>..<head>`(깨끗한 트리에서 커밋을 차례로 체크아웃해 그 커밋이 바꾼 파일만 굽고 원래 ref 로 돌아온다). 파일만 보려면 `--files a.c,b.cpp`. 실패 → 고치고 재실행(**재질의 상한 1회**; 두 번째도 실패면 사용자에게 상태 보고). 그다음 사용자 허락 하에 `goto CBRD-n` 빌드 → 재현 스크립트(`harness/templates/repro.sh`, `ServerSession`) → TC. **CTP 는 요청자 확인 후**(`review-testing`).
 - 빌드는 `cubrid-build` 스킬대로 — 백그라운드면 `nohup bash ~/bin/goto.sh <br> release > log 2>&1 &`(`goto` 는 alias 라 nohup 이 못 찾는다, H-24). 실패해 `cubrid` 가 사라지면 고친 rev 로 다시 goto 하면 복구(H-01). 빌드 중엔 엔진 소스를 고치지 않는다.
 - `cubrid server start` 를 **파이프로 받지 않는다**(데몬이 stdout 을 물어 안 끝난다 — `> file` 로, H-23).
