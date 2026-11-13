@@ -116,6 +116,9 @@ def main():
     json.dump({'architecture': arch, 'risks': risks}, open(os.path.join(out, 'arch.json'), 'w'), ensure_ascii=False, indent=1)
     open(os.path.join(out, 'arch.mmd'), 'w').write(AI.to_mermaid(arch, risks))
     schema = open(os.path.join(ROOT, 'harness', 'schemas', 'plan.json'), encoding='utf-8').read()
+    # 판정꼴 후보 함수(is·can·check·foldable …)의 호출 자리 전부 — 판정을 바꾸면 그 판정을 소비하는 패스 전부가 범위다(H-177, PR#8489)
+    from . import call_sites as CS
+    cs_md = CS.section(repo, [(fn.file, fn.name, fn.start_line) for fn in (g.function(x) for x in fids) if fn is not None and CS.PRED_NAME.search(fn.name)])
     head = f"""# implement_request — {a.key} (repo HEAD {sh('git','-C',repo,'rev-parse','--short=9','HEAD').strip()}, {time.strftime('%Y-%m-%d')})
 
 ## 지시 (구현 계획 — 코드를 쓰기 전에)
@@ -133,6 +136,7 @@ def main():
 {('- 정의를 못 찾은 심볼: ' + ', '.join(missing)) if missing else ''}
 {('- ⚠ 파서가 일부를 잃은 파일(ERROR 줄 비율): ' + json.dumps(g.parse_quality(), ensure_ascii=False)) if g.parse_quality() else ''}
 
+{cs_md}
 ## plan 스키마 (harness/schemas/plan.json)
 ```json
 {schema}

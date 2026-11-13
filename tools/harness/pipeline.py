@@ -191,6 +191,16 @@ def n_review_request(c, a):
     schema = open(os.path.join(ROOT, 'harness', 'schemas', 'finding.json'), encoding='utf-8').read()
     _ur = os.path.join(c['out'], 'unit_regress.md')
     _unit_md = open(_ur, encoding='utf-8').read() if os.path.isfile(_ur) else ''
+    # 바뀐 판정·플래그 함수의 호출 자리 전부(그래프 범위 밖 포함) — 패스 순서 구멍을 판정이 소스를 뒤져 찾지 않게(H-177, PR#8489)
+    _cs_md = ''
+    try:
+        from . import call_sites as CS
+        _fns = [(f.file, f.name, f.start_line, f.end_line) for f in (c['g'].function(x) for x in (c.get('changed_fids') or [])) if f is not None]
+        _cs_md = CS.section(c.get('wt') or c['repo'], CS.predicate_functions(c.get('diff', ''), _fns))
+        if _cs_md:
+            open(os.path.join(c['out'], 'call_sites.md'), 'w', encoding='utf-8').write(_cs_md)
+    except Exception as e:                       # 표가 없어도 리뷰는 돈다 — 실패는 로그로
+        c['log'](f'call_sites: 건너뜀 ({e})')
     head = f"""# review_request — PR #{c['pr']} {c['meta']['title']} ({c['meta']['headRefOid'][:9]}, {c['meta']['jira']})
 
 ## 지시 (리뷰용 + 설계용을 한 번에)
@@ -221,6 +231,7 @@ def n_review_request(c, a):
 {chr(10).join('- ⚠ ' + w for w in (c.get('pr_refs') or {}).get('warnings', [])) or '- 참조 PR·커밋 해시 모두 정상 (또는 미실행)'}
 
 {_unit_md}
+{_cs_md}
 ## 아키텍처 유추 (arch.json 요약)
 """ + (('- touched layers: ' + ', '.join(arch['architecture']['touched_layers']) + '\n- edges: ' + '; '.join(f"{e['source']}->{e['target']}({e['calls']})" for e in arch['architecture']['connections'][:30]) + '\n- risks: ' + ('\n  - '.join(f"[{r['severity']}] {r['kind']} {r['component']}: {r['issue']}" for r in arch['risks']) or 'none')) if arch else '- (design infer 미실행)') + f"""
 
