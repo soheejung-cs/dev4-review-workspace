@@ -100,6 +100,13 @@ status_var (int a)
 }
 
 int
+ratio (int a, int b, double x, DB_VALUE * p, DB_VALUE * q, DB_VALUE * r)
+{
+  int s = a;
+  return s;
+}
+
+int
 hash_key (DB_VALUE * v, unsigned int *h)
 {
   TP_DOMAIN *dom = tp_domain_resolve_default (DB_TYPE_DOUBLE);
@@ -146,7 +153,12 @@ HEAD_C = BASE_C.replace("""  *out = (short) d;
   double d = db_get_double (v);
   *h = (unsigned int) d;""", """  TP_DOMAIN *dom = tp_domain_resolve_default (DB_TYPE_NUMERIC);
   int rc = numeric_db_value_hash (v, h);   /* was DB_TYPE_DOUBLE */
-  (void) rc;""")
+  (void) rc;""").replace("""  int s = a;
+  return s;""", """  int s = a / b;
+  double y = x / 2.0;
+  s += a % 8;
+  float_numeric_db_value_div (p, q, r);
+  return s + (int) y;""")
 
 TMPL = """template <int DST, typename T>
 static bool
@@ -257,6 +269,15 @@ class StaticLintTest(unittest.TestCase):
         self.assertEqual((fs[0]['category'], fs[0]['severity']), ('측정 요청', 'question'))
         self.assertIn('db_get_double', fs[0]['verification']['result'])
         self.assertNotIn('learn_repr', fs[0]['claim'])
+
+    def test_var_divisor_and_unchecked_call(self):
+        # ratio: a / b(정수, 변수 나눌 수) 만 — x / 2.0(실수)·a % 8(상수)은 넘김. float_numeric_db_value_div 새 호출 하나
+        vd = self.by.get('var-divisor', [])
+        self.assertEqual([f['claim'].split('`')[3] for f in vd], ['a / b'], vd)
+        self.assertEqual(vd[0]['severity'], 'question')
+        uc = self.by.get('unchecked-divisor-call', [])
+        self.assertEqual(len(uc), 1, uc)
+        self.assertIn('`q`', uc[0]['claim'])
 
     def test_template_guard_and_inline(self):
         st = {}

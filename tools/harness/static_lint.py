@@ -22,6 +22,11 @@
   numeric-path-switch     같은 함수에서 DOUBLE 경로 줄(DB_TYPE_DOUBLE·db_get_double·numeric_coerce_num_to_double …)을 지우고 NUMERIC 경로
                           줄(DB_TYPE_NUMERIC·numeric_*()·float_numeric_*() …)을 더했다 — NUMERIC 계산은 느릴 수 있어 develop 대비 측정·사용자
                           보고가 필요하다(자가진화 #118 — CBRD-27798 PR#8414 첫 판, H-180). diff 수준, 측정 요청. implement_gate 도 같은 함수로 본다.
+  var-divisor             바뀐 줄의 정수 나눗셈·나머지(`/`·`%`·`/=`·`%=`)의 나눌 수가 상수가 아니다 — 0·MIN/−1 검사 줄을 짚게 한다
+                          (0 나눗셈 스윕 2026-11-10: CBRD-28020 TRUNC `num % 0`·CBRD-28024 WIDTH_BUCKET 이 리뷰·CI 를 지나 들어와 있었다, H-166).
+                          실수 나눗셈은 트랩이 없어(FP 예외를 켜는 코드가 없다) 뺀다. 변경 줄만, 확인 질문. 매크로 안 나눗셈은 못 본다
+                          (GIMPLE 판 — claude-workspace projects/CBRD-28024/스윕/gimple_divs/ — 은 저장소 전수용으로 남김).
+  unchecked-divisor-call  나눌 수 0 을 호출자에 맡기는 함수(float_numeric_db_value_div·float_numeric_div_fast)의 새 호출 — 같은 질문(H-166).
   join-shape-checklist    카디널리티·선택도 모델 함수가 바뀌면 조인 형상 체크리스트를 테스트 제안으로 싣는다 — preamble 의
                           「자동 finding」 절로 리뷰 단계에 주입된다(META-REVIEW PR#7937 → H-33). 파이프라인에서만.
 
@@ -56,8 +61,8 @@ from .codegraph import TS_LIB, _normalize_split_headers
 
 SRC_EXT = ('.c', '.cpp', '.cc', '.cxx', '.h', '.hpp', '.hh')
 CHECKERS = ('fp-range-outside', 'discarded-status', 'error-path-continues', 'untracked-aligned-alloc', 'comment-fallthrough',
-            'errid-warning-gap', 'numeric-path-switch', 'join-shape-checklist')
-DIFF_ONLY = {'error-path-continues', 'untracked-aligned-alloc', 'comment-fallthrough', 'errid-warning-gap'}      # 선재분까지 내면 저장소 전체의 관행을 다시 리뷰하게 된다
+            'errid-warning-gap', 'numeric-path-switch', 'var-divisor', 'unchecked-divisor-call', 'join-shape-checklist')
+DIFF_ONLY = {'error-path-continues', 'untracked-aligned-alloc', 'comment-fallthrough', 'errid-warning-gap', 'var-divisor', 'unchecked-divisor-call'}      # 선재분까지 내면 저장소 전체의 관행을 다시 리뷰하게 된다
 # error-path-continues 의 '블록을 빠져나가 계속'·'반복 끝' 은 develop 표본(2026-10-28, 15건)에서 대부분 의도된 '기록하고 계속'(정리 후 반환·
 # 일관성 검사기의 전수 수집)이었다 — 파이프라인에서는 지적으로 내지 않고 static_lint.json 의 notes 에만 남긴다
 NOTE_ONLY = {'fall-through', 'loop-end'}
@@ -967,7 +972,8 @@ def numeric_switches(diff_text: str, fn_of=None) -> List[Dict]:
     groups, cur, n, hunk_new = {}, None, 0, 0
 
     def grp(file, at):
-        fn = fn_of(file, at) if fn_of else None
+        # 지운 줄은 그 자리(다음 새 줄 at, 또는 바로 앞 줄)의 함수로 — hunk 시작 줄로 묶으면 한 hunk 에 붙은 앞 함수로 잘못 간다
+        fn = (fn_of(file, at) or fn_of(file, at - 1)) if fn_of else None
         return groups.setdefault((file, fn or '@%d' % hunk_new), {'file': file, 'function': fn, 'line': None, 'double': set(), 'numeric': set()})
     for ln in diff_text.splitlines():
         if ln.startswith('+++ '):
@@ -982,7 +988,7 @@ def numeric_switches(diff_text: str, fn_of=None) -> List[Dict]:
         if ln.startswith('-'):
             hits = {x.group(0) for x in DOUBLE_PATH.finditer(_code_part(ln[1:]))}
             if hits:
-                grp(cur, max(hunk_new, 1))['double'] |= hits
+                grp(cur, max(n, 1))['double'] |= hits
         elif ln.startswith('+'):
             hits = {x.group(0) for x in NUMERIC_PATH.finditer(_code_part(ln[1:]))}
             if hits:
@@ -995,8 +1001,71 @@ def numeric_switches(diff_text: str, fn_of=None) -> List[Dict]:
     return [dict(g, double=sorted(g['double']), numeric=sorted(g['numeric'])) for g in groups.values() if g['double'] and g['numeric']]
 
 
+# ------------------------------------------------------------------ checker 7·8: var-divisor·unchecked-divisor-call (0 나눗셈 스윕 → H-166)
+ZERO_LEFT_TO_CALLER = {'float_numeric_db_value_div', 'float_numeric_div_fast'}   # 나눌 수 0 을 호출자가 막는다고 가정(스윕 2026-11-10)
+CONST_DIVISOR = re.compile(r'^\(*\s*(\d[\w.]*|sizeof\b.*|[A-Z][A-Z0-9_]*)\s*\)*$')   # 리터럴·sizeof·대문자 매크로 상수(-1 은 따로 본다)
+
+
+def _vars_ready(ctx: FileCtx, f: Fn):
+    if not f.vars:
+        ctx._collect_vars(f)
+
+
+def check_var_divisor(ctx: FileCtx, f: Fn, stats) -> List[Hit]:
+    body = f.node.child_by_field_name('body')
+    if body is None:
+        return []
+    _vars_ready(ctx, f)
+    out = []
+    for n in _walk(body):
+        if n.type == 'binary_expression':
+            opn = n.child_by_field_name('operator')
+            op = text(ctx.src, opn) if opn is not None else ''
+        elif n.type == 'assignment_expression':
+            opn = n.child_by_field_name('operator')
+            op = text(ctx.src, opn) if opn is not None else ''
+        else:
+            continue
+        if op not in ('/', '%', '/=', '%='):
+            continue
+        left, right = n.child_by_field_name('left'), n.child_by_field_name('right')
+        if right is None:
+            continue
+        rt = ' '.join(text(ctx.src, right).split())
+        if CONST_DIVISOR.match(rt):
+            continue
+        kl, kr = ctx.kind(f, left) if left is not None else None, ctx.kind(f, right)
+        if 'float' in (kl, kr) or 'tmpl' in (kl, kr):
+            continue                                   # 실수 나눗셈은 트랩이 아니다
+        if kl is None and kr is None:
+            stats['unknown'] = stats.get('unknown', 0) + 1
+        out.append(Hit('var-divisor', ctx.rel, n.start_point[0] + 1, f.name, ' '.join(text(ctx.src, n).split())[:80],
+                       'low', facts={'expr': ' '.join(text(ctx.src, n).split())[:80], 'divisor': rt[:60], 'op': op.rstrip('='),
+                                     'kinds': [kl, kr]}))
+    return out
+
+
+def check_unchecked_div_call(ctx: FileCtx, f: Fn, stats) -> List[Hit]:
+    body = f.node.child_by_field_name('body')
+    out = []
+    for n in _walk(body) if body is not None else []:
+        if n.type != 'call_expression':
+            continue
+        fn = n.child_by_field_name('function')
+        name = text(ctx.src, fn) if fn is not None else ''
+        if name not in ZERO_LEFT_TO_CALLER:
+            continue
+        args = n.child_by_field_name('arguments')
+        a = [x for x in args.named_children] if args is not None else []
+        divisor = ' '.join(text(ctx.src, a[1]).split())[:60] if len(a) > 1 else '?'
+        out.append(Hit('unchecked-divisor-call', ctx.rel, n.start_point[0] + 1, f.name, name, 'low',
+                       facts={'callee': name, 'divisor': divisor}))
+    return out
+
+
 RUN = {'fp-range-outside': check_fp_range, 'discarded-status': check_discarded, 'error-path-continues': check_error_path,
-       'untracked-aligned-alloc': check_aligned, 'comment-fallthrough': check_fallthrough, 'errid-warning-gap': check_errid_gap}
+       'untracked-aligned-alloc': check_aligned, 'comment-fallthrough': check_fallthrough, 'errid-warning-gap': check_errid_gap,
+       'var-divisor': check_var_divisor, 'unchecked-divisor-call': check_unchecked_div_call}
 
 
 def scan_file(rel: str, raw: bytes, gs: GitSrc, checkers, stats, only_lines=None, resolve=None) -> List[Hit]:
@@ -1114,6 +1183,20 @@ TEXT = {
         proposal=('앞뒤 모두 오류 등급만 세는 `er_errid_if_has_error ()` 로 잰다.\n\n```c\nint {var} = er_errid_if_has_error ();\n…\n'
                   'if ({var} == NO_ERROR && er_errid_if_has_error () != NO_ERROR)\n  {{\n    er_clear ();\n  }}\n```\n\n'
                   '앞서 남은 경고까지 지키려는 의도면 그 이유를 주석으로 남긴다.')),
+    'var-divisor': dict(
+        claim='나눌 수가 상수가 아닌 정수 `{op}` — `{expr}` 의 나눌 수 `{divisor}` 가 0(부호 있으면 MIN/−1 도)이 아님을 무엇이 보장하나',
+        why=('정수 나눗셈·나머지는 나눌 수가 0 이면 SIGFPE 로 서버가 죽고, 부호 있는 최솟값을 −1 로 나누면 결과가 표현되지 않아 같은 트랩이다. '
+             '0 나눗셈 스윕(2026-11-10)에서 CBRD-28020(TRUNC 의 `num % 0`, 2014 부터)·CBRD-28024(WIDTH_BUCKET, 2026-06)가 리뷰·CI 를 지나 '
+             '들어와 있었다 — 새로 들어오는 자리마다 막는 줄을 짚는다(H-166).'),
+        proposal=('나눌 수를 쓰기 전에 막는 줄(앞의 검사·상수에서 온 값)을 근거로 답한다. 없으면:\n\n```c\nif ({divisor} == 0)\n  {{\n'
+                  '    er_set (ER_ERROR_SEVERITY, ARG_FILE_LINE, ER_QPROC_ZERO_DIVIDE, 0);\n    return ER_QPROC_ZERO_DIVIDE;\n  }}\n```\n\n'
+                  '부호 있는 정수면 `OR_CHECK_INT_DIV_OVERFLOW`·`OR_CHECK_BIGINT_DIV_OVERFLOW` 로 MIN/−1 도 막는다.')),
+    'unchecked-divisor-call': dict(
+        claim='`{callee}` 는 나눌 수 0 을 검사하지 않는다 — 이 새 호출의 나눌 수 `{divisor}` 가 0 이 아님을 무엇이 보장하나',
+        why=('`{callee}` 는 피제수 0 만 보고 나눌 수 0 은 호출자에 맡긴다(주석 "already handled in parsing"). WIDTH_BUCKET 의 두 번째 나눗셈이 '
+             '막지 않아 128비트 나눗셈(float_numeric_div_fast)에서 SIGFPE 로 서버가 죽었다(CBRD-28024, H-166).'),
+        proposal=('호출 전에 나눌 수가 0 인지 본다(`numeric_db_value_is_zero ()` 류) — 0 이면 ER_QPROC_ZERO_DIVIDE 로 돌려준다. '
+                  '구조상 0 이 될 수 없으면(갈래 조건·앞의 검사) 그 줄을 근거로 답한다.')),
     'comment-fallthrough': dict(
         claim='case 사이 fall through 를 주석(`{comment}`)으로만 표시했다 — 주석을 지우고 컴파일하는 빌드에서 Release 빌드가 깨진다',
         why=('gcc 의 -Wimplicit-fallthrough 는 주석 표시를 전처리 전 소스에서만 알아본다. Jenkins 이미지(cubridci, ccache 3.1.x)처럼 주석을 지운 '
@@ -1144,6 +1227,12 @@ def _finding(h: Hit, layer: str, line: int, pre: bool, base_ev: Optional[str]) -
                  'fall-through': 'return·goto 없이 블록을 빠져나가 다음 문장으로 계속 진행한다'}[fx['verdict']]
         kw = dict(sev=fx['severity'], code=fx['code'], after=after, code_or_errid=fx['code'] if fx['code'].startswith('ER_') else 'er_errid ()')
         ver = 'er_set 다음 문장: %s → %s' % (' ; '.join(fx['after']) or '(없음)', fx['verdict'])
+    elif h.checker == 'var-divisor':
+        kw = dict(op={'/': '나눗셈', '%': '나머지'}.get(fx['op'], fx['op']), expr=fx['expr'], divisor=fx['divisor'])
+        ver = '나눌 수 `%s` — 상수 아님, 피연산자 종류 %s' % (fx['divisor'], fx['kinds'])
+    elif h.checker == 'unchecked-divisor-call':
+        kw = dict(callee=fx['callee'], divisor=fx['divisor'])
+        ver = '`%s` 는 나눌 수 0 을 검사하지 않는다(numeric_opfunc.c, 0 나눗셈 스윕) — 둘째 인자 `%s`' % (fx['callee'], fx['divisor'])
     elif h.checker == 'errid-warning-gap':
         kw = dict(var=fx['var'], cond=fx['cond'][:80])
         ver = '`%s = er_errid ()`(:%d) → `%s` 의 갈래에 er_clear ()(:%d)' % (fx['var'], fx['aline'], fx['cond'][:80], fx['cline'])
