@@ -1,0 +1,12 @@
+diff -ru a/src/query/scan_manager.c b/src/query/scan_manager.c
+--- a/src/query/scan_manager.c	2026-11-13 17:39:45.606037381 +0900
++++ b/src/query/scan_manager.c	2026-11-13 17:39:45.608037381 +0900
+@@ -5160,7 +5160,7 @@
+       && !SCAN_IS_INDEX_COVERED (isidp) && !scan_id->grouped)
+     {
+       isidp->ahead_next = 0;
+-      if (scan_id->single_fetch == QPROC_SINGLE_INNER)
++      if (false && scan_id->single_fetch == QPROC_SINGLE_INNER)
+ 	{
+ 	  /* the inner scan of a NL semi/anti join stops at its first match: the first OID's page is read at once and
+ 	   * the windows start after it, so a scan that matches at once tells the OS nothing */

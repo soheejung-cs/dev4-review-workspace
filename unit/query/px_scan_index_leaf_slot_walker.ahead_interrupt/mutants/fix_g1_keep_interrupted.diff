@@ -1,0 +1,61 @@
+diff -ru a/src/query/parallel/px_scan/index/px_scan_index_leaf_slot_walker.cpp b/src/query/parallel/px_scan/index/px_scan_index_leaf_slot_walker.cpp
+--- a/src/query/parallel/px_scan/index/px_scan_index_leaf_slot_walker.cpp	2026-11-13 17:32:23.535052905 +0900
++++ b/src/query/parallel/px_scan/index/px_scan_index_leaf_slot_walker.cpp	2026-11-13 17:32:23.579052903 +0900
+@@ -74,7 +74,8 @@
+       m_ahead_last (),
+       m_ahead_slot (0),
+       m_ahead_end (false),
+-      m_ahead_skipped_keys (0)
++      m_ahead_skipped_keys (0),
++      m_ahead_interrupted (false)
+   {
+     db_make_null (&m_slot_key);
+     db_make_null (&m_ahead_last.key);
+@@ -481,6 +482,10 @@
+ 
+     /* Non-covering index path: read values from heap record */
+     read_ahead (thread_p);
++    if (m_ahead_interrupted)
++      {
++	return S_ERROR;		/* ER_INTERRUPTED is still the thread's error */
++      }
+ 
+     RECDES heap_recdes = RECDES_INITIALIZER;
+     if (m_scan_id->fixed == false)
+@@ -556,7 +561,16 @@
+   {
+     if (ahead)
+       {
+-	er_clear ();
++	if (er_errid () == ER_INTERRUPTED)
++	  {
++	    /* pgbuf_fix () raises it after clearing the transaction's interrupt (logtb_is_interrupted (.., true, ..)):
++	     * the slot read again would not raise it, so it stays and stops the lookups */
++	    m_ahead_interrupted = true;
++	  }
++	else
++	  {
++	    er_clear ();
++	  }
+       }
+     else
+       {
+@@ -775,6 +789,7 @@
+ 	m_scan_id->s.isid.ahead_next = 0;
+       }
+     m_ahead_end = false;
++    m_ahead_interrupted = false;
+   }
+ 
+   /* evaluates the next key of m_page ahead of the lookups; false when there is none to queue (end of the leaf, the
+diff -ru a/src/query/parallel/px_scan/index/px_scan_index_leaf_slot_walker.hpp b/src/query/parallel/px_scan/index/px_scan_index_leaf_slot_walker.hpp
+--- a/src/query/parallel/px_scan/index/px_scan_index_leaf_slot_walker.hpp	2026-11-13 17:32:23.535052905 +0900
++++ b/src/query/parallel/px_scan/index/px_scan_index_leaf_slot_walker.hpp	2026-11-13 17:32:23.578052903 +0900
+@@ -190,6 +190,7 @@
+       int m_ahead_slot;                               /* the slot after the last key of m_ahead, or where it stopped. */
+       bool m_ahead_end;                               /* evaluate_ahead found no more key to queue on m_page. */
+       int m_ahead_skipped_keys;                       /* read_keys of the slots skipped before that stop. */
++      bool m_ahead_interrupted;                       /* the look-ahead met ER_INTERRUPTED: pgbuf_fix cleared the transaction's interrupt */
+   };
+ }
+ 

@@ -1,0 +1,12 @@
+diff -ru a/src/storage/page_buffer.c b/src/storage/page_buffer.c
+--- a/src/storage/page_buffer.c	2026-11-13 17:39:45.673037378 +0900
++++ b/src/storage/page_buffer.c	2026-11-13 17:39:45.676037378 +0900
+@@ -9277,7 +9277,7 @@
+ }
+ 
+ /* BCBs a read-ahead check walks in one hash chain before it gives up */
+-#define PGBUF_READ_AHEAD_MAX_CHAIN_STEPS 16
++#define PGBUF_READ_AHEAD_MAX_CHAIN_STEPS 32
+ 
+ /*
+  * pgbuf_read_ahead () - tell the OS which pages the caller is going to fix soon

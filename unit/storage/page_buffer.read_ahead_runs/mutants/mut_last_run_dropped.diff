@@ -1,0 +1,12 @@
+diff -ru a/src/storage/page_buffer.c b/src/storage/page_buffer.c
+--- a/src/storage/page_buffer.c	2026-11-13 17:39:45.663037379 +0900
++++ b/src/storage/page_buffer.c	2026-11-13 17:39:45.666037379 +0900
+@@ -9300,7 +9300,7 @@
+   int steps;
+   int i;
+ 
+-  for (i = 0; i <= count; i++)
++  for (i = 0; i < count; i++)
+     {
+       bufptr = NULL;
+       if (i < count && !pgbuf_is_temporary_volume (vpids[i].volid))

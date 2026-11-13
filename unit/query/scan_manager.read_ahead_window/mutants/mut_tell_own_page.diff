@@ -1,0 +1,12 @@
+diff -ru a/src/query/scan_manager.c b/src/query/scan_manager.c
+--- a/src/query/scan_manager.c	2026-11-13 17:39:45.599037381 +0900
++++ b/src/query/scan_manager.c	2026-11-13 17:39:45.601037381 +0900
+@@ -5242,7 +5242,7 @@
+       isidp->ahead_distance = distance;
+     }
+ 
+-  if (n == 0 || (n == 1 && start == curr))
++  if (n == 0)
+     {
+       /* the one page of a window that starts here is the page the lookup reads right now */
+       return;

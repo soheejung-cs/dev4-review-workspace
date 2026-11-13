@@ -1,0 +1,29 @@
+{
+ "name": "pgbuf_read_ahead () (PR#8490): the pages handed to the OS -- consecutive ascending pages of a volume as one range, a page in the buffer (hash chain walk, no mutex) or of a temporary volume not told and ending the range, a gap / volume change / descending step ending it, the last range told at the end, a chain walked 16 BCBs without the page counted as found",
+ "file": "src/storage/page_buffer.c",
+ "mode": "server",
+ "seams": [],
+ "appendix": "hooks.cpp",
+ "test": "test.cpp",
+ "requires": [
+  "pgbuf_read_ahead"
+ ],
+ "watch": [
+  "src/storage/page_buffer.h",
+  "src/storage/file_io.c",
+  "src/storage/file_io.h",
+  "src/query/scan_manager.c"
+ ],
+ "fakes": "Real: pgbuf_read_ahead (), the hash function (PGBUF_HASH_VALUE = pgbuf_hash_func_mirror) and pgbuf_is_temporary_volume (). hooks.cpp (appended to page_buffer.c, pgbuf_Pool is static) gives the pool a calloc'd table of PGBUF_HASH_SIZE anchors and puts calloc'd BCBs at the head of their chains as pgbuf_insert_into_hash_chain () links them; pages 2^20 apart on one volume share a chain. fileio_read_ahead_hint records (descriptor, first page, pages, page size); fileio_get_volume_descriptor = 100 + volid; xdisk_get_purpose: temporary for the volumes the case names (log_Gl is the 4 KiB zeroed stub, rcv_phase 0 = LOG_RESTARTED -- hooks.cpp static_asserts the offset); db_Io_page_size 16 KiB.",
+ "note": "2026-11-13 head 35a151f37: 7/7 PASS (P6 is current behavior: a page listed twice is told twice). base 4255a337d: new function (test does not compile there; unit_regress skips it by requires). Sensitivity mutants on head (mutants/*.diff), each caught: mut_last_run_dropped -> P1-P7, mut_no_buffer_check -> P2 P7, mut_temp_volume_told -> P3, mut_gap_joins -> P4, mut_chain_steps_32 -> P7. Not covered: the unlocked chain walk under concurrent fix/victimization (read only: a wrong answer costs one synchronous read or one needless hint).",
+ "origin": {
+  "pr": 8490,
+  "jira": "CBRD-28031",
+  "head": "35a151f37e3448a2a2c2bec7d47be050574090f0",
+  "base": "4255a337dd1088d38e28cead7794225b2b9a38ed",
+  "finding": "contract suite (harness-review 3-8, no finding)",
+  "comment": null,
+  "artifacts": "/home/cubrid/dev/utils/harness-out/8490/35a151f37/unit/pgbuf_read_ahead/ (mutants/, out*/)",
+  "date": "2026-11-13"
+ }
+}

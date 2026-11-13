@@ -1,0 +1,12 @@
+diff -ru a/src/query/scan_manager.c b/src/query/scan_manager.c
+--- a/src/query/scan_manager.c	2026-11-13 17:39:45.617037380 +0900
++++ b/src/query/scan_manager.c	2026-11-13 17:39:45.620037380 +0900
+@@ -6366,7 +6366,7 @@
+ 	      tsc_getticks (&start_tick);
+ 	    }
+ 
+-	  if (isidp->curr_oidno + isidp->ahead_distance / 2 >= isidp->ahead_next)
++	  if (isidp->curr_oidno >= isidp->ahead_next)
+ 	    {
+ 	      scan_index_read_ahead (thread_p, isidp, false);
+ 	    }

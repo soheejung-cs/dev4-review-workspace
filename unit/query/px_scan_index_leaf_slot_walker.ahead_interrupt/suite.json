@@ -1,0 +1,41 @@
+{
+ "name": "parallel index scan worker, one leaf through leaf_slot_walker + overflow_drain_fsm the way a worker drives it: rows, errors, the range's end, trace counters, key value clears, and PR#8490's look-ahead (read_ahead -> evaluate_ahead -> next_key (ahead)) -- the read-ahead hints, and a user cancel that only the look-ahead sees (dropped by stop_at_error's er_clear)",
+ "file": "src/query/parallel/px_scan/index/px_scan_index_leaf_slot_walker.cpp",
+ "mode": "server",
+ "seams": [],
+ "extra": [
+  "src/query/parallel/px_scan/index/px_scan_index_overflow_drain_fsm.cpp",
+  "src/query/scan_manager.c"
+ ],
+ "test": "test.cpp",
+ "requires": [
+  "scan_next_slot",
+  "overflow_drain_fsm"
+ ],
+ "watch": [
+  "src/query/parallel/px_scan/index/px_scan_index_leaf_slot_walker.hpp",
+  "src/query/parallel/px_scan/index/px_scan_index_overflow_drain_fsm.cpp",
+  "src/query/parallel/px_scan/index/px_scan_index_overflow_drain_fsm.hpp",
+  "src/query/parallel/px_scan/index/px_scan_index_leaf_page_dispatcher.hpp",
+  "src/query/parallel/px_scan/index/px_scan_index_key_range_list.hpp",
+  "src/query/parallel/px_scan/px_scan_input_handler_index.hpp",
+  "src/query/parallel/px_scan/px_scan_slot_iterator_index.cpp",
+  "src/query/parallel/px_scan/px_scan_task.cpp",
+  "src/query/scan_manager.c",
+  "src/query/scan_manager.h",
+  "src/storage/btree.h",
+  "src/storage/page_buffer.h"
+ ],
+ "fakes": "Real: leaf_slot_walker (TU), overflow_drain_fsm (extra), scan_index_read_ahead () (extra scan_manager.c; absent before PR#8490 -- W7 then passes trivially). The driver is px_scan_task.cpp's worker loop (its interrupt check before and after the leaf, :1212-1230) with slot_iterator_index::set_page () / next_qualified_slot_with_peek () / finalize () (px_scan_slot_iterator_index.cpp:52-92) copied. The transaction's interrupt flag: every engine call that checks it does what pgbuf_fix () does (page_buffer.c:2350-2358: logtb_is_interrupted (thread_p, true, ..) clears the flag, ER_INTERRUPTED, failure) and db_sleep () (arithmetic.c:5121-5124); a cancel sets the flag right before one chosen check. btree_read_record: an overflow key (BTREE_LEAF_RECORD_OVERFLOW_KEY) fixes two overflow pages, overflow_get_length () and overflow_get () (btree.c:2197, 2211) -- a check each, on failure the key NULL and ER_FAILED (btree.c:2199, 4855-4858); every key a COPY owning memory (clear_key, btree.c:4861), in-page keys fix nothing; a key may fail every time with a fixed error. eval_key_filter: a SLEEP key makes one check per evaluation; false or failing keys. heap_get_visible_version: the heap page fix is one check, else visible. btree_record_process_objects: the key's leaf OIDs, no snapshot. spage_get_record / btree_node_number_of_keys / btree_leaf_record_is_fence: the leaf's records, no fence. btree_compare_search_key / btree_compare_key_to_bound: integer order of the slot number (INF_INF or INF_LE range). pr_clear_value: frees when need_clear then NULL (object_primitive.c:1856-2012) -- each key carries a token, so a double clear or a key never cleared is seen. leaf_page_dispatcher::release_leaf lets the leaf go; ::signal_chain_ended records (the leaf is the frontier, kept) -- px_scan_index_leaf_page_dispatcher.cpp:255-271, 641-655. pgbuf_read_ahead records pages and the lookups done. logtb_set_tran_index_interrupt sets the flag (log_tran_table.c:2932-2992, notification and sleeper wake-up not modeled) -- used only by the G23-01 proposal mutant. input_handler_index is placement-new'd once, its key range vector set through explicit-instantiation member pointers; SCAN_ID, INDX_INFO and the thread entry are calloc'd, never constructed.",
+ "note": "2026-11-13 head 35a151f37: 10/10 PASS -- contracts W1-W7, [defect] G1 and G23-01 reproduced, sweep 66 checks: 21 honored, 45 lost (30 overflow key reads, 15 SLEEP evaluations: keys 2-16 are all first read ahead). base 4255a337d: W1-W7 PASS (W7 trivially), the three [defect] FAIL (key 3 raises ER_INTERRUPTED after 2 rows; sweep 66/66 honored) -- the PR made the defect. Proposal mutants on head (unitseam --patch): mutants/fix_g1_keep_interrupted.diff (G1 (a): keep ER_INTERRUPTED, process_oid stops after read_ahead) and mutants/fix_g23_01_set_interrupt_again.diff (G23-01: logtb_set_tran_index_interrupt before er_clear) -- each: 7 contracts PASS, the 3 [defect] FAIL, sweep 66/66 honored. Sensitivity mutants: mut_ahead_key_not_cleared -> W1 W3-W7 (key values leak), mut_signal_ahead -> W6 (2 signals), mut_skip_failed_key -> W4 W5 (a key that fails every time is skipped: 9 rows, no error), mut_skipped_keys_lost -> W1 (read_keys 18). Library path (unit_regress) gives the same verdicts. When the PR fixes it, add defects_fixed_in {\"PR8490 G\": <commit>}. Reach (not unit-tested): parallel index scan promotion has no key length gate (px_scan.cpp:1426-1449), the key filter takes any term on index columns (query_planner.c:3029-3036), the parallel checker does not exclude SLEEP.",
+ "origin": {
+  "pr": 8490,
+  "jira": "CBRD-28031",
+  "head": "35a151f37e3448a2a2c2bec7d47be050574090f0",
+  "base": "4255a337dd1088d38e28cead7794225b2b9a38ed",
+  "finding": "G1-ahead-interrupt-lost (overflow key read ahead meets the cancel) and G23-01 (key filter SLEEP evaluated ahead meets the cancel) -- [defect]; contracts W1-W7 (harness-review 3-8)",
+  "comment": null,
+  "artifacts": "/home/cubrid/dev/utils/harness-out/8490/35a151f37/unit/G1-ahead-interrupt-lost/ (result.md, mutants/, out*/)",
+  "date": "2026-11-13"
+ }
+}

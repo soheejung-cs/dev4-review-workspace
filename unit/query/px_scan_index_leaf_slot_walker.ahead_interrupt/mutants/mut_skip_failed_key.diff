@@ -1,0 +1,11 @@
+diff -ru a/src/query/parallel/px_scan/index/px_scan_index_leaf_slot_walker.cpp b/src/query/parallel/px_scan/index/px_scan_index_leaf_slot_walker.cpp
+--- a/src/query/parallel/px_scan/index/px_scan_index_leaf_slot_walker.cpp	2026-11-13 17:40:03.587036749 +0900
++++ b/src/query/parallel/px_scan/index/px_scan_index_leaf_slot_walker.cpp	2026-11-13 17:40:03.587036749 +0900
+@@ -582,7 +582,6 @@
+ 	{
+ 	  if (ahead)
+ 	    {
+-	      *slot = at;
+ 	      *read_keys = at_read_keys;
+ 	      m_current_range_idx = at_range_idx;
+ 	    }

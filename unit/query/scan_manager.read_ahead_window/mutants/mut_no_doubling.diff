@@ -1,0 +1,12 @@
+diff -ru a/src/query/scan_manager.h b/src/query/scan_manager.h
+--- a/src/query/scan_manager.h	2026-11-13 17:39:45.587037381 +0900
++++ b/src/query/scan_manager.h	2026-11-13 17:39:45.588037381 +0900
+@@ -258,7 +258,7 @@
+ #define SCAN_INDEX_READ_AHEAD_DISTANCE 256
+ #define SCAN_INDEX_READ_AHEAD_INITIAL 8
+ #define SCAN_INDEX_READ_AHEAD_NEXT(distance) \
+-  (((distance) == 0) ? SCAN_INDEX_READ_AHEAD_INITIAL : MIN ((distance) * 2, SCAN_INDEX_READ_AHEAD_DISTANCE))
++  (((distance) == 0) ? SCAN_INDEX_READ_AHEAD_INITIAL : MIN ((distance), SCAN_INDEX_READ_AHEAD_DISTANCE))
+ /* INDX_SCAN_ID superset (mirrors PARALLEL_HEAP_SCAN_ID pattern); paired static_asserts pin layout */
+ 
+ typedef struct heap_page_scan_id HEAP_PAGE_SCAN_ID;

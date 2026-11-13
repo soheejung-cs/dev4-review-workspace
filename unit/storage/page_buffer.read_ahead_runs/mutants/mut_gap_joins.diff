@@ -1,0 +1,12 @@
+diff -ru a/src/storage/page_buffer.c b/src/storage/page_buffer.c
+--- a/src/storage/page_buffer.c	2026-11-13 17:39:45.683037378 +0900
++++ b/src/storage/page_buffer.c	2026-11-13 17:39:45.685037378 +0900
+@@ -9324,7 +9324,7 @@
+ 		}
+ 	    }
+ 	  if (bufptr == NULL && run_length > 0 && vpids[i].volid == run_vpid.volid
+-	      && vpids[i].pageid == run_vpid.pageid + run_length)
++	      && vpids[i].pageid > run_vpid.pageid)
+ 	    {
+ 	      run_length++;
+ 	      continue;

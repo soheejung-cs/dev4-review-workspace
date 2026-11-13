@@ -1,0 +1,21 @@
+diff -ru a/src/storage/page_buffer.c b/src/storage/page_buffer.c
+--- a/src/storage/page_buffer.c	2026-11-13 17:39:45.652037379 +0900
++++ b/src/storage/page_buffer.c	2026-11-13 17:39:45.657037379 +0900
+@@ -9303,7 +9303,7 @@
+   for (i = 0; i <= count; i++)
+     {
+       bufptr = NULL;
+-      if (i < count && !pgbuf_is_temporary_volume (vpids[i].volid))
++      if (i < count)
+ 	{
+ 	  /* No hash mutex: a chain changed meanwhile may give a wrong answer either way, which costs one synchronous
+ 	   * read or one needless hint. BCBs are never freed while the server runs, and the walk is bounded because a
+@@ -9337,7 +9337,7 @@
+ 				  IO_PAGESIZE);
+ 	  run_length = 0;
+ 	}
+-      if (i < count && bufptr == NULL && !pgbuf_is_temporary_volume (vpids[i].volid))
++      if (i < count && bufptr == NULL)
+ 	{
+ 	  run_vpid = vpids[i];
+ 	  run_length = 1;

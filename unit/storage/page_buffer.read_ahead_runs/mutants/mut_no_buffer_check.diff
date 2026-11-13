@@ -1,0 +1,12 @@
+diff -ru a/src/storage/page_buffer.c b/src/storage/page_buffer.c
+--- a/src/storage/page_buffer.c	2026-11-13 17:39:45.642037379 +0900
++++ b/src/storage/page_buffer.c	2026-11-13 17:39:45.644037379 +0900
+@@ -9310,7 +9310,7 @@
+ 	   * BCB moved to another chain meanwhile leads the walk there; a walk cut short counts as found. */
+ 	  hash_anchor = &pgbuf_Pool.buf_hash_table[PGBUF_HASH_VALUE (&vpids[i])];
+ 	  steps = 0;
+-	  for (bufptr = __atomic_load_n (&hash_anchor->hash_next, __ATOMIC_RELAXED); bufptr != NULL;
++	  for (bufptr = NULL; bufptr != NULL;
+ 	       bufptr = __atomic_load_n (&bufptr->hash_next, __ATOMIC_RELAXED))
+ 	    {
+ 	      if (__atomic_load_n (&bufptr->vpid.pageid, __ATOMIC_RELAXED) == vpids[i].pageid

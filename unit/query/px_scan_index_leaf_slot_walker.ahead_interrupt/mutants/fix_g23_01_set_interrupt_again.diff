@@ -1,0 +1,24 @@
+diff -ru a/src/query/parallel/px_scan/index/px_scan_index_leaf_slot_walker.cpp c/src/query/parallel/px_scan/index/px_scan_index_leaf_slot_walker.cpp
+--- a/src/query/parallel/px_scan/index/px_scan_index_leaf_slot_walker.cpp	2026-11-13 17:32:23.535052905 +0900
++++ c/src/query/parallel/px_scan/index/px_scan_index_leaf_slot_walker.cpp	2026-11-13 17:32:23.579052903 +0900
+@@ -30,6 +30,7 @@
+ #include "error_manager.h"
+ #include "fetch.h"
+ #include "heap_file.h"
++#include "log_impl.h"
+ #include "memory_alloc.h"
+ #include "object_primitive.h"
+ #include "page_buffer.h"
+@@ -556,6 +557,12 @@
+   {
+     if (ahead)
+       {
++	if (er_errid () == ER_INTERRUPTED)
++	  {
++	    /* a cancel is seen once: whoever saw it cleared the transaction's flag, so the slot read again would not
++	     * raise it -- set the flag again for the lookup that goes on now */
++	    (void) logtb_set_tran_index_interrupt (thread_p, thread_p->tran_index, true);
++	  }
+ 	er_clear ();
+       }
+     else

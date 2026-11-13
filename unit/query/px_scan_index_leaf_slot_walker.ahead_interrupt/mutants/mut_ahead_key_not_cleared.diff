@@ -1,0 +1,14 @@
+diff -ru a/src/query/parallel/px_scan/index/px_scan_index_leaf_slot_walker.cpp b/src/query/parallel/px_scan/index/px_scan_index_leaf_slot_walker.cpp
+--- a/src/query/parallel/px_scan/index/px_scan_index_leaf_slot_walker.cpp	2026-11-13 17:40:03.590036749 +0900
++++ b/src/query/parallel/px_scan/index/px_scan_index_leaf_slot_walker.cpp	2026-11-13 17:40:03.591036749 +0900
+@@ -800,10 +800,6 @@
+ 	/* the walk goes no further than a key with an overflow chain: its value is kept to publish the chain */
+ 	m_ahead_last = k;
+       }
+-    else if (k.clear_key)
+-      {
+-	pr_clear_value (&k.key);
+-      }
+     m_ahead_slot = slot;
+     return true;
+   }
