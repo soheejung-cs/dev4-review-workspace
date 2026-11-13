@@ -185,6 +185,35 @@ mq_rewrite_query_as_derived (PARSER_CONTEXT * parser, PT_NODE * query)
   return new_query;
 }
 
+/* query_result.c:403 pt_get_select_list (): the select list of a SELECT, else the one a set operation kept or that of
+ * its first operand (PR#8489 fourth commit: the fold reads the select list that names the columns of the set
+ * operation, and of its empty operand) -- the arms here are SELECTs without one */
+PT_NODE *
+pt_get_select_list (PARSER_CONTEXT * parser, PT_NODE * query)
+{
+  if (query == NULL)
+    {
+      return NULL;
+    }
+  if (query->node_type == PT_SELECT)
+    {
+      return query->info.query.q.select.list;
+    }
+  if (query->node_type == PT_UNION || query->node_type == PT_DIFFERENCE || query->node_type == PT_INTERSECTION)
+    {
+      return (query->info.query.q.union_.select_list != NULL ? query->info.query.q.union_.select_list
+	      : pt_get_select_list (parser, query->info.query.q.union_.arg1));
+    }
+  return NULL;
+}
+
+/* type_checking.c:7125 pt_false_where (): an operand folded into a value is empty; the SELECTs here have no WHERE */
+bool
+pt_false_where (PARSER_CONTEXT * parser, PT_NODE * node)
+{
+  return node != NULL && node->node_type == PT_VALUE;
+}
+
 /* ---------------------------------------------------------------- builders */
 namespace
 {
@@ -469,6 +498,32 @@ TEST_CASE ("F8 fold to a derived table: the set operation's ORDER BY, LIMIT and 
   CHECK (g_order_by_checks == 1);
   CHECK (g_order_by_checked == r);
   CHECK (arm->info.query.limit != NULL);	/* the arm keeps its own LIMIT inside the derived table */
+}
+
+TEST_CASE ("F11 a UNION without ALL folds to a SELECT DISTINCT from a derived table of the operand left, which "
+	   "takes the set operation's text and LIMIT (PR#8489 fourth commit)", "[contract]")
+{
+  REQUIRE (boot ());
+  stmt s;
+  s.start (g_text);
+  PT_NODE *a1 = s.select (1);
+  PT_NODE *a2 = s.select (2);
+  PT_NODE *u = s.union_all (a1, a2);
+  u->info.query.all_distinct = PT_DISTINCT;
+  PT_NODE *u_limit = u->info.query.limit = s.ival (1);
+  s.end (u, g_len1);
+
+  PT_NODE *r = pt_fold_union (s.parser, u, STATEMENT_SET_FOLD_AS_ARG2);
+  REQUIRE (r != NULL);
+  REQUIRE (g_derived_calls == 1);
+  REQUIRE (r->node_type == PT_SELECT);
+  CHECK (r->info.query.all_distinct == PT_DISTINCT);
+  CHECK (r->info.query.q.select.from->info.spec.derived_table == a2);
+  CHECK (a2->info.query.all_distinct != PT_DISTINCT);	/* the block of the operand stays as it is */
+  CHECK (r->info.query.limit == u_limit);
+  CHECK (r->sql_user_text == g_text);
+  CHECK (r->sql_user_text_len == g_len1);
+  CHECK (g_order_by_checks == 1);
 }
 
 TEST_CASE ("F9 nothing to fold: the set operation comes back as it was, next relinked", "[contract]")

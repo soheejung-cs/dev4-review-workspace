@@ -41,6 +41,15 @@
 (* compiles it again.  PosFix, OrderKeepFix and GroupLimitFix are the      *)
 (* third commit of the PR (self-review round 3).                           *)
 (*                                                                         *)
+(* Derived is the fourth commit: no operand is marked; only the set       *)
+(* operations of a statement typed again at execution are (its top chain), *)
+(* to fold into an empty operand.  A UNION or EXCEPT without ALL folds into *)
+(* a SELECT DISTINCT from a derived table of the operand left, which keeps  *)
+(* that block as it is, with the clause of T above the DISTINCT; so does an *)
+(* operand left with LIMIT under a clause of T, or with WITH beside the     *)
+(* WITH of T.  Folded so, an ORDER BY key outside the select list keeps T,  *)
+(* which refuses it, as does an operand with INTO beside two WITH clauses.  *)
+(*                                                                         *)
 (* FIX = FALSE is develop, FIX = TRUE the PR.  README.md maps each action  *)
 (* to file:line.                                                           *)
 (***************************************************************************)
@@ -62,6 +71,7 @@ CONSTANTS
     OrderKeepFix,  \* the PR keeps a set operation only with an ORDER BY of its select list (pt_orderby_matches_select_list ())
     GroupLimitFix, \* an operand with GROUP BY takes no DISTINCT under the LIMIT of T without ORDER BY
                    \* (pt_folded_operand_takes_distinct ())
+    Derived,       \* the fourth commit: SELECT DISTINCT from a derived table of the operand left (pt_fold_union_as_derived ())
     FIX
 
 ASSUME Nested \in BOOLEAN /\ FIX \in BOOLEAN /\ KeepAtExec \in BOOLEAN /\ IntoFix \in BOOLEAN
@@ -71,6 +81,7 @@ ASSUME WithChoice \subseteq BOOLEAN /\ WithChoice # {}
 ASSUME TClauseChoice \subseteq {"none", "limit", "pos", "in", "out"} /\ TClauseChoice # {}
 ASSUME ViewChoice \subseteq BOOLEAN /\ ViewChoice # {} /\ GroupChoice \subseteq BOOLEAN /\ GroupChoice # {}
 ASSUME PosFix \in BOOLEAN /\ OrderKeepFix \in BOOLEAN /\ GroupLimitFix \in BOOLEAN
+ASSUME Derived \in BOOLEAN /\ (Derived => FIX)
 ASSUME Nested => (TClauseChoice = {"none"} /\ ViewChoice = {FALSE})
 
 Vals == {1, 2}
@@ -110,7 +121,8 @@ VARIABLES
     outcome,    \* "ROWS" | "ERROR" (exec: do_statement () unknown statement) | "KIND" (compile: a value statement)
     result,     \* the rows returned when outcome = "ROWS"
     scanned,    \* leaves with a false WHERE that the executor runs (reads their table)
-    dev         \* what develop does with T, fixed at Init: [clause, folds (into an operand), rows (it returns)]
+    dev         \* what develop does with T, fixed at Init: [clause, folds (into an operand), rows (it returns),
+                \* error (its derived table could not see an ORDER BY key outside the select list: Internal error)]
 
 vars == << exec, node, top, expected, pc, asserted, outcome, result, scanned, dev >>
 
@@ -126,7 +138,11 @@ Sem(n, id) == IF n[id].kind = "LEAF"
 \* the LIMIT GROUPBY_NUM () in the HAVING of a GROUP BY block, which cuts the groups before DISTINCT, or ORDERBY_NUM ()
 \* of a DISTINCT block, after it (pt_eval_type_pre ())
 LeafRun(l) ==
-    IF l.tclause = "limit" /\ ~l.complex
+    IF l.derived
+    THEN LET own == IF l.complex THEN Lim2(l.rows) ELSE l.rows
+             d == IF l.ddistinct THEN Dedup(own) ELSE own
+         IN IF l.tclause = "limit" THEN Lim2(d) ELSE d
+    ELSE IF l.tclause = "limit" /\ ~l.complex
     THEN (IF l.distinct THEN (IF l.group THEN Dedup(Lim2(l.rows)) ELSE Lim2(Dedup(l.rows))) ELSE Lim2(l.rows))
     ELSE LET b == IF l.distinct
                   THEN (IF l.complex THEN Lim2(Dedup(l.rows)) ELSE Dedup(l.rows))
@@ -137,7 +153,8 @@ RECURSIVE Run(_, _)
 Run(n, id) ==
     CASE n[id].kind = "VALUE" -> Empty
       [] n[id].kind = "LEAF" -> LeafRun(n[id])
-      [] OTHER -> LET r == SetOp(n[id].op, n[id].all, Run(n, n[id].a1), Run(n, n[id].a2))
+      [] OTHER -> LET r0 == SetOp(n[id].op, n[id].all, Run(n, n[id].a1), Run(n, n[id].a2))
+                      r == IF n[id].derived /\ n[id].ddistinct THEN Dedup(r0) ELSE r0
                   IN IF n[id].clause = "limit" THEN Lim2(r) ELSE r
 
 \* the leaves the executor runs, with a false WHERE, below a set operation kept in the final tree
@@ -164,20 +181,24 @@ Init ==
                       IF x \in Leaves
                       THEN [kind |-> "LEAF", rows |-> rows[x], false |-> fl[x], paren |-> par[x], complex |-> cx[x],
                             with |-> wi[x], mark |-> FALSE, distinct |-> FALSE, into |-> (x = "A" /\ into),
-                            group |-> gb[x], tclause |-> "none"]
+                            group |-> gb[x], tclause |-> "none", derived |-> FALSE, ddistinct |-> FALSE]
                       ELSE IF x = "T"
                       THEN [kind |-> "SETOP", op |-> opT, all |-> allT, with |-> withT, mark |-> FALSE,
-                            a1 |-> IF Nested THEN "N" ELSE "A", a2 |-> "C", kept |-> "", clause |-> tcl, view |-> view]
+                            a1 |-> IF Nested THEN "N" ELSE "A", a2 |-> "C", kept |-> "", clause |-> tcl, view |-> view,
+                            derived |-> FALSE, ddistinct |-> FALSE]
                       ELSE [kind |-> "SETOP", op |-> opN, all |-> allN, with |-> FALSE, mark |-> FALSE,
-                            a1 |-> "A", a2 |-> "B", kept |-> "", clause |-> "none", view |-> view]]
+                            a1 |-> "A", a2 |-> "B", kept |-> "", clause |-> "none", view |-> view,
+                            derived |-> FALSE, ddistinct |-> FALSE]]
           \* develop folds the flat T into the operand that is not empty, unless both have a WITH clause; it returns the
           \* rows of that operand in its own block (no DISTINCT), with the clause of T (an ORDER BY keeps the rows)
           /\ LET act == IF fl["A"] THEN "C" ELSE "A"
                  own == IF cx[act] THEN Lim2(rows[act]) ELSE rows[act]
+                 folds == ~Nested /\ fl["A"] # fl["C"] /\ (opT = "UNION" \/ (opT = "EXCEPT" /\ fl["C"]))
+                          /\ ~(wi[act] /\ withT)
              IN dev = [clause |-> tcl,
-                       folds |-> ~Nested /\ fl["A"] # fl["C"] /\ (opT = "UNION" \/ (opT = "EXCEPT" /\ fl["C"]))
-                                 /\ ~(wi[act] /\ withT),
-                       rows |-> IF tcl = "limit" THEN Lim2(own) ELSE own]
+                       folds |-> folds,
+                       rows |-> IF tcl = "limit" THEN Lim2(own) ELSE own,
+                       error |-> folds /\ cx[act] /\ tcl = "out"]
     /\ top = "T"
     /\ expected = Sem(node, "T")
     /\ pc = "mark"
@@ -190,6 +211,8 @@ Mark ==
     /\ pc = "mark"
     /\ node' = [x \in Ids |->
                   IF ~FIX THEN node[x]
+                  \* Derived: db_mark_set_operations_stay_queries () marks the set operations of the statement at execution
+                  ELSE IF Derived THEN (IF x \in SetIds THEN [node[x] EXCEPT !.mark = exec] ELSE node[x])
                   ELSE IF x = "T" THEN [node[x] EXCEPT !.mark = exec]
                   ELSE [node[x] EXCEPT !.mark = EarlyMark \/ exec]]
     /\ pc' = "convert"
@@ -208,11 +231,16 @@ IsNull(n, id) == CASE n[id].kind = "VALUE" -> TRUE
                    [] n[id].kind = "LEAF" -> n[id].false
                    [] OTHER -> FALSE
 IsQuery(n, id) == n[id].kind # "VALUE"
-Distinct(n, id) == IF n[id].kind = "LEAF" THEN n[id].distinct ELSE ~n[id].all
+\* a SELECT DISTINCT from a derived table counts (Derived): the set operation above folds to it as it is
+Distinct(n, id) == IF n[id].kind = "LEAF" THEN n[id].distinct \/ n[id].ddistinct ELSE ~n[id].all \/ n[id].ddistinct
 TakesDistinct(n, id) == n[id].kind = "LEAF" /\ ~n[id].complex
 \* ... with the LIMIT of s moved to it: GROUPBY_NUM () would number its groups before DISTINCT
 FoldedTakesDistinct(n, s, id) == TakesDistinct(n, id) /\ ~(GroupLimitFix /\ n[s].clause = "limit" /\ n[id].group)
 HasInto(n, id) == n[id].kind = "LEAF" /\ n[id].into
+\* Derived: clauses of the active node that those of s cannot join in one block (pt_fold_union_needs_derived ())
+NeedsDerived(n, s, act) == /\ IsQuery(n, act)
+                           /\ \/ (n[act].with /\ n[s].with)
+                              \/ (n[act].kind = "LEAF" /\ n[act].complex /\ n[s].clause # "none")
 
 \* pt_check_union_is_foldable ()
 Decide(n, s) ==
@@ -222,7 +250,7 @@ Decide(n, s) ==
                 ELSE IF a1n /\ a2n THEN "NULL"
                 ELSE IF a1n THEN (IF n[s].op = "UNION" THEN "ARG2" ELSE "NULL")
                 ELSE (IF n[s].op # "INTERSECT" THEN "ARG1" ELSE "NULL")
-        guardOk(id) == ~ValueGuard \/ IsQuery(n, id)
+        guardOk(id) == IF Derived THEN IsQuery(n, id) ELSE ~ValueGuard \/ IsQuery(n, id)
         b2 == IF FIX /\ base = "NULL" /\ n[s].mark
               THEN (IF a1n /\ guardOk(n[s].a1) THEN "ARG1" ELSE IF a2n /\ guardOk(n[s].a2) THEN "ARG2" ELSE "NULL")
               ELSE base
@@ -231,6 +259,9 @@ Decide(n, s) ==
         act == IF b2 = "ARG1" THEN n[s].a1 ELSE n[s].a2
         emp == IF b2 = "ARG1" THEN n[s].a2 ELSE n[s].a1
     IN IF keepAtExec /\ base # "NOTHING" THEN "NOTHING:keep"
+       ELSE IF b2 \in {"ARG1", "ARG2"} /\ Derived
+       THEN (IF NeedsDerived(n, s, act) /\ (n[s].clause = "out" \/ (n[act].with /\ n[s].with /\ HasInto(n, act)))
+             THEN "NOTHING:derived" ELSE b2)
        ELSE IF b2 \in {"ARG1", "ARG2"}
        THEN (IF IsQuery(n, act) /\ n[act].with /\ n[s].with THEN "NOTHING:with"
              ELSE IF FIX /\ ~n[s].all /\ IsQuery(n, act) /\ ~Distinct(n, act) /\ ~IsNull(n, act)
@@ -251,7 +282,24 @@ Fold(n, s, parentOf) ==
         \* the ORDER BY moved to the operand, matched by pt_check_order_by (): a key outside the select list becomes a
         \* hidden column, which keeps DISTINCT off; CREATE VIEW leaves it a name, which only PosFix sees
         orderOk == n[s].clause # "out" \/ (n[s].view /\ ~PosFix)
+        \* Derived: DISTINCT on a SELECT from a derived table of the operand left, the clause of s above it
+        keepD == ~n[s].all /\ IsQuery(n, act) /\ ~Distinct(n, act) /\ ~IsNull(n, act) /\ ~HasInto(n, act)
+                 /\ n[s].clause # "out"
+        asDerived == IsQuery(n, act) /\ (keepD \/ NeedsDerived(n, s, act))
     IN IF d = "NULL" THEN << [n EXCEPT ![s] = [kind |-> "VALUE"]], s >>
+       ELSE IF d \in {"ARG1", "ARG2"} /\ Derived
+       THEN << [x \in Ids |->
+                  IF x = act /\ n[x].kind = "LEAF"
+                  THEN [n[x] EXCEPT !.derived = n[x].derived \/ asDerived,
+                                    !.ddistinct = n[x].ddistinct \/ (asDerived /\ keepD),
+                                    !.tclause = n[s].clause, !.mark = n[s].mark]
+                  ELSE IF x = act /\ n[x].kind = "SETOP"
+                  THEN [n[x] EXCEPT !.derived = n[x].derived \/ asDerived,
+                                    !.ddistinct = n[x].ddistinct \/ (asDerived /\ keepD),
+                                    !.clause = n[s].clause, !.mark = n[s].mark]
+                  ELSE IF x = parentOf THEN [n[x] EXCEPT !.a1 = IF n[x].a1 = s THEN act ELSE n[x].a1,
+                                                         !.a2 = IF n[x].a2 = s THEN act ELSE n[x].a2]
+                  ELSE n[x]], act >>
        ELSE IF d \in {"ARG1", "ARG2"}
        THEN << [x \in Ids |->
                   IF x = act /\ n[x].kind = "LEAF"
@@ -284,7 +332,9 @@ SetsIn(n, id) == IF n[id].kind = "SETOP" THEN {id} \cup SetsIn(n, n[id].a1) \cup
 \* mq_set_union_query (): at compile time, every operand left is a SELECT or a set operation
 Translate ==
     /\ pc = "translate"
-    /\ asserted' = (~exec /\ \E s \in SetsIn(node, top) : ~IsQuery(node, node[s].a1) \/ ~IsQuery(node, node[s].a2))
+    \* a set operation left with an ORDER BY key outside its select list fails pt_check_order_by () before that
+    /\ asserted' = (~exec /\ \E s \in SetsIn(node, top) : /\ node[s].clause # "out"
+                                                          /\ (~IsQuery(node, node[s].a1) \/ ~IsQuery(node, node[s].a2)))
     /\ pc' = "execute"
     /\ UNCHANGED << exec, node, top, expected, outcome, result, scanned, dev >>
 
@@ -319,25 +369,31 @@ ResultMatches == (pc = "done" /\ outcome = "ROWS" /\ ~AInto /\ dev.clause # "out
 \* does not assign the INTO of its first operand (do_select_internal () reads the statement's into_list)
 DevelopFoldsToA == /\ node["T"].kind = "SETOP" /\ node["C"].kind = "LEAF" /\ node["C"].false /\ ~node["A"].false
                    /\ node["T"].op \in {"UNION", "EXCEPT"} /\ ~(node["A"].with /\ node["T"].with)
-IntoFoldsLikeDevelop == (pc = "done" /\ ~Nested /\ AInto /\ DevelopFoldsToA) => top = "A"
+\* -- unless develop's derived table failed on an ORDER BY key outside the select list (dev.error)
+IntoFoldsLikeDevelop == (pc = "done" /\ ~Nested /\ AInto /\ DevelopFoldsToA /\ ~dev.error) => top = "A"
 \* typing again at execution keeps the query the client prepared
 ExecStaysQuery == (pc = "done" /\ exec) => outcome # "ERROR"
 \* no set operation is left with an operand folded into a value (debug assert)
-NoValueOperand == pc = "done" => ~asserted
+\* -- Derived keeps, as develop does, a set operation whose operand left has INTO beside two WITH clauses (accepted)
+IntoWithKept == /\ node["A"].kind = "LEAF" /\ node["A"].into /\ node["A"].with
+                /\ node["T"].kind = "SETOP" /\ node["T"].with
+NoValueOperand == pc = "done" => (~asserted \/ (Derived /\ IntoWithKept))
 \* a value statement only where develop makes one too: every operand empty at compile time (the known [3])
 KindOnlyAllEmpty == (pc = "done" /\ outcome = "KIND") => (~exec /\ expected = Empty)
 \* an empty operand is read only below a set operation kept for a reason the PR accepts
 ScanOnlyWhenKept == pc = "done" =>
     \A x \in scanned : \E s \in SetsIn(node, top) : /\ x \in Reach(node, s)
-                                                     /\ node[s].kept \in {"NOTHING:distinct", "NOTHING:with", "nofold"}
+                                                     /\ node[s].kept \in {"NOTHING:distinct", "NOTHING:with", "NOTHING:derived",
+                                                                          "nofold"}
 \* at execution, a statement whose operands are all empty reads no table -- unless the top and an operand both
 \* have a WITH clause, which the PR keeps unfolded as develop does (accepted, README)
 AllFalse == \A x \in Leaves : node[x].kind = "LEAF" /\ node[x].false
 TWith == node["T"].kind = "SETOP" /\ node["T"].with
 ExecEmptyReadsNothing == (pc = "done" /\ exec /\ AllFalse /\ ~TWith) => scanned = {}
 \* the ORDER BY fails a statement only where develop does not fold it either (develop keeps the set operation)
-NoNewOrderError == (pc = "done" /\ outcome \in {"ORDER_ERROR", "DISTINCT_ORDER_ERROR"}) => ~dev.folds
+\* -- or where develop's derived table failed on it (an operand with LIMIT under ORDER BY: Internal error)
+NoNewOrderError == (pc = "done" /\ outcome \in {"ORDER_ERROR", "DISTINCT_ORDER_ERROR"}) => (~dev.folds \/ dev.error)
 \* a set operation ordered by a column outside its select list, which develop folds into an operand, folds the same
 \* way: the rows of that operand without DISTINCT
-OutFoldsLikeDevelop == (pc = "done" /\ dev.clause = "out" /\ dev.folds) => (outcome = "ROWS" /\ result = dev.rows)
+OutFoldsLikeDevelop == (pc = "done" /\ dev.clause = "out" /\ dev.folds /\ ~dev.error) => (outcome = "ROWS" /\ result = dev.rows)
 =============================================================================
