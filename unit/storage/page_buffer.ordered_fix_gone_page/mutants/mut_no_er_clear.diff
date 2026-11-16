@@ -1,0 +1,10 @@
+--- a/src/storage/heap_file.c
++++ b/src/storage/heap_file.c
+@@ -2926,7 +2926,6 @@
+ 	      return S_ERROR;
+ 	    }
+ 	  /* deallocated since the bitmap was taken */
+-	  er_clear ();
+ 	  continue;
+ 	}
+ 

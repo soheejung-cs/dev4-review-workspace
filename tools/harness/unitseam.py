@@ -4,6 +4,7 @@
 서버 부팅·버퍼풀·카탈로그 없이 함수 하나를 돌리기 위해 세 가지 이음매(seam)를 둔다.
 
   seam      지정한 함수 정의를 weak 로 바꾼다(static 이면 푼다). 테스트가 같은 시그니처의 강한 정의(가짜)를 두면 그쪽이 불린다.
+            서명과 `{` 사이의 전처리 줄(`#endif` 등)은 건너뛴다 — debug/release 두 서명을 #if 로 가른 정의(pgbuf_fix_release 등).
   appendix  TU 끝에 붙일 코드. 같은 TU 안이라 static 전역·static 함수에 닿는다(테스트용 훅을 여기 둔다).
   prelude   부팅된 프로세스라면 가졌을 값이 필요한 전역(예: mmon_disabled=true)은 unitseam_prelude.cpp 에 weak 로 둔다.
   patch     (변이) 제안 수정 diff(헤더 포함 아무 파일, repo 기준 -p1)를 그 리비전의 전용 worktree 에 git apply 해 돌린다 — [defect] 가 FAIL,
@@ -173,6 +174,22 @@ def apply_seams(text, seams):
                 while j < len(lines) and not lines[j].rstrip().endswith((')', ';', '{')):
                     j += 1
                 k = j + 1 if lines[j].rstrip().endswith(')') else j
+                while k < len(lines) and lines[k].lstrip().startswith('#'):
+                    # 서명과 본문 사이의 전처리 줄(#endif 등) — page_buffer.c 의 `#if !NDEBUG <debug 서명> #else <release 서명> #endif {`.
+                    # #else/#elif 이면 짝 #endif 까지 건너뛴다(다른 갈래의 서명) — debug 서명 쪽도 정의로 찾는다
+                    if re.match(r'#\s*(else|elif)\b', lines[k].lstrip()):
+                        depth = 0
+                        k += 1
+                        while k < len(lines):
+                            t = lines[k].lstrip()
+                            if re.match(r'#\s*if', t):
+                                depth += 1
+                            elif re.match(r'#\s*endif\b', t):
+                                if depth == 0:
+                                    break
+                                depth -= 1
+                            k += 1
+                    k += 1
                 if k < len(lines) and lines[k].strip() == '{':           # 정의
                     rt = i - 1
                     lines[rt] = '__attribute__ ((weak)) ' + re.sub(r'^static\s+', '', lines[rt])

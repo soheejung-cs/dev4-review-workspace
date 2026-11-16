@@ -1,0 +1,64 @@
+--- a/src/query/scan_manager.h
++++ b/src/query/scan_manager.h
+@@ -194,6 +194,7 @@
+   int page_list_sect;		/* the walk's sector in page_list */
+   size_t page_list_pgoffset;	/* the walk's next page offset in that sector */
+   VPID page_list_vpid;		/* the row path's page; NULL to take the next listed page */
++  unsigned int page_list_build;	/* the snapshot build the bitmap followed (MVCC_SNAPSHOT.build_serial) */
+ };				/* Regular Heap File Scan Identifier */
+ 
+ namespace parallel_scan
+@@ -244,6 +245,7 @@
+   int page_list_sect;
+   size_t page_list_pgoffset;
+   VPID page_list_vpid;
++  unsigned int page_list_build;
+   // *INDENT-OFF*
+   #if !WINDOWS
+   parallel_scan::RESULT_TYPE result_type;
+--- a/src/query/scan_manager.c
++++ b/src/query/scan_manager.c
+@@ -4083,6 +4083,13 @@
+ 	  hsidp->page_list_sect = 0;
+ 	  hsidp->page_list_pgoffset = 0;
+ 	  VPID_SET_NULL (&hsidp->page_list_vpid);
++	  if (hsidp->sector_order
++	      && (mvcc_snapshot == NULL || mvcc_snapshot->build_serial != hsidp->page_list_build))
++	    {
++	      /* a nested statement rebuilt the snapshot after the bitmap: the rest of this open follows the links */
++	      hsidp->sector_order = false;
++	      hsidp->page_list = NULL;
++	    }
+ 	}
+       if (hsidp->caches_inited != true)
+ 	{
+@@ -4387,6 +4394,17 @@
+ 	  s_id->s.hsid.page_list_sect = 0;
+ 	  s_id->s.hsid.page_list_pgoffset = 0;
+ 	  VPID_SET_NULL (&s_id->s.hsid.page_list_vpid);
++	  if (s_id->s.hsid.sector_order)
++	    {
++	      MVCC_SNAPSHOT *snapshot = logtb_get_mvcc_snapshot (thread_p);
++
++	      if (snapshot == NULL || snapshot->build_serial != s_id->s.hsid.page_list_build)
++		{
++		  /* a nested statement rebuilt the snapshot after the bitmap: the rest of this open follows the links */
++		  s_id->s.hsid.sector_order = false;
++		  s_id->s.hsid.page_list = NULL;
++		}
++	    }
+ 	}
+       /* the next pass reads its pages afresh, not from the copy the last pass took */
+       VPID_SET_NULL (&s_id->s.hsid.scan_cache.local_cache_vpid);
+@@ -5491,6 +5509,11 @@
+   assert (page_list == NULL || !scan_id->grouped);
+   hsidp->page_list = page_list;
+   hsidp->sector_order = (page_list != NULL);
++  /* mutation (GB-01 proposal): the build the bitmap followed -- the proposal passes it in; here it is read from the
++   * spec that keeps the bitmap (page_list is &spec->page_list_keep, scan_heap_scan_page_list ()) */
++  hsidp->page_list_build =
++    (page_list != NULL) ? ((const ACCESS_SPEC_TYPE *) ((const char *) page_list
++						       - offsetof (ACCESS_SPEC_TYPE, page_list_keep)))->page_list_keep_snapshot : 0;
+ }
+ 
+ /*

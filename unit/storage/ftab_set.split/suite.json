@@ -1,0 +1,32 @@
+{
+ "name": "ftab_set::split () (PR#8497): n sets of contiguous sector runs in file order, every sector once; 3328953d3 cuts by pages (set i ends at the first sector where the pages so far reach floor (total * (i + 1) / n), the last set takes the rest) where develop cut equal sector counts",
+ "file": "src/storage/ftab_set.cpp",
+ "mode": "server",
+ "seams": [],
+ "test": "test.cpp",
+ "extra": [
+  "src/base/bit.c"
+ ],
+ "requires": [
+  "ftab_set"
+ ],
+ "watch": [
+  "src/storage/ftab_set.hpp",
+  "src/storage/file_manager.h",
+  "src/query/parallel/px_scan/px_scan_input_handler_heap.cpp",
+  "src/optimizer/histogram/histogram_sampler_sr.cpp",
+  "src/storage/btree_load.c"
+ ],
+ "fakes": "None: ftab_set is header only (convert, split, get_next, size) and bit64_count_ones () is bit.c's (--extra). The TU ftab_set.cpp holds only includes.",
+ "note": "2026-11-16 head 3328953d3 7/7, base 99279799f 3/7 -- S4-S7 '(PR#8497 TO-BE)' fail on develop's equal-sector cut by design (S4: three full then three empty sectors in two sets are 192|0 pages on develop, 128|64 on the PR); S1-S3 (n_sets <= 0, partition in file order, get_next () end) hold on both. S6 records the edges as current behavior: fewer pages than sets leaves empty sets ([] [0] [] [1]), a heap with no page puts every sector in the last set. Mutants (mutants/, head): mut_goal_inclusive ('<=' -- one more sector per set) -> S5 S6 S7 FAIL; mut_goal_previous_set (goal of set i-1) -> S4-S7 FAIL; develop's algorithm itself (base) -> S4-S7 FAIL.",
+ "origin": {
+  "pr": 8497,
+  "jira": "CBRD-28043",
+  "head": "3328953d3fb49872ba77fcd5028e30b9eacdaddc",
+  "base": "99279799f822c9c1235f2b9eba1c91d780d5877d",
+  "finding": "contract suite (harness-review 3-8, no finding)",
+  "comment": null,
+  "artifacts": "/home/cubrid/dev/utils/harness-out/8497/3328953d3/unit/contract/ftab_set_split/",
+  "date": "2026-11-16"
+ }
+}

@@ -1,0 +1,11 @@
+--- a/src/storage/ftab_set.hpp
++++ b/src/storage/ftab_set.hpp
+@@ -129,7 +129,7 @@
+ 	    {
+ 	      /* up to this set's share of the pages; a sector goes to the set its first page falls in */
+ 	      size_t pages_goal = total_pages * (i + 1) / (size_t) n_sets;
+-	      while (end_idx < size && pages_done < pages_goal)
++	      while (end_idx < size && pages_done <= pages_goal)
+ 		{
+ 		  pages_done += (size_t) bit64_count_ones (m_ftab_set[end_idx].page_bitmap);
+ 		  end_idx++;

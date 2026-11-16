@@ -1,0 +1,31 @@
+{
+ "name": "a parallel heap scan's reset (manager::reset () -> open () -> input_handler_heap::init_on_main ()) after the snapshot was built again and a page was allocated: PR#8497 splits the bitmap of the open again (no snapshot, no collection, the new page walked by no worker), develop took the snapshot and collected at every init_on_main ()",
+ "file": "src/query/parallel/px_scan/px_scan_input_handler_heap.cpp",
+ "mode": "server",
+ "seams": [],
+ "test": "test.cpp",
+ "extra": [
+  "src/base/bit.c"
+ ],
+ "requires": [
+  "input_handler_heap"
+ ],
+ "watch": [
+  "src/query/parallel/px_scan/px_scan_input_handler_heap.hpp",
+  "src/query/parallel/px_scan/px_scan.cpp",
+  "src/query/parallel/px_scan/px_scan.hpp",
+  "src/storage/ftab_set.hpp"
+ ],
+ "fakes": "Real (the TU): input_handler_heap::init_on_main () (3328953d3 (thread_p, hfid, parallelism, page_list); develop (thread_p, hfid, parallelism) -- the test calls whichever exists through SFINAE and, for 3328953d3, hands the open's bitmap again as manager::open () does with m_page_list, set once by set_page_list () at the scan's open, px_scan.cpp:496/530/564 -> :1737), initialize (), get_next_vpid_with_fix (), finalize (); ftab_set; bit64_* (bit.c). The workers run one after the other on the test thread (initialize () resets the thread_local walk). Fakes: logtb_get_mvcc_snapshot () / file_get_all_data_sectors () count calls (the file's data sectors now, malloc); heap_page_list_fix_next () (3328953d3's walk) = the real walk without the page fix, recording the page; pgbuf_ordered_fix_release () / pgbuf_ordered_unfix () / heap_page_is_bestspace () (develop's walk) record the page, hold a dummy pointer / let it go, no bestspace page; db_private_alloc_release / db_private_free_release malloc / free with a live count; er_* one level.",
+ "note": "2026-11-16 head 3328953d3 3/3 (P1 [defect] PASS: after build 7 -> 8 and page 768 allocated, the reset walks 641-720 only, snapshot and collection calls unchanged), base 99279799f 2/3 (P1 FAIL: develop's reset took the snapshot and collected again -- 2 calls each -- and walked 768). Stub calls 0. No mutant: the fix site is manager::reset () / open () (px_scan.cpp, a template outside this TU); the serial suite query/scan_manager.page_list_rebuild carries the proposal's build comparison as a mutant.",
+ "origin": {
+  "pr": 8497,
+  "jira": "CBRD-28043",
+  "head": "3328953d3fb49872ba77fcd5028e30b9eacdaddc",
+  "base": "99279799f822c9c1235f2b9eba1c91d780d5877d",
+  "finding": "GB-01-serial-rewind-stale-bitmap, the parallel side (GA-01)",
+  "comment": null,
+  "artifacts": "/home/cubrid/dev/utils/harness-out/8497/3328953d3/unit/GB-01/parallel/",
+  "date": "2026-11-16"
+ }
+}

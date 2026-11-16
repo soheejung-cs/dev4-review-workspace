@@ -1,0 +1,42 @@
+{
+ "name": "pgbuf_ordered_fix () with OLD_PAGE_MAYBE_DEALLOCATED while the thread holds another ordered page: a refused conditional latch lets the later-sorting held pages go, and a requested page deallocated (or reused as the file's table page) while the fix waits ends the refix loop before they are fixed again (develop same); heap_page_list_fix_next () (PR#8497) takes that ER_PB_BAD_PAGEID for 'deallocated since the bitmap' and walks on -- plus its walk contract (bit order, *pgoffset, file header passed over, bestspace / other ordered type / deallocated / reused pages passed over, held page let go before the next fix, interrupt, S_END)",
+ "file": "src/storage/page_buffer.c",
+ "mode": "server",
+ "seams": [
+  "pgbuf_fix_release",
+  "pgbuf_unfix",
+  "pgbuf_fix_debug",
+  "pgbuf_unfix_debug"
+ ],
+ "appendix": "hooks.cpp",
+ "test": "test.cpp",
+ "extra": [
+  "src/storage/heap_file.c",
+  "src/base/bit.c",
+  "src/base/mem_block.cpp"
+ ],
+ "requires": [
+  "pgbuf_ordered_unfix_reused_page"
+ ],
+ "watch": [
+  "src/storage/page_buffer.h",
+  "src/storage/heap_file.c",
+  "src/storage/heap_file.h",
+  "src/storage/bestspace.cpp",
+  "src/query/scan_manager.c",
+  "src/query/query_executor.c",
+  "src/query/parallel/px_scan/px_scan_input_handler_heap.cpp"
+ ],
+ "fakes": "Real: pgbuf_ordered_fix_release () (one body with the debug variant), pgbuf_ordered_unfix (), pgbuf_ordered_unfix_reused_page (), pgbuf_get_page_ptype (), pgbuf_compare_hold_vpid_for_sort (), pgbuf_search_hash_chain () (exit path), the thread holder bookkeeping (pgbuf_find_thrd_holder / pgbuf_allocate_thrd_holder_entry / pgbuf_unlatch_thrd_holder / pgbuf_remove_thrd_holder) and the avoid-dealloc counters of page_buffer.c; heap_page_list_fix_next () and heap_page_is_bestspace () of heap_file.c (--extra, the L / W cases registered where heap_page_list_fix_next is linked); bit64_* (bit.c); the block allocator constructor heap_file.c builds at load (mem_block.cpp). Seams: pgbuf_fix_release () / pgbuf_unfix () (release names; the release signature sits after '#else' and before '#endif {' -- needs unitseam's preprocessor-line skip of 2026-11-16) call hooks.cpp's unit_pgbuf_fix () / unit_pgbuf_unfix (). unit_pgbuf_fix () copies pgbuf_fix_release () (3328953d3 lines): interrupt check 2351-2360; zero wait makes an unconditional request conditional 2327-2337; OLD_PAGE_PREVENT_DEALLOC marks the BCB before the latch 2476-2479 and unmarks after it 2564-2568 (a refused conditional request keeps the mark); the latch as pgbuf_latch_bcb_upon_fix () decides 7021-7091 (another thread's write latch blocks all, its read latch a write request, a writer queued behind a reader blocks a new non-holder reader), a refused conditional request sets no error unless LK_ZERO_WAIT 7205-7238; the holder via the TU's own helpers 7106-7176; a PAGE_UNKNOWN page 2574-2608 (OLD_PAGE_MAYBE_DEALLOCATED: ER_PB_BAD_PAGEID warning, unfix, NULL; OLD_PAGE / PREVENT: the error severity). What the other thread does before it lets a blocked page go is scripted per case: release as it was, file_perm_dealloc () at postpone (write latch at file_manager.c:6530, pgbuf_dealloc_page () sets PAGE_UNKNOWN at page_buffer.c:16011-16014 -- no dealloc-mark or waiter check), or deallocate and allocate again as the file's table page (PAGE_FTAB). unit_pgbuf_unfix () = pgbuf_unfix ()'s holder half (pgbuf_unlatch_thrd_holder (), 6779-6829). spage_get_record (): slot 0 = a HEAP_CHAIN replica (heap_file.c:280-288), flags 0x1 (HEAP_PAGE_FLAG_BESTSPACE, :231) for the pages a case marks -- R0 checks it against the real heap_page_is_bestspace (). er_set / er_errid / er_errid_if_has_error (warnings and notifications ignored, error_manager.c:1894-1901) / er_clear: one error level. fileio_get_volume_label (): a label. prm_Def zeroed (er_log_debug off), db_Io_page_size 16 KiB. The thread entry is calloc'd (index 1, wait_msecs_override LK_INFINITE_WAIT), never constructed. Layout: heap A (file header 64, heap header 65 -> ordered group 0|65) sorts before heap B (320 / 321 -> group 0|321) by group, page 520 of A before page 330 of B.",
+ "note": "2026-11-16 head 3328953d3 20/20 (O2 O3 L1 L1b L2 [defect] PASS = defect present), base 99279799f 7/7 (R0 O1-O6; O2 O3 [defect] PASS = the pgbuf_ordered_fix () mechanism is develop's; L / W not registered -- heap_page_list_fix_next () is new). Stub calls 0. Mutants (mutants/, head): fix_gd01_refix_rest.diff (the finding's proposal: in the refix loop a requested page gone under MAYBE_DEALLOCATED is skipped, the other held pages are fixed again, ER_PB_BAD_PAGEID at exit) -> O2 O3 L1 L1b L2 FAIL (page 330 held again), all [contract] PASS, same on base (O2 O3 FAIL) -- it also closes develop's relocation path (bestspace allocate_verify_actual_space, refute.GD.json); mut_no_er_clear -> L1 L2 L5 W4 FAIL; mut_hold_previous_page (heap_page_list_fix_next keeps its page while fixing the next) -> W5 FAIL. Debug build tree (--build-tree ~/dev/build/build_x86_64_debug, Catch spec '~\"W3*\" ~\"O4*\"'): head 18/18, base 6/6 -- the MAYBE_DEALLOCATED path (O2 O3 L1 L1b L2) hits no assert; O4 aborts at page_buffer.c:13617 (assert (false): a PREVENT_DEALLOC page found deallocated -- develop's chain mode is caught by a debug build) and W3 at heap_file.c:2942 (assert (false): a non-heap page listed), both on purpose. The seams name both the release and the debug functions (unitseam skips the other #if branch's signature). Reachability (read, not run): a fixed scan holds its page only as the innermost scan of a join chain without index access, and that scan's dptr_list (select-list correlated subqueries) is not checked in that branch (query_executor.c:22381-22413 vs the index branch :22426 and the top-level dptr check :22447-22451); the dptr list runs per qualified row with the page held (:12431) and after_join_pred / output read the PEEKed values after it; the requested page must be refused, then deallocated by the postpone fix (file_manager.c:6530) in the window after vacuum's waiter/dealloc-mark checks (heap_file.c:3550, 3562) -- a narrow race.",
+ "origin": {
+  "pr": 8497,
+  "jira": "CBRD-28043",
+  "head": "3328953d3fb49872ba77fcd5028e30b9eacdaddc",
+  "base": "99279799f822c9c1235f2b9eba1c91d780d5877d",
+  "finding": "GD-01-bad-pageid-skip-leaves-held-pages-unfixed (+ harness-review 3-8 contract cases for heap_page_list_fix_next ())",
+  "comment": null,
+  "artifacts": "/home/cubrid/dev/utils/harness-out/8497/3328953d3/unit/GD-01/ (out/, out_fix/, out_mut_*/)",
+  "date": "2026-11-16"
+ }
+}

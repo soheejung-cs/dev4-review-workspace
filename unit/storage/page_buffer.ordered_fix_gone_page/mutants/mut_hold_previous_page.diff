@@ -1,0 +1,22 @@
+--- a/src/storage/heap_file.c
++++ b/src/storage/heap_file.c
+@@ -2912,12 +2912,18 @@
+ 
+       /* release the held page first: the next page comes from the bitmap, not from this page's link, and holding
+        * this page while waiting deadlocks with vacuum deallocating an empty page */
++      PGBUF_WATCHER held_watcher;
++      PGBUF_INIT_WATCHER (&held_watcher, PGBUF_ORDERED_HEAP_NORMAL, hfid);
+       if (watcher->pgptr != NULL)
+ 	{
+-	  pgbuf_ordered_unfix (thread_p, watcher);
++	  pgbuf_replace_watcher (thread_p, watcher, &held_watcher);
+ 	}
+ 
+       error_code = pgbuf_ordered_fix (thread_p, &vpid, OLD_PAGE_MAYBE_DEALLOCATED, PGBUF_LATCH_READ, watcher);
++      if (held_watcher.pgptr != NULL)
++	{
++	  pgbuf_ordered_unfix (thread_p, &held_watcher);
++	}
+       if (watcher->pgptr == NULL)
+ 	{
+ 	  if (error_code != NO_ERROR && error_code != ER_PB_BAD_PAGEID)
