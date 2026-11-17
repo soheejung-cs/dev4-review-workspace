@@ -10,6 +10,18 @@ from . import codegraph as CG, context_pack as CP, arch_infer as AI
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 SRC_EXT = ('.c', '.cpp', '.h', '.hpp', '.cc')
 
+
+# agent-todo 보드(퍼스널 claude-workspace)가 '재개할 자리' 로 칠할 컨테이너 — 그 키로 하네스 구현을 처음 돌린 곳(사용자 지시 2026-11-17
+# "발번 한 곳 기준이 아니라 처음으로 harness implement 를 쓴 곳 기준으로"). 있는 곳에서만, 뒤에서 조용히 — 실패해도 구현을 막지 않는다.
+AGENT_BOARD = os.path.expanduser('~/dev/docs/claude-workspace/skills/agent-board/agent_board.sh')
+
+def _impl_home(key):
+    b = os.environ.get('CLAUDE_CODE_BRIDGE_SESSION_ID', '')
+    sid = b.split('session_')[-1][:8] if b else ''
+    if os.path.exists(AGENT_BOARD) and sid and re.fullmatch(r'CBRD-\d+', key or ''):
+        subprocess.Popen(['bash', AGENT_BOARD, 'impl-home', '-s', sid, key], stdout=subprocess.DEVNULL,
+                         stderr=subprocess.DEVNULL, start_new_session=True)
+
 def sh(*a, cwd=None):
     return subprocess.run(list(a), stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True, cwd=cwd).stdout
 
@@ -36,6 +48,7 @@ def main():
     a = ap.parse_args()
     out = a.out or os.path.expanduser(f'~/dev/utils/harness-out/impl/{a.key}'); os.makedirs(out, exist_ok=True)
     log = lambda m: print(f'[impl-pack] {m}', file=sys.stderr)
+    _impl_home(a.key)
     repo = a.repo
     symbols = [s.strip() for s in a.symbols.split(',') if s.strip()]
     greps = [s.strip() for s in a.grep.split(',') if s.strip()]
