@@ -61,7 +61,7 @@ SKILL.md 절차 3-2 에서 이 파일을 연다. 첫 적용: CUBRID/cubrid#8472(
 | `TRACE DIVERGES` (행동 n개까지) | n+1 번째 부근에서 모델이 코드를 못 따라간다 | 셋 중 무엇인지 가른다: ① 계측 자리·이름 오류 ② 모델 추상화가 틀림 → 모델을 고치고 before/after 를 **다시** 돌린다 ③ 코드가 모델의 계약을 어김(selftest 의 racy 판: 잃은 갱신) → 결함 후보, 재현으로 |
 
 **Specula 를 그대로 쓸 때**(사람이 설치 — §4 아래 설치 절):
-- 새 명세를 처음 쓸 때 `specula-lite` 스킬의 순서(불변식마다 근거 인용한 `modeling-brief.md` → 모델 → 커버리지 감사 → TLC → 재현)를 따른다. trace 대조는 하지 않으므로 위 1~6 은 따로 한다.
+- 새 명세를 처음 쓸 때 `specula-lite`(`~/tools/specula/skills/specula-lite/SKILL.md` — 전역 스킬로 깔지 않는다)의 순서(불변식마다 근거 인용한 `modeling-brief.md` → 모델 → 커버리지 감사 → TLC → 재현)를 따른다. trace 대조는 하지 않으므로 위 1~6 은 따로 한다.
 - 버퍼 latch·락 관리자·로그처럼 큰 동시성 하위 시스템은 리뷰 밖 캠페인으로 `specula run --byom=<우리 명세 디렉터리> --artifact=<엔진 전용 worktree> --guidance=<g.md> --keep-original`. 실행 시간 중앙값 3.7시간·시스템당 $19~168(저자 보고)이고 자체 빌드를 하므로 **사용자 승인 뒤, CTP·goto·벤치가 돌지 않을 때만**. guidance 의 Priority Questions 는 "When [사건], can [보이는 나쁜 결과]?" 꼴로, 영역 판정 4단계(①~④)에서 뽑는다.
 - `TRACE DIVERGES` 원인 찾기에 Specula 의 MCP `trace_debugger` 를 쓸 수 있는지는 **첫 사용 때 확인**한다(우리 TraceData 형식과 맞는지 미확인).
 
@@ -81,7 +81,11 @@ uv python install 3.12                                    # pip 없는 python3.1
 # JDK 21: 사용자 공간 tarball 을 ~/tools/jdk-21 에 풀고 JAVA_HOME 을 그쪽으로(시스템 rpm 은 sudo)
 git clone https://github.com/specula-org/Specula.git ~/tools/specula && cd ~/tools/specula && uv tool install -e . && specula setup
 ```
-`specula setup` 은 스킬을 전역·프로젝트 중 어디에 깔지 묻는다 — **프로젝트(dev4-review-workspace)** 로 고르고, 깔린 스킬 이름이 우리 스킬과 겹치는지 본다.
+설치 함정(2026-11-17 .51 실측 — 다른 컨테이너도 같은 OS 라 같다):
+- `setup.sh` 는 PATH 의 `python3` 로 가상환경을 만든다 — 시스템 3.6 이면 `mcp` 설치에서 죽는다. 위처럼 uv 의 3.12 를 PATH 앞에 두고 돌린다(`python3 --version` 이 3.12).
+- 스킬 설치는 `~/.claude/skills` 의 한글 이름(`출근`)을 이상한 항목으로 보고 **전체를 멈춘다**. 우리는 Specula 스킬을 전역에 깔지 않는다(모든 세션 목록에 12개가 실린다) — 쓸 때 `~/tools/specula/skills/<이름>/SKILL.md` 를 경로로 읽는다(`specula-lite` 등). setup 의 Claude Code 질문에는 `n`.
+- setup 은 `CLAUDE_CONFIG_DIR=~/.claude` 로 MCP 를 등록해, `CLAUDE_CONFIG_DIR` 를 안 쓰는 우리 환경에서는 아무도 읽지 않는 `~/.claude/.claude.json` 에 들어간다(실제 설정 `~/.claude.json` 은 그대로). trace 디버거만 손으로 등록한다:
+  `claude mcp add --transport stdio --scope user --env SPECULA_ROOT=$HOME/tools/specula tracedebugger -- $HOME/tools/specula/tools/trace_debugger/.venv/bin/python $HOME/tools/specula/tools/trace_debugger/mcp_server.py` — 새 세션부터 보인다.
 
 ## 5. 판정과 보고
 | before | after | 뜻 | 할 일 |
