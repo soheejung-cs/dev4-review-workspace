@@ -49,9 +49,9 @@ SKILL.md 절차 3-2 에서 이 파일을 연다. 첫 적용: CUBRID/cubrid#8472(
 |---|---|---|
 | 기록 한 줄 | `{"tag":"trace","event","tid"(0부터),"start","end","state",["args","msg"]}` | 같다(`tla_trace.h`) |
 | 파일 | `<prefix>-thread-<tid>.ndjson` | 같다(`TLA_TRACE_PREFIX`, 기본 `trace`) |
-| 병합 | 전처리기 → `{"num_threads","max_timestamp","traces":{"<tid>":[…]}}`, 시각은 1부터 조밀한 순위 | 같다(`trace_to_tla.py --merged`) — Specula `Trace.tla`·`trace_debugger` 에 넘길 수 있는 꼴. 그쪽 실행은 Specula 설치 뒤 첫 사용 때 확인 |
+| 병합 | 전처리기 → `{"num_threads","max_timestamp","traces":{"<tid>":[…]}}`, 시각은 1부터 조밀한 순위 | 같다(`trace_to_tla.py --merged`) — Specula `Trace.tla` 의 `JsonDeserialize` 가 그대로 읽는다 — **Specula TLC(2026.11.15)로 확인(2026-11-17)**: selftest 의 locked 받아들임(61 states·depth 61), racy 는 depth 10 에서 막힘(우리 CONFORMS·DIVERGES '행동 9개까지' 와 같은 자리). 쓴 명세 `tools/tla/trace/selftest/specula/` |
 | Trace 명세 | `Trace.tla`: `pc`·`ViablePIDs`·`MatchEvent`, `JsonDeserialize(TraceFile)` | 같은 구조·이름, 데이터만 TLA 리터럴(`TraceData.tla`) — Json 모듈(CommunityModules jar) 없이 우리 tla2tools.jar 하나로 돈다 |
-| 완료 판정 | `PROPERTY TraceFullyConsumed`(<> 모두 소비) | 불변식 `TraceIncomplete` 위반 = 모두 소비한 상태에 닿는 순서가 **하나라도** 있음. Specula 꼴은 겹친 구간에서 한 순서만 막혀도 불일치로 나와(모든 행동열을 본다) 여기서는 쓰지 않는다 |
+| 완료 판정 | `PROPERTY TraceFullyConsumed`(<> 모두 소비) | 불변식 `TraceIncomplete` 위반 = 모두 소비한 상태에 닿는 순서가 **하나라도** 있음. Specula 꼴은 겹친 구간에서 한 순서만 막혀도 불일치로 나와(모든 행동열을 본다) 여기서는 쓰지 않는다. 가이드의 `TraceSpec` 은 공정성이 없어 **맞는 trace 도 Stuttering 반례로 실패한다** — Specula 예제처럼 `/\ WF_allVars(TraceNext)` 를 붙이거나(braft) PROPERTY 를 빼고 교착 검사로 판정한다(cometbft) |
 옛 우리 형식(`ev`·`t0`·`t1`·`st`, `trace.<pid>.<tid>.ndjson`)도 변환기가 읽는다.
 6. **돌리기** — `python3 tools/tla/tlc_run.py tla/<…>/trace/TraceCheck.tla --config tla/<…>/trace/TraceCheck.cfg --expect trace`
 
@@ -63,7 +63,8 @@ SKILL.md 절차 3-2 에서 이 파일을 연다. 첫 적용: CUBRID/cubrid#8472(
 **Specula 를 그대로 쓸 때**(사람이 설치 — §4 아래 설치 절):
 - 새 명세를 처음 쓸 때 `specula-lite`(`~/tools/specula/skills/specula-lite/SKILL.md` — 전역 스킬로 깔지 않는다)의 순서(불변식마다 근거 인용한 `modeling-brief.md` → 모델 → 커버리지 감사 → TLC → 재현)를 따른다. trace 대조는 하지 않으므로 위 1~6 은 따로 한다.
 - 버퍼 latch·락 관리자·로그처럼 큰 동시성 하위 시스템은 리뷰 밖 캠페인으로 `specula run --byom=<우리 명세 디렉터리> --artifact=<엔진 전용 worktree> --guidance=<g.md> --keep-original`. 실행 시간 중앙값 3.7시간·시스템당 $19~168(저자 보고)이고 자체 빌드를 하므로 **사용자 승인 뒤, CTP·goto·벤치가 돌지 않을 때만**. guidance 의 Priority Questions 는 "When [사건], can [보이는 나쁜 결과]?" 꼴로, 영역 판정 4단계(①~④)에서 뽑는다.
-- `TRACE DIVERGES` 원인 찾기에 Specula 의 MCP `trace_debugger` 를 쓸 수 있는지는 **첫 사용 때 확인**한다(우리 TraceData 형식과 맞는지 미확인).
+- `TRACE DIVERGES` 원인 찾기에 Specula 의 MCP `trace_debugger`(`run_trace_validation`·`run_trace_debugging` — 중단점·식 평가)를 쓴다: `trace_to_tla.py --merged` 의 JSON + Specula 꼴 `Trace.tla`(본보기 `tools/tla/trace/selftest/specula/`, base 를 우리 명세로, `MatchEvent` 를 TraceCheck 의 것으로) + `community_jar=~/tools/specula/lib/CommunityModules-deps.jar`.
+  - 함정(11-17 .51): MCP 는 PATH 의 `java` 를 부른다(`trace_validation.py` 에 박힘) — 시스템 Java 8 이면 `UnsupportedClassVersionError(55.0)`. 등록에 PATH 를 넣는다: `claude mcp remove tracedebugger --scope user` 뒤 설치 절의 `claude mcp add` 에 `-e PATH=$HOME/tools/jdk-21/bin:/usr/local/bin:/usr/bin:/bin` 를 더해(사람이, 새 세션부터). 그 전에는 같은 명령을 손으로: `cd <dir> && ~/tools/jdk-21/bin/java -Xmx4G -cp ~/tools/specula/lib/tla2tools.jar:~/tools/specula/lib/CommunityModules-deps.jar tlc2.TLC -config Trace.cfg Trace.tla -lncheck final`.
 
 ## 4. 돌리기
 ```bash
