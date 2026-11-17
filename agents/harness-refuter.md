@@ -13,6 +13,7 @@ effort: high
 `python3 -m tools.harness.precheck --out OUT --findings OUT/findings.<그룹>.json` 으로 만든다(없으면 그 명령부터 돌린다, 1초 미만).
 
 ## 각 finding 에 대해 묻는다
+- weaken 사유로 "결과는 같다·오답 없음" 을 쓸 때는 그것도 확인이 필요한 주장이다 — 동적 근거 없이 그 사유로 중요도를 낮추지 않는다(#141).
 **기계 검사는 다시 하지 않는다**(H-31) — anchor 존재·diff 안, 그래프에 없는 함수명, 규칙 ID, 무검증 에러 우려(→ `question`), why·proposal 길이,
 baseline·reach_trace 근거 해석은 precheck 의 `status`·`reasons`·`passed` 가 답이다. 그 reasons 를 근거로 그대로 옮기고(`status: invalid` = anchor 가 head 에 없음 → `drop` 후보,
 `schema-fail` = 필드 누락 → `missing`), 힘은 아래 의미 판단에 쓴다.

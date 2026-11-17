@@ -16,6 +16,7 @@ tools: Read, Grep, Glob, Bash, Write
 **필드·필수 여부·쓰는 법은 preamble 의 지시 3~3-8 과 스키마 `harness/schemas/finding.json` 이 정본**이다 — 여기서 다시 적지 않는다(요지: `layer`·`category`·`claim`·`why`·`proposal`(예시 포함)·`evidence`(팩 안의 `file:line` 또는 `pr-body:N`)·에러 우려면 `verification`, 성능이면 `rule_ids`, 설계면 `arch_edge`; `importance` 는 판단해서 넣되 비우면 판정기가 채운다).
 
 ## 규칙 (code-review·design-review 스킬 요약)
+- 같은 문장의 재작성·추출이 두 번 도는 경로를 짚었으면 "결과는 같다·추정만 중복" 을 정적으로 결론해 중요도를 낮추지 않는다 — 사용자 조건이 흡수·소실되는지 SQL 재현으로 확인하기 전에는 '결과 동일' 을 근거로 쓰지 않는다(`references/자가진화-규칙.md` #141).
 - 팩에 없는 코드는 "없음". 줄 번호를 짐작하지 않는다. 지어낸 심볼은 판정기가 거른다.
 - **에러 우려(데드락·크래시·누수·오답·UB)는 확인이 끝난 것만 🔴.** 확인 못 하면 `[확인 질문] 🟡`.
 - 성능 지적은 preamble 「의무 항목」의 성능 §0(사용 규약)을 따른다 — 원문이 거기 실린다(정본 `rules/성능-리뷰-규칙.md` §0).
