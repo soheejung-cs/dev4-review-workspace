@@ -85,7 +85,7 @@ git clone https://github.com/specula-org/Specula.git ~/tools/specula && cd ~/too
 - `setup.sh` 는 PATH 의 `python3` 로 가상환경을 만든다 — 시스템 3.6 이면 `mcp` 설치에서 죽는다. 위처럼 uv 의 3.12 를 PATH 앞에 두고 돌린다(`python3 --version` 이 3.12).
 - 스킬 설치는 `~/.claude/skills` 의 한글 이름(`출근`)을 이상한 항목으로 보고 **전체를 멈춘다**. 우리는 Specula 스킬을 전역에 깔지 않는다(모든 세션 목록에 12개가 실린다) — 쓸 때 `~/tools/specula/skills/<이름>/SKILL.md` 를 경로로 읽는다(`specula-lite` 등). setup 의 Claude Code 질문에는 `n`.
 - setup 은 `CLAUDE_CONFIG_DIR=~/.claude` 로 MCP 를 등록해, `CLAUDE_CONFIG_DIR` 를 안 쓰는 우리 환경에서는 아무도 읽지 않는 `~/.claude/.claude.json` 에 들어간다(실제 설정 `~/.claude.json` 은 그대로). trace 디버거만 손으로 등록한다:
-  `claude mcp add --transport stdio --scope user --env SPECULA_ROOT=$HOME/tools/specula tracedebugger -- $HOME/tools/specula/tools/trace_debugger/.venv/bin/python $HOME/tools/specula/tools/trace_debugger/mcp_server.py` — 새 세션부터 보인다.
+  `claude mcp add tracedebugger --transport stdio --scope user -e SPECULA_ROOT=$HOME/tools/specula -- $HOME/tools/specula/tools/trace_debugger/.venv/bin/python $HOME/tools/specula/tools/trace_debugger/mcp_server.py` — 이름을 맨 앞에(`-e` 는 값을 여러 개 받아 뒤의 이름까지 먹는다), 새 세션부터 보인다.
 
 ## 5. 판정과 보고
 | before | after | 뜻 | 할 일 |
