@@ -104,6 +104,8 @@ def n_self_check(c, a):
     if not any(r['status'] == 'valid' for r in c.get('adjudicated', [])): c['log']('self_check: skipped (no valid finding)'); return None
     r = AD.self_check_build(c.need('wt'), files); c['log'](f'self_check: {r}'); json.dump(r, open(os.path.join(c['out'], 'self_check.json'), 'w')); return r
 def n_episodic(c, a):
+    if os.environ.get('HARNESS_EVAL_PR'):   # 평가 실행은 episodic(examples/episodic/PR-<n>.json, 커밋되는 파일)을 덮어쓰지 않는다
+        c['log']('episodic: 평가 모드 — 적재하지 않음'); return None
     p = EP.collect(c['pr'], a.get('reviewer', 'soheejung-cs'), os.path.join(ROOT, 'examples', 'episodic'), local=c.get('adjudicated'))
     n = len(json.load(open(p, encoding='utf-8'))); c['log'](f'episodic: {n} items -> {p}'); return p
 def n_pr_refs(c, a):

@@ -31,8 +31,9 @@ RANK = {'low': 1, 'medium': 2, 'high': 3}
 
 
 def load_findings(trial_dir):
-    files = sorted(glob.glob(os.path.join(trial_dir, '*.adjudicated.json'))) or \
-        sorted(glob.glob(os.path.join(trial_dir, 'findings*.json')))
+    # 하네스는 <out>/<pr>/<sha>/ 아래에 쓴다 — 시도 디렉터리 아래를 끝까지 찾는다
+    files = sorted(glob.glob(os.path.join(trial_dir, '**', '*.adjudicated.json'), recursive=True)) or \
+        sorted(glob.glob(os.path.join(trial_dir, '**', 'findings*.json'), recursive=True))
     if not files:
         return None
     out = []

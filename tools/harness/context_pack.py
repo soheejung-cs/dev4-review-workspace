@@ -152,6 +152,24 @@ def _fold_resolved(lines: List[str]) -> List[str]:
         out.append(l)
     return out
 
+def _drop_eval_items(lines: List[str]) -> List[str]:
+    """평가 모드(harness/평가.md §3, HARNESS_EVAL_PR): 그 PR 의 리뷰에서 나온 항목(`PR#<n>`·`#<n>` 이 적힌 `- ` 항목과 이어지는 줄)을 뺀다
+    — 그 리뷰가 찾은 결함이 §3 에 올라가 같은 PR 의 팩에 다시 실리면 답 유출이다(R-26, 2026-11-17 PR#8375 팩에서 실제로 나왔다)."""
+    pr = os.environ.get('HARNESS_EVAL_PR', '')
+    if not pr: return lines
+    pat = re.compile(r'(?:PR\s*#|#)' + re.escape(pr) + r'\b')
+    out, skip = [], False
+    for l in lines:
+        if l.startswith('- '):
+            skip = bool(pat.search(l))
+        elif skip and (l.startswith(' ') or l.startswith('\t') or not l.strip()):
+            if pat.search(l): pass
+            continue
+        else:
+            skip = False
+        if not skip: out.append(l)
+    return out
+
 def _known_pitfalls(touched_dirs: Set[str], notes_root: str = '', cap: int = PITFALLS_CAP_TOKENS) -> List['Section']:
     """손댄 디렉터리의 모듈 노트 §3(예비 이슈 — 미수정 버그·의심·구조적 한계)을 모듈마다 절 하나로(H-29).
     리뷰가 이미 규명된 함정을 다시 밟거나 미수정 상태를 정상으로 가정하지 않게 — 예전에는 LLM 이 노트를 열어야 했다.
@@ -165,7 +183,7 @@ def _known_pitfalls(touched_dirs: Set[str], notes_root: str = '', cap: int = PIT
     for fn in sorted(mods):
         p = os.path.join(root, 'modules', fn)
         if not os.path.isfile(p): continue
-        with open(p, encoding='utf-8', errors='replace') as fp: body = _fold_resolved(_note_section3(fp.read()))
+        with open(p, encoding='utf-8', errors='replace') as fp: body = _drop_eval_items(_fold_resolved(_note_section3(fp.read())))
         if not body: continue
         kept, tok = [], 0
         for i, l in enumerate(body):
@@ -185,9 +203,12 @@ def _episodic(examples_dir: str, files: Set[str]) -> str:
     d = os.path.join(examples_dir, 'episodic'); rows = []
     if not os.path.isdir(d): return ''
     import json
+    # 평가 모드(harness/평가.md §3): 그 과제 PR 의 과거 리뷰·스레드는 정답이라 팩에 싣지 않는다(R-26 답 유출)
+    eval_pr = os.environ.get('HARNESS_EVAL_PR', '')
     for fn in sorted(os.listdir(d)):
-        if not fn.endswith('.json'): continue
+        if not fn.endswith('.json') or (eval_pr and fn == f'PR-{eval_pr}.json'): continue
         for e in json.load(open(os.path.join(d, fn), encoding='utf-8')):
+            if eval_pr and str(e.get('pr')) == eval_pr: continue
             if e.get('file') in files:
                 tag = e.get('outcome', 'open') if e.get('source') != 'local' else f"local {e.get('status')}/{e.get('severity')}"
                 rows.append(f"- [{tag}] PR#{e.get('pr')} {e['file']}:{e.get('line')} — {e.get('claim','')[:160]}")
