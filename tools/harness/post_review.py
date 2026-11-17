@@ -29,6 +29,7 @@
 """
 import argparse, json, re, subprocess, sys, tempfile, time, os
 from . import md_lint as ML   # 게시 전 교정·검사 — review_reply 와 같은 함수(H-32)
+from . import board_presence
 
 EMOJI = {'높음': '🔴', '중간': '🟡', '낮음': '🟢'}
 LAYER = {'코드': '[코드 리뷰]', '설계': '[설계 리뷰]'}
@@ -366,6 +367,7 @@ def main():
         failed = (not post_issue_comment(a.pr, a.repo, body)) or failed
     if failed:
         sys.exit(1)
+    board_presence.review_posted(a.pr)   # 리뷰 끝난 PR 은 추적하지 않는다 — 보드의 '리뷰중 PR#n' 을 푼다
 
 
 if __name__ == '__main__':
