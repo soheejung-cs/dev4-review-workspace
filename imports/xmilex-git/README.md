@@ -5,7 +5,7 @@
 
 | 디렉터리 | 방법론 | 우리 쪽 대응 |
 |---|---|---|
-| `skills/cubrid-pr-review/` | 한국어 리뷰 보고서 형식(TL;DR / Summary / Findings Blocking·Non-blocking / 확인 필요) + voice-guide + reference | `skills/code-review` 보고서 형식, `skills/review-response` 어조 |
+| `skills/cubrid-pr-review/` | 한국어 리뷰 보고서 형식(TL;DR / Summary / Findings Blocking·Non-blocking / 확인 필요) + voice-guide + reference | `skills/code-review` 보고서 형식, `skills/review-response` 어조 — voice-guide 는 2026-11-17 `references/글쓰기-말투.md` §3·§6 에 녹임 |
 | `skills/code-review/` | 2축 리뷰(Standards / Spec) | `skills/code-review` §2 |
 | `skills/codebase-design/` | 깊은 모듈·seam·adapter, DESIGN-IT-TWICE, DEEPENING | `rules/설계-리뷰-규칙.md` §3 어휘 |
 | `skills/diagnosing-bugs/` | 어려운 버그·성능 회귀 진단 루프(피드백 루프 먼저) + hitl 템플릿 | `skills/code-review` §3 "재현이 먼저" |
