@@ -1,0 +1,13 @@
+--- a/src/storage/page_buffer.c	2026-11-17 17:53:25.736872382 +0900
++++ b/src/storage/page_buffer.c	2026-11-17 17:53:25.748872381 +0900
+@@ -7940,7 +7940,9 @@
+    * pgbuf_wakeup_reader_writer () does: a stale bit makes pgbuf_latch_bcb_upon_fix () block every later READ
+    * request on a READ-latched page, and keeps the lock-free READ path off, until a holder unlatches. The caller
+    * holds the BCB mutex, under which every waiter_exists transition is made. */
+-  if (!pgbuf_is_exist_blocked_reader_writer (bufptr))
++  if (bufptr->next_wait_thrd == NULL
++      || (bufptr->next_wait_thrd->request_latch_mode != PGBUF_LATCH_READ
++	  && bufptr->next_wait_thrd->request_latch_mode != PGBUF_LATCH_WRITE))
+     {
+       set_waiter_exists (&bufptr->atomic_latch, false);
+     }

@@ -1,0 +1,30 @@
+{
+ "name": "pgbuf_timed_sleep_error_handling () -- a page latch waiter that gave up (latch timeout or interrupt) leaves the BCB wait queue and, from the front, hands the READ latch to the READ waiters behind it; when it returns, waiter_exists must equal 'a READ or WRITE waiter is left on the queue' (rule #028 form). develop (bb71348d6) leaves the flag set on every exit, so a READ-latched page keeps blocking non-holder READ requests (and the lock-free READ path) until the holder unlatches -- CBRD-28163. Plus R1: the grant loop adds a reader's fix count before it re-checks the reader under its entry lock, so a reader that gave up in between leaves its count on the BCB (develop same, outside CBRD-28163)",
+ "file": "src/storage/page_buffer.c",
+ "mode": "server",
+ "seams": [],
+ "appendix": "hooks.cpp",
+ "test": "test.cpp",
+ "requires": [
+  "pgbuf_timed_sleep_error_handling",
+  "get_waiter_exists",
+  "PGBUF_ATOMIC_LATCH_IMPL"
+ ],
+ "watch": [
+  "src/storage/page_buffer.h",
+  "src/thread/thread_entry.hpp",
+  "src/thread/thread_entry.cpp"
+ ],
+ "fakes": "Real: pgbuf_timed_sleep_error_handling () (called through hooks.cpp's unit_tseh (), same TU) and all it calls in page_buffer.c: PGBUF_BCB_LOCK (pthread_mutex_lock -- pgbuf_Monitor_locks is false), get_impl / compare_exchange on the atomic latch, pgbuf_is_exist_blocked_reader_writer () (head's end check), pgbuf_wakeup () (STATIC_INLINE: resume_status = THREAD_PGBUF_RESUMED, pthread_cond_signal () of the zeroed wakeup_cond, thread_unlock_entry ()). pgbuf_wakeup () is not a seam: unitseam's --seam prefixes `__attribute__ ((weak))` to `STATIC_INLINE int` and reports it applied, but GCC 8.5 warns 'inline function declared weak', drops the attribute and inlines the always_inline body (checked on a copy of the shape: no symbol is emitted) -- a fake would never run. Who is woken is read from resume_status and from the entry lock calls instead. Fakes: cubthread::entry::lock () / unlock () = thread_entry.cpp:397-407 (pthread_mutex_lock / unlock of th_entry_lock) plus a lock / unlock count per entry; in R1 alone the lock () of one READ waiter also sets its request_latch_mode to PGBUF_NO_LATCH -- what that waiter's own pgbuf_timed_sleep () does when it gives up (page_buffer.c cae32d077 :8005 interrupt, :8035 timeout) between the grant loop's unlocked read of the request (:7903) and the loop's thread_lock_entry () (:7914). Inputs as the caller makes them: the giving-up thread's request_latch_mode is PGBUF_NO_LATCH at the call (:8005 / :8035); the call is made without the BCB mutex and returns NO_ERROR holding it (the caller unlocks, :8010 / er_set_return) -- the test checks both and unlocks. A blocked thread carries pgbuf_block_bcb ()'s request (:7733-7734) and resume_status THREAD_PGBUF_SUSPENDED (:7991). The BCB is READ latched by one other thread (fcnt 1) with waiter_exists set. BCB and thread entries are calloc'd (zeroed pthread mutex / cond = the default ones on Linux), never constructed. The contract's right side is computed in test.cpp from the queue, not with the TU's pgbuf_is_exist_blocked_reader_writer ().",
+ "note": "2026-11-17 head cae32d077 (branch CBRD-28163): [contract] a b c d e e2 f f2 g h 10/10 PASS; [defect] a b c e2 f g FAIL (head's flag false -- fixed), R1 PASS (develop-same defect present). base bb71348d6: 17/17 PASS (all six CBRD-28163 [defect] reproduced). Stub calls 0 on every run (auto stubs: 96 functions, 18 data, never called). base + mutants/fix_cbrd28163.diff (= head's one commit) gives head's result. Mutants on head: mut_clear_always (clear without the check) -> [contract] d e f2 h FAIL (a READ would overtake a blocked writer); mut_case12_early_return (case 1 / case 2 keep `return NO_ERROR`) -> [defect] g e2 PASS again, a b c f stay FAIL -- only g and e2 pin the exits a-f do not reach; mut_check_first_only (look at the front waiter only) -> [contract] f2 FAIL. Tag polarity follows unit_regress: the six CBRD-28163 [defect] cases assert develop's stale flag, so they PASS where the fix is absent and FAIL where it is in; once CBRD-28163 is merged add \"defects_fixed_in\": {\"CBRD-28163 \": \"<merge commit>\"} (not set before the merge: an unmerged fix would make other PRs' runs report those PASSes as a recurrence). R1 is not CBRD-28163's change; it looks like one path of CBRD-27739 (a READ latch nobody holds after repeated latch timeouts, Confirmed, separate issue) -- whether it is that issue's mechanism is for that issue's text to say. Reachability (read): a / b / c / d / e: any READ-latched page with a writer or reader queued behind waiter_exists (pgbuf_latch_bcb_upon_fix () :7046-7058, :7108-7112) whose wait times out (page_latch_timeout_in_msecs, or zero-wait transactions) or is interrupted; e2 / f / f2: a synchronous flush of a page that is being flushed queues a FLUSH waiter even on a READ latch (pgbuf_bcb_safe_flush_internal () :9625-9637) without setting the flag; g: the queue is already empty when another thread's grant loop took the entry off, and an empty queue with the flag set also comes from a refused conditional request, which sets waiter_exists in the CAS (:7092-7095 promotion, :7108-7112 non-holder) and returns without queueing (:7227-7259). R1 needs the reader's own timeout or interrupt to land between :7903 and :7914; since 14434daa05 (CBRD-26295) the TIMEDOUT branch of pgbuf_timed_sleep () writes PGBUF_NO_LATCH and calls thread_unlock_entry () without having taken the entry lock (thread_suspend_timeout_wakeup_and_unlock_entry () returns unlocked), so the entry lock does not order the two.",
+ "origin": {
+  "pr": null,
+  "jira": "CBRD-28163",
+  "head": "cae32d0770edc232751efd463cd7b75ea57d88c4",
+  "base": "bb71348d63ef215bd63442616e42ab69a48cbb7d",
+  "finding": "implementation plan T2 (harness-out/impl/CBRD-28163/plan.json tests[1]) -- waiter_exists left set after a latch waiter gives up; R1 found while writing the suite",
+  "comment": null,
+  "artifacts": "/home/cubrid/dev/utils/harness-out/impl/CBRD-28163/unit/ (out/, out_fix/, out_mut_*/, result.md)",
+  "date": "2026-11-17"
+ }
+}

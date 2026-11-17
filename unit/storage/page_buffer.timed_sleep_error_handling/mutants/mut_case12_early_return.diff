@@ -1,0 +1,20 @@
+--- a/src/storage/page_buffer.c	2026-11-17 17:53:25.736872382 +0900
++++ b/src/storage/page_buffer.c	2026-11-17 17:53:25.742872382 +0900
+@@ -7869,7 +7869,7 @@
+   if (bufptr->next_wait_thrd == NULL)
+     {
+       /* The thread entry has been already removed from the BCB waiting queue by another thread. */
+-      goto end;
++      return NO_ERROR;
+     }
+ 
+   /* case 2 : first waiting thread != thrd_entry */
+@@ -7886,7 +7886,7 @@
+ 	    }
+ 	  prev_thrd_entry = prev_thrd_entry->next_wait_thrd;
+ 	}
+-      goto end;
++      return NO_ERROR;
+     }
+ 
+   /* case 3 : first waiting thread == thrd_entry */
