@@ -1,0 +1,48 @@
+{
+ "name": "PR#8517 (CBRD-28076) pt_to_pred_expr_factor_dnf () -- 통째로 둔 OR 인수 중 AND 아래 OR 이 있는 것을 실행용 술어에서 DNF 로 편다: 순서(갈래·잎 쓴 순서, 오른쪽 선형 사슬), 피연산자를 CNF 목록으로 읽기(next=AND, or_next=OR, PT_OR 트리), 쓴 갈래 수와 같으면 안 폄, 16갈래 한도, 두 spec·부질의·메서드·난수면 안 폄(호스트 변수는 폄), pt_to_pred_expr_with_arg () 가 다른 항과 AND·inst_num 계속 표시. 결함 G5-F1(실패할 수 있는 잎이 가드 없는 갈래로 감)·G5-F2(잎 33개 형도 선택 — 페이지 경로는 잎 합계 32)",
+ "requires": [
+  "pt_to_pred_expr_factor_dnf"
+ ],
+ "file": "src/parser/xasl_generation.c",
+ "mode": "cs",
+ "seams": [
+  "pt_to_pred_expr_local_with_arg"
+ ],
+ "appendix": "hooks.cpp",
+ "test": "test.cpp",
+ "extra": [
+  "src/parser/parse_tree.c",
+  "src/parser/parse_tree_cl.c",
+  "src/base/language_support.c",
+  "src/base/intl_support.c",
+  "src/base/chartype.c",
+  "src/object/object_domain.c",
+  "src/object/object_primitive.c",
+  "src/query/domain_rules.c",
+  "src/compat/db_macro.c",
+  "src/base/memory_alloc.c",
+  "src/base/system_parameter.c"
+ ],
+ "watch": [
+  "src/parser/parse_tree.h",
+  "src/parser/xasl_generation.h",
+  "src/xasl/xasl_predicate.hpp",
+  "src/parser/cnf.c",
+  "src/query/expr_compile.c",
+  "src/query/expr_batch.c",
+  "src/query/query_evaluator.c"
+ ],
+ "fakes": "진짜: xasl_generation.c(pt_to_pred_expr_with_arg·pt_to_pred_expr_factor_dnf 와 pt_factor_dnf_node/_list/_and/_top/_top_list/_is_unsafe·pt_make_pred_expr_pred·pt_numbering_set_continue_post), parse_tree.c + parse_tree_cl.c(parser_create_parser·parser_new_node·parser_walk_tree), language/intl/chartype, object_domain/primitive, domain_rules, db_macro, memory_alloc, system_parameter. 이음매: pt_to_pred_expr_local_with_arg -> 잎마다 T_EVAL_TERM 하나를 만들고 노드를 기억하는 가짜(진짜는 비교의 regu 를 만든다 -- 형이 어느 노드를 잎으로 어떻게 잇는지만 본다). 가짜: pt_alloc_packing_buf = parser_support.c:4578 의 0 으로 채운 packing 메모리(calloc), regu_init (pred_expr) = xasl_regu_alloc.cpp:276(T_NOT_TERM), er_set/er_errid/er_clear 기본 수준 하나, 부팅 가짜는 xasl_generation.session_variable_mark 와 같다(envvar·calendar·date locale·pt_parser_line_col·pt_free_dblink_remote_cols·cubregex). 트리: 통째 인수 = PT_OR(arg1, arg2 가 CNF 목록, paren 1 -- pt_cnf_where () 가 두는 꼴), 피연산자 안 OR 은 오른쪽으로 중첩된 PT_OR 트리(pt_cnf_or_list_to_tree ()) 또는 or_next 사슬(qo_extract_or_restrictions () 의 파생 항), 열은 spec_id 가 g_spec_t/g_spec_u 의 주소인 PT_NAME(PT_NORMAL).",
+ "note": "base(41ca53ce7) 에는 형이 없다 -- hooks.cpp 가 컴파일되지 않는다(신설, requires 로 건너뜀). 동적 SQL 확인은 harness-out/8517/c8e8d4f7f/unit/G5-F1/repro(PR 만 `Attempt to divide by zero.`).",
+ "origin": {
+  "pr": 8517,
+  "jira": "CBRD-28076",
+  "finding": "G5-F1 (버그 가능성, blocking: 가드가 막던 잎을 형이 평가 -- WHERE·ON·EXISTS·CASE·IF·SELECT 목록·UPDATE SET) · G5-F2 (측정 요청: 형 한도 갈래당 잎 32 vs 페이지 경로 잎 합계 32) · 계약 C1-C7",
+  "comment": null,
+  "date": "2026-11-17",
+  "reviewed_head": "c8e8d4f7f",
+  "base": "41ca53ce7",
+  "artifact": "harness-out/8517/c8e8d4f7f/unit/G5-DNF/",
+  "result": "2026-11-17: head c8e8d4f7f 9/9 PASS([defect] F1·F2 PASS = 결함 있음), base 41ca53ce7 compile-error(신설), stub 호출 0. 변이 fix_raw_leaves.diff(잎이 열 대 상수·호스트 변수 비교·IN·IS NULL 일 때만, 잎 합계 32 이하일 때만 형): [defect] F1·F2 FAIL(닫힘), 계약 7건 PASS 그대로."
+ }
+}

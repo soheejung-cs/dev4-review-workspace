@@ -1,0 +1,48 @@
+{
+ "name": "PR#8517 (CBRD-28076) pt_cnf_where () -- 피연산자에 이미 통째로 둔 PT_OR 트리가 있는 OR 은 통째로 둔다(c8e8d4f7f, pt_cnf_list_has_or_tree ()) -- or_next 를 단 AND/OR 트리가 CNF 목록에 남지 않는다(상수 접기가 그 트리를 바꿔 끼우며 or_next 를 버린다, Case 20). 결함 F1a-F1d: OR 안의 (+) 술어는 cnf.c:957 의 !outer_mark 예외로 분배되어 같은 꼴이 남는다",
+ "requires": [
+  "pt_cnf_where"
+ ],
+ "file": "src/parser/cnf.c",
+ "mode": "cs",
+ "seams": [],
+ "appendix": "",
+ "test": "test.cpp",
+ "extra": [
+  "src/parser/parse_tree.c",
+  "src/parser/parse_tree_cl.c",
+  "src/parser/parser_support.c",
+  "src/base/language_support.c",
+  "src/base/intl_support.c",
+  "src/base/chartype.c",
+  "src/object/object_domain.c",
+  "src/object/object_primitive.c",
+  "src/query/domain_rules.c",
+  "src/compat/db_macro.c",
+  "src/base/memory_alloc.c",
+  "src/base/system_parameter.c"
+ ],
+ "watch": [
+  "src/parser/parse_tree.h",
+  "src/parser/parser.h",
+  "src/parser/parse_tree_cl.c",
+  "src/parser/parser_support.c",
+  "src/parser/xasl_generation.c",
+  "src/query/query_evaluator.c",
+  "src/parser/name_resolution.c",
+  "src/parser/type_checking.c"
+ ],
+ "fakes": "cnf.keep_or_whole 과 같다(그 suite.json 의 fakes) + pt_negate_op = type_checking.c:21001 본문 그대로(NOT 케이스 C5).",
+ "note": "판정 꼴: or_next 를 가진 PT_OR/PT_AND 노드가 CNF 목록에 있나. [contract] C1-C8 은 c8e8d4f7f 가 겨냥한 꼴(Case 20 과 변형)에 그 노드가 없음, C7·C8 은 (+) 없는 두 열 인수·(+) 먼저 꼴의 대조. [defect] F1a-F1d 는 PASS = 꼴 있음. SQL 로 행이 빠지는 것은 F1a(r6_plus.sql P2)·F1c(P1)로 확인했다 -- 9f9f9d715(#8375 이전)는 맞고 41ca53ce7·c8e8d4f7f 는 틀림. F1b((+) 먼저·가운데 트리)는 꼴만 있고 SQL 결과는 세 빌드 모두 맞았다(P4).",
+ "origin": {
+  "pr": 8517,
+  "jira": "CBRD-28076",
+  "finding": "G3-F1 (G4-01 합침) 재현 + c8e8d4f7f 계약 C1-C8",
+  "comment": null,
+  "date": "2026-11-17",
+  "reviewed_head": "c8e8d4f7f",
+  "base": "41ca53ce7",
+  "artifact": "harness-out/8517/c8e8d4f7f/unit/G3-F1/",
+  "result": "2026-11-17: head c8e8d4f7f 12/12 PASS(C1-C8 계약 유지, F1a-F1d 꼴 있음 = 결함), base 41ca53ce7 8/12(C1·C2·C3·C6 FAIL = c8e8d4f7f 가 고친 꼴, 나머지 PASS). 변이 fix_outer_distribute.diff((+) 인수를 분배할 때 통째 트리 피연산자도 분배) -> F1a-F1d FAIL(닫힘), C1-C8 PASS."
+ }
+}
