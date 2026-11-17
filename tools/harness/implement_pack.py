@@ -16,8 +16,10 @@ SRC_EXT = ('.c', '.cpp', '.h', '.hpp', '.cc')
 AGENT_BOARD = os.path.expanduser('~/dev/docs/claude-workspace/skills/agent-board/agent_board.sh')
 
 def _impl_home(key):
+    # 리모트 컨트롤 세션이면 claude.ai 세션 8자(보드 코멘트 표기와 같다), 터미널만 연 세션이면 로컬 세션 UUID 앞 8자 —
+    # 보드는 코멘트 끝의 컨테이너 표기 (.5N) 로 칠하므로 어느 쪽이든 된다(2026-11-17: 세션ID 가 없으면 표지를 건너뛰던 구멍)
     b = os.environ.get('CLAUDE_CODE_BRIDGE_SESSION_ID', '')
-    sid = b.split('session_')[-1][:8] if b else ''
+    sid = b.split('session_')[-1][:8] if b else os.environ.get('CLAUDE_CODE_SESSION_ID', '')[:8]
     if os.path.exists(AGENT_BOARD) and sid and re.fullmatch(r'CBRD-\d+', key or ''):
         subprocess.Popen(['bash', AGENT_BOARD, 'impl-home', '-s', sid, key], stdout=subprocess.DEVNULL,
                          stderr=subprocess.DEVNULL, start_new_session=True)
