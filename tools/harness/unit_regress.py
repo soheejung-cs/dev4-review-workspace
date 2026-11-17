@@ -14,7 +14,7 @@ suite.json 의 requires(대상 심볼)로 적용 여부를 먼저 본다: head �
   python3 -m tools.harness.unit_regress --head <rev> --base <rev> --files a.c,b.cpp --out DIR   (단독 실행)
 환경 HARNESS_NO_UNIT=1 이면 파이프라인에서 건너뛴다.
 """
-import argparse, glob, json, os
+import argparse, glob, json, os, re
 from . import unitseam as US
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -29,9 +29,17 @@ def suites():
         yield s
 
 
+def from_eval_pr(s, pr):
+    """평가 모드(harness/평가.md §3, HARNESS_EVAL_PR): 그 PR 의 리뷰가 만든 suite 는 이름·[defect] 결과가 곧 그때의 지적이라 답 유출이다
+    (2026-11-17 PR#8375 기준점에서 판정 에이전트가 keep_or_whole·or_extract_gate 결과로 '이전 리뷰의 지적' 을 그대로 다시 냈다)."""
+    o = s.get('origin') or {}
+    return str(o.get('pr', '')) == pr or re.search(r'PR\s*#' + re.escape(pr) + r'\b', s.get('name', '')) is not None
+
+
 def select(changed):
     ch = set(changed)
-    return [s for s in suites() if ch & set([s['file']] + s.get('watch', []))]
+    pr = os.environ.get('HARNESS_EVAL_PR', '')
+    return [s for s in suites() if ch & set([s['file']] + s.get('watch', [])) and not (pr and from_eval_pr(s, pr))]
 
 
 def fixed_in_for(suite, name):
