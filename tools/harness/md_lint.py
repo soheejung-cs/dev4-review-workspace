@@ -6,7 +6,9 @@
 
   sanitize_markdown(body) -> (body, fixes, fatal)   문장 뒤 울타리를 줄 맨 앞으로 분리, 울타리 홀수는 치명(게시 거부)
   readability(body)       -> (body, fixes, warns)   울타리 밖 산문의 절 경계·①②③ 열거 복원, 문단·중요도별 길이 경고
-  check(body)             -> (body, fixes, warns, fatal)   위 둘을 차례로
+  tone(body)              -> (warns, fatal)          말투(H-64 ⑦): 내부 ID 거부, 첫 문장·꼬리표·지은 말·단어 수 경고
+  count_warnings(marks)   -> warns                   PR 당 코멘트 수(🔴🟡🟢 목록)
+  check(body)             -> (body, fixes, warns, fatal)   위 셋을 차례로
   report(tag, body, out)  -> (body, fatal)          check 결과를 ↻(교정)·⚠(경고)·✗(거부) 줄로 out 에 쓴다
 
 사이드이펙트 없음(문자열만 다룬다). 사용 예: python3 -m tools.harness.md_lint <본문.md> — 파일 하나를 검사해 출력만 한다.
@@ -78,11 +80,69 @@ def readability(body):
     return body2, fixes, warns
 
 
+# ── 말투 검사 (H-64 ⑦, 정본 references/글쓰기-말투.md) ─────────────────
+# 실측(2026-11-17 .51 PR#8375): 결론이 조건 셋 뒤, "왜 문제가 되는지:" 꼬리표, 분석하며 지은 말("닿는 조건"), 600단어·PR 당 14건.
+# 기준값은 episodic 의 지난 코멘트 289건에서 쟀다(첫 문장 중앙값 153자·p80 215자, 꼬리표로 연 코멘트 54건, PR 당 p80 10건).
+# 내부 ID 만 거부하고 나머지는 경고 — 문장은 사람이 고친다.
+INTERNAL_ID = re.compile(r'(?<![0-9A-Za-z_-])(?:G\d+-F?\d+[a-z0-9-]*|H-\d{2,3}|R-\d{2}|#0\d\d)(?![0-9A-Za-z_])')
+SECTION_SIGN = re.compile(r'§\s?\d')
+EXTERNAL_DOC = re.compile(r'(Reference|SQL|ISO|RFC|표준|매뉴얼|manual|Manual|스펙)[^§\n]{0,30}$')   # 외부 문서의 절 번호는 내부 ID 가 아니다(Oracle SQL Reference §8)
+TAG_LINE = re.compile(r'^\s*(?:\*\*)?(?:왜 문제가 되는지|왜 문제인가|닿는 조건|확인 결과[^:：\n]{0,12}|반증[^:：\n]{0,8}|보강 근거)(?:\*\*)?\s*[:：]', re.M)
+COINED = ('닿는 조건', '파생 절', '사용자 범위', '방어로')   # 글쓰기-말투.md §1-3·§2 — 분석하며 지은 이름
+FIRST_SENT = 150      # 첫 문장 글자 수 경고선(지난 코멘트 중앙값)
+WORDS = 250           # 울타리·<details> 밖 본문 단어 수 경고선(다섯 문장 안팎 + 재현, §1-5)
+
+
+def _prose(body):
+    """울타리·<details> 블록을 뺀 산문."""
+    t = re.sub(r'^[ \t]*(`{3,}|~{3,}).*?^[ \t]*\1[ \t]*$', '', body, flags=re.S | re.M)
+    return re.sub(r'<details>.*?</details>', '', t, flags=re.S)
+
+
+def first_sentence(body):
+    """첫 줄의 `[층] [카테고리] 이모지` 꼬리표 줄을 건너뛴 첫 문장."""
+    lines = [ln.strip() for ln in _prose(body).split('\n') if ln.strip()]
+    lines = [ln for ln in lines if not re.match(r'^\[[^\]]+\]\s*(\[[^\]]+\])?\s*\S{0,2}$', ln)]
+    if not lines: return ''
+    m = re.search(r'.+?(?:[.?!](?=\s|$)|$)', lines[0])
+    return m.group(0) if m else lines[0]
+
+
+def tone(body):
+    """반환 (경고, 치명). 내부 ID 는 치명(밖으로 나가는 글에 쓰지 않는다), 나머지는 경고."""
+    warns, fatal = [], []
+    prose = _prose(body)
+    bare = re.sub(r'`[^`\n]*`', '', prose)
+    ids = sorted(set(m.group(0) for m in INTERNAL_ID.finditer(bare))
+                 | {m.group(0) for m in SECTION_SIGN.finditer(bare) if not EXTERNAL_DOC.search(bare[max(0, m.start() - 40):m.start()])})
+    if ids: fatal.append(f'내부 식별자 {ids} — 밖으로 나가는 글엔 쓰지 않는다(글쓰기-말투 §2)')
+    fs = first_sentence(body)
+    if len(fs) > FIRST_SENT:
+        warns.append(f'첫 문장이 {len(fs)}자(경고선 {FIRST_SENT}) — 결론(관찰할 수 있는 결과)부터, 조건은 뒤로: "{fs[:40]}…"')
+    tags = TAG_LINE.findall(prose)
+    if tags: warns.append(f'꼬리표로 연 문단 {len(tags)}개({", ".join(t.strip()[:12] for t in tags[:3])}) — 문단 첫 문장이 그 역할을 하게')
+    coined = [w for w in COINED if w in prose]
+    if coined: warns.append(f'분석하며 지은 말 {coined} — 코드·SQL·독자가 쓰는 말로 바꾼다')
+    n = len(prose.split())
+    if n > WORDS: warns.append(f'본문 {n}단어(경고선 {WORDS}) — 다섯 문장 안팎 + 재현, 긴 인과 사슬은 <details> 로')
+    return warns, fatal
+
+
+def count_warnings(marks):
+    """PR 하나에 올릴 코멘트들의 중요도 이모지 목록 → 경고(결정 3: 🔴 하나씩 · 🟡 8건 넘으면 묶음 · 🟢 한 코멘트)."""
+    w = []
+    if marks.count('🟡') > 8: w.append(f'🟡 {marks.count("🟡")}건 — 8건 넘으면 같은 파일·같은 원인끼리 묶는다')
+    if marks.count('🟢') > 1: w.append(f'🟢 {marks.count("🟢")}건 — 🟢 는 한 코멘트로 모은다')
+    if len(marks) > 10: w.append(f'코멘트 {len(marks)}건(지난 리뷰 p80 10건) — 많으면 독자는 전부를 기계 글로 본다')
+    return w
+
+
 def check(body):
-    """sanitize_markdown → readability. 반환 (고친 본문, 교정 내역, 경고, 치명)."""
+    """sanitize_markdown → readability → tone. 반환 (고친 본문, 교정 내역, 경고, 치명)."""
     body, fixes, fatal = sanitize_markdown(body)
     body, rfix, warns = readability(body)
-    return body, fixes + rfix, warns, fatal
+    tw, tf = tone(body)
+    return body, fixes + rfix, warns + tw, fatal + tf
 
 
 def report(tag, body, out=sys.stderr):

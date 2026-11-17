@@ -79,5 +79,31 @@ class PostReviewUsesMdLintTest(unittest.TestCase):
         self.assertIn('앵커 OK 0건', err)
 
 
+class ToneTest(unittest.TestCase):
+    """H-64 ⑦ — 말투 검사(글쓰기-말투.md). 내부 ID 만 거부, 나머지는 경고."""
+    def test_internal_ids_fatal_but_code_spans_and_external_sections_ok(self):
+        w, f = ML.tone('[코드] [버그 가능성] 🔴\n\nG3-F4 와 H-64, 설계 규칙 §4 를 보세요. `G1-01` 은 코드다. Oracle SQL Reference 10g §8 참고.')
+        self.assertEqual(len(f), 1)
+        for x in ('G3-F4', 'H-64', '§4'): self.assertIn(x, f[0])
+        self.assertNotIn('G1-01', f[0]); self.assertNotIn('§8', f[0])
+
+    def test_tag_lines_coined_words_first_sentence(self):
+        body = '[코드] [버그 가능성] 🟡\n\n' + '가' * 160 + '.\n\n왜 문제가 되는지: 닿는 조건이 있다.\n'
+        w, f = ML.tone(body)
+        self.assertFalse(f)
+        self.assertTrue(any('첫 문장' in x for x in w))
+        self.assertTrue(any('꼬리표' in x for x in w))
+        self.assertTrue(any('지은 말' in x for x in w))
+
+    def test_short_conclusion_first_is_clean(self):
+        w, f = ML.tone('[코드] [버그 가능성] 🔴\n\n아래 UPDATE 가 고치면 안 되는 행을 고칩니다.\n\n```sql\nupdate t set a=1;\n```\n')
+        self.assertEqual((w, f), ([], []))
+
+    def test_count_warnings(self):
+        self.assertEqual(ML.count_warnings(['🔴', '🟡', '🟢']), [])
+        w = ML.count_warnings(['🟡'] * 9 + ['🟢', '🟢'])
+        self.assertEqual(len(w), 3)
+
+
 if __name__ == '__main__':
     unittest.main()

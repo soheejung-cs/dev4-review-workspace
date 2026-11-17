@@ -20,5 +20,8 @@
     "reach_trace": {"type": "array", "items": {"type": "string", "pattern": "^[^:\\s]+:\\d+"}, "minItems": 2, "description": "'이 분기에 닿는다/사용자에게 보인다' 류 도달 가능성 주장은 필수 — 실패 조건을 만드는 쪽(표 생성·등록·호출자 전처리)까지 읽은 file:line 을 2곳 이상. 분기 하나만 보고 쓴 지적은 판정에서 거절된다"},
     "comment_basis": {"enum": ["mismatch", "new_api_contract"], "description": "category=주석 제안 이면 필수(사용자 지시 2026-10-27). mismatch = 지금 있는 주석이 코드·동작과 다르다(evidence 에 그 주석 줄과, 다른 사실의 file:line) / new_api_contract = 이 PR 이 새 API(함수·매크로·구조체 필드)를 만들어 그 쓰임을 제한하는 계약을 적어야 한다. 그 밖의 주석 제안(설명 보강·의도 기록·용어)은 내지 않는다 — function_notes 에만"},
     "status": {"enum": ["valid", "invalid", "inconclusive", "withheld"], "description": "adjudicate 가 채움. withheld = 맞을 수 있지만 게시하지 않는다(주석 제안 기준 미달)"},
+    "merged_from": {"type": "array", "items": {"type": "string"}, "description": "종합 단계가 이 지적에 합친 원래 지적 id 들(findings.<g>.json). 합쳤으면 반드시 적는다 — merge_check 가 그 id 들의 refute 판단이 엇갈리면 needs_judgment 로 올린다(H-63 ③, #142)"},
+    "needs_judgment": {"type": "boolean", "description": "사람(메인 루프)이 판정할 것 — 종합 단계·merge_check·adjudicate(결과 동일 미확인, #141)가 단다"},
+    "judgment_basis": {"type": "array", "items": {"type": "string"}, "description": "needs_judgment 의 이유 — 엇갈린 판단을 나란히"},
     "obligations": {"type": "object"}, "reasons": {"type": "array", "items": {"type": "string"}}
   } }

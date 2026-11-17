@@ -341,6 +341,9 @@ def main():
             comments.append(c)
         else:
             orphans.append((f['id'], path, span, body))
+    # PR 당 코멘트 수(H-64 ⑦, 글쓰기-말투 결정 3) — 경고만
+    marks = [m for c in comments + [{'body': o[3]} for o in orphans] for m in ('🔴', '🟡', '🟢') if m in c['body'].split('\n')[0]]
+    for w in ML.count_warnings(marks): print(f'  ⚠ 건수 {w}', file=sys.stderr)
     if a.out:
         open(a.out, 'w').write('\n\n'.join(preview))
     print(f"앵커 OK {len(comments)}건 / diff 밖 {len(orphans)}건: {[o[0] for o in orphans]}", file=sys.stderr)

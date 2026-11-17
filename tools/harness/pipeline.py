@@ -5,6 +5,7 @@
 """
 import hashlib, json, os, re, subprocess, sys, time
 import yaml
+from . import merge_check as MC
 from . import codegraph as CG, context_pack as CP, arch_infer as AI, adjudicate as AD, perf_claims as PC, episodic as EP, or_buf as OB, pr_refs as PR, unit_regress as UR
 from . import static_lint as SL   # 정적 린트 노드 static_lint (H-15·H-33) — 노드 함수는 static_lint.node
 from .run_support import Worktree, sh
@@ -95,6 +96,9 @@ def n_gate(c, a):
     if not os.path.isdir(docs):
         c['log'](f'repro 의무: 산출물 디렉터리 없음({docs}) — 평가 건너뜀(blocking 유지). DEV4_RECORDS_ROOT 또는 roster.json records_root 설정')
     res = AD.repro_obligation(docs, res, c['meta'].get('jira', ''))
+    res, mrep = MC.check(c['out'], res)   # 합친 지적의 반증 엇갈림·말없이 사라진 지적(H-63 ③)
+    c['merge_check'] = mrep
+    if MC.to_md(mrep): c['log']('merge_check:\n' + MC.to_md(mrep))
     json.dump(res, open(os.path.join(c['out'], 'findings.adjudicated.json'), 'w'), ensure_ascii=False, indent=1)
     n = AD.requery(c.get('findings_bad', []), res, os.path.join(c['out'], 'requery.json'))
     for r in res: c['log'](f'{r["status"]:12s} {r.get("severity","")[:12]:12s} {r.get("id")} {r.get("file")}:{r.get("line")} {"; ".join(r.get("reasons", []))}')
@@ -110,9 +114,9 @@ def n_episodic(c, a):
     n = len(json.load(open(p, encoding='utf-8'))); c['log'](f'episodic: {n} items -> {p}'); return p
 def n_pr_refs(c, a):
     """본문이 기대는 외부 사실 — 참조 PR 상태(미머지로 닫힌 것을 "포트했다" 고 적었나), 언급한 커밋 해시가 head 에 있나."""
-    r = PR.check(c['pr'], c['meta'].get('body') or '', c['meta']['headRefOid'], 'CUBRID/cubrid', c.get('wt') or os.path.expanduser('~/dev/sources/cubrid'))
+    r = PR.check(c['pr'], c['meta'].get('body') or '', c['meta']['headRefOid'], 'CUBRID/cubrid', c.get('wt') or os.path.expanduser('~/dev/sources/cubrid'), c['meta'].get('jira', ''))
     open(os.path.join(c['out'], 'pr_refs.md'), 'w', encoding='utf-8').write(PR.to_md(r)); json.dump(r, open(os.path.join(c['out'], 'pr_refs.json'), 'w'), ensure_ascii=False, indent=1)
-    c['pr_refs'] = r; c['log'](f"pr_refs: {len(r['prs'])} PR refs, {len(r['hashes'])} hashes, warnings {len(r['warnings'])}" + (' — ' + ' | '.join(r['warnings']) if r['warnings'] else '')); return r
+    c['pr_refs'] = r; c['log'](f"pr_refs: {len(r['prs'])} PR refs, {len(r['hashes'])} hashes, {len(r['jiras'])} JIRA, warnings {len(r['warnings'])}" + (' — ' + ' | '.join(r['warnings']) if r['warnings'] else '')); return r
 
 
 def _mandatory(rules_dir):
@@ -292,6 +296,11 @@ def n_report(c, a):
     md += [fmt(r) for r in valid if r.get('layer') == '설계'] or ['없음']; md += ['', '### [코드 리뷰]', '']
     md += [fmt(r) for r in valid if r.get('layer') == '코드'] or ['없음']; md += ['', '### 판정 보류 (requery.json)', '']
     md += [fmt(r) for r in inc] or ['없음']
+    nj = [r for r in res if r.get('needs_judgment')]
+    md += ['', f'### 사람이 판정할 것 (needs_judgment {len(nj)}건)', '']   # 0 이면 탈출구가 안 돈 것일 수 있다(synthesizer 정의 5)
+    md += [f"- `{r.get('id')}` {AD.comment_header(r)} — " + ' / '.join(r.get('judgment_basis') or ['(종합 단계가 올림)']) for r in nj] or ['없음']
+    mc = MC.to_md(c.get('merge_check') or {'conflicts': [], 'silent': [], 'implicit': []})
+    if mc: md += ['', '#### 합치기 점검 (merge_check)', '', mc]
     if withheld:   # 주석 제안 기준 미달(사용자 지시 2026-10-27) — 맞을 수 있지만 게시하지 않는다
         md += ['', '### 게시하지 않음 (주석 제안 — 지금 주석이 코드와 다르거나 새 API 의 쓰임 제한일 때만 게시)', '']
         md += [fmt(r) for r in withheld]
@@ -328,7 +337,8 @@ def n_report(c, a):
     pr_p = os.path.join(c['out'], 'pr_refs.json')
     if os.path.isfile(pr_p):
         rr = json.load(open(pr_p, encoding='utf-8'))
-        md += ['', '## 본문 참조 확인 (pr_refs)', ''] + ([f'- ⚠ {w}' for w in rr['warnings']] or ['- 참조 PR·커밋 해시 모두 정상']) + [f"- 참조 PR: " + ', '.join(f'{a} {b}' for a, b, _ in rr['prs'])] if rr['prs'] else []
+        md += ['', '## 본문 참조 확인 (pr_refs)', ''] + ([f'- ⚠ {w}' for w in rr['warnings']] or ['- 참조 PR·커밋 해시·JIRA 모두 정상'])
+        md += [f"- 참조 PR: " + ', '.join(f'{a} {b}' for a, b, _ in rr['prs'])] if rr['prs'] else []   # 예전엔 이 조건식이 위 줄까지 묶어 참조 PR 이 없으면 경고도 빠졌다
     ur_p = os.path.join(c['out'], 'unit_regress.md')
     if os.path.isfile(ur_p):
         md += [''] + open(ur_p, encoding='utf-8').read().rstrip().split('\n')

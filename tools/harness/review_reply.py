@@ -6,7 +6,7 @@ import argparse, json, os, re, subprocess, sys
 from . import review_threads as RT
 
 # 게시 전 교정·가독성 검사는 post_review 와 같은 함수를 쓴다(H-32) — 정본은 md_lint.py
-from .md_lint import sanitize_markdown, readability, FENCE_TAIL, FENCE_LINE, SEC_SPLIT, ENUM, LONG_PARA, BUDGET  # noqa: F401 (하위호환 이름)
+from .md_lint import sanitize_markdown, readability, tone, FENCE_TAIL, FENCE_LINE, SEC_SPLIT, ENUM, LONG_PARA, BUDGET  # noqa: F401 (하위호환 이름)
 
 def parse_draft(path):
     txt = open(path, encoding='utf-8').read(); out = {}
@@ -35,6 +35,7 @@ def main():
         body, fixes, fatal = sanitize_markdown(body)
         body, rfix, rwarn = readability(body)
         fixes += rfix
+        twarn, tfatal = tone(body); rwarn += twarn; fatal += tfatal   # 말투(H-64 ⑦)
         print(f"| {tid} | {t['path']}:{t['line']} | {st} | {body.splitlines()[0][:70] if body else '(비어 있음)'} | {len(body)} |")
         for f in fixes: print(f'  ↻ {tid} 교정: {f}')
         for w in rwarn:  print(f'  ⚠ {tid} {w}')

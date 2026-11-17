@@ -35,6 +35,8 @@ def _line_exists_at(repo: str, rev: str, file: str, line: int) -> bool:
 
 # develop 과의 관계를 주장하는 문구 — 기준 소스를 읽은 근거(baseline) 가 있어야 valid (PR#8022 답변 대조 2026-10-06: 4건이 헛지적)
 BASELINE_WORDS = r'develop|기준선|회귀|regress|하나만 고|새로 (도입|생긴|들어)|그대로 옮'
+RESULT_SAME_WORDS = r'결과\s*(?:행|값|집합)?\s*(?:은|는|이|가)?\s*(?:같|동일|바뀌지\s*않|달라지지\s*않|변하지\s*않)|오답(?:은|이)?\s*(?:없|나지\s*않|생기지\s*않)|results?\s+(?:is|are)\s+(?:the\s+)?(?:same|unchanged|identical)'   # H-116 ⑥
+DOUBLE_PASS_WORDS = r'두 번 (?:재작성|재번역|번역|돈다|도는)|두 번째 (?:재작성|패스|재번역)|이중 재작성|pt_to_upd_del_query|재진입 관문'   # #141 — 같은 문장을 두 번 고치는 경로
 # 도달 가능성 주장 — 실패 조건의 생산자까지 읽은 근거(reach_trace) 가 있어야 valid
 REACH_WORDS = r'닿는|닿을|도달|보이는 경로|사용자에게 보이|사용자가 받는|reachab|행 경로는 .* 낸다'
 
@@ -69,6 +71,19 @@ def adjudicate(repo: str, g: CodeGraph, changed: Dict[str, List[int]], findings:
             if not obligations['verified_if_error']:
                 reasons.append('에러 우려인데 verification(static/dynamic 확인 결과, 또는 artifact 가 있는 model) 없음 → severity 를 question 으로 내림')
                 f['severity'] = 'question'
+        # '결과(행)는 같다·오답은 없다' 를 정적으로만 결론 내면 표시한다(H-116 ⑥, 자가진화 #141) — 11-17 평가 기준점 PR#8375 에서
+        # 판정 둘이 DML 두 번 재작성 경로를 짚고도 '결과 행은 바뀌지 않는다' 고 정적으로 결론 내, SA 재현으로 확정된 오답을 놓쳤다.
+        # 그 주장으로 중요도를 낮췄을 수 있으면(높음이 아니면) 사람이 판정하게 needs_judgment 로 올린다.
+        # 결과 동일 문구 없이 두 번 재작성 경로만 짚고 정적으로 끝낸 것(평가 기준점 G4-1)도 같다 — 그 경로에서 사용자 조건이 사라지는지는 재현해야 안다.
+        _nodyn = (f.get('verification') or {}).get('method') != 'dynamic'
+        if _nodyn and re.search(RESULT_SAME_WORDS, claim + ' ' + why, re.I):
+            obligations['result_same_verified'] = False
+            f['result_same_unverified'] = True
+            reasons.append("'결과 동일·오답 없음' 을 동적 확인 없이 단정 — 결과 동일 주장 미확인(develop·PR 에 같은 SQL 을 돌려 확인하거나 질문으로)")
+        elif _nodyn and re.search(DOUBLE_PASS_WORDS, claim + ' ' + why):
+            obligations['result_same_verified'] = False
+            f['result_same_unverified'] = True
+            reasons.append('같은 문장을 두 번 재작성하는 경로를 짚었는데 결과 영향을 재현하지 않았다 — 사용자 조건 흡수·소실을 SQL 재현으로(자동 파라미터화 끈 설정 포함, #141)')
         if file and line and _line_exists(repo, file, line): obligations['anchor_exists'] = True
         else: reasons.append('anchor file:line 이 저장소에 없다')
         if obligations['anchor_exists'] and _in_diff(changed, file, line): obligations['anchor_in_diff'] = True
@@ -161,7 +176,11 @@ def adjudicate(repo: str, g: CodeGraph, changed: Dict[str, List[int]], findings:
             if art and not os.path.exists(os.path.expanduser(str(art))): reasons.append(f'verification.artifact 경로가 없다: {art}')
             elif art: passed.append(f"verification [{v['method']}] + artifact 존재")
             else: passed.append(f"verification [{v['method']}] 있음" + (' (static 인데 file:line 인용 없음)' if v['method'] == 'static' and not re.search(r'\w+\.(c|cpp|h|hpp):\d+', v.get('result', '')) else ''))
-        out.append(fill_importance(dict(f, status=status, obligations=obligations, reasons=reasons, passed=passed)))
+        r = fill_importance(dict(f, status=status, obligations=obligations, reasons=reasons, passed=passed))
+        if r.get('result_same_unverified') and r.get('importance') != '높음':   # 중요도가 채워진 뒤에 본다
+            r['needs_judgment'] = True
+            r['judgment_basis'] = list(r.get('judgment_basis') or []) + ['중요도가 높음이 아닌데 그 근거가 정적 결과 동일 주장일 수 있다 — 재현 전에는 낮추지 않는다(H-116 ⑥)']
+        out.append(r)
     return out
 
 def self_check_build(repo: str, files: List[str], timeout: int = 900) -> Dict:

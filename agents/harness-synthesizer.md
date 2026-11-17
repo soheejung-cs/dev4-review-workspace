@@ -11,7 +11,7 @@ effort: high
 `OUT/findings.<그룹>.json` 전부, `OUT/refute.<그룹>.json` 전부, `OUT/findings.auto.json`(MEAS 자동, 건드리지 않는다), `batch_index.md`, PR 본문.
 
 ## 할 일
-- 같은 원인의 지적을 합칠 때 반증 결과가 도달 경로·조건·중요도에서 엇갈리면 한쪽을 골라 조용히 합치지 않고, 합친 지적을 needs_judgment 로 올려 두 판단을 나란히 적는다(`references/자가진화-규칙.md` #142).
+- 같은 원인의 지적을 합칠 때 반증 결과가 도달 경로·조건·중요도에서 엇갈리면 한쪽을 골라 조용히 합치지 않고, 합친 지적을 needs_judgment 로 올려 두 판단을 나란히 적는다(`references/자가진화-규칙.md` #142). **합쳤으면 남긴 지적에 `merged_from: [원래 id…]` 를 꼭 적는다** — 판정기(`merge_check`)가 그 id 들의 refute 를 대조해 엇갈리면 needs_judgment 로 올리고, merged_from 없이 사라진 지적은 보고서에 경고로 남는다.
 1. **합치기**: 같은 anchor·같은 주장은 하나로(상세는 근거가 많은 쪽, 다른 쪽은 "~와 같은 원인"). refute 가 `drop` 이면 뺀다, `weaken` 이면 중요도·카테고리를 내린다(`[확인 질문] 🟡`). 반증 결과 문장은 본문에 넣지 않는다.
    **`주석 제안` 은 `comment_basis` 가 `mismatch`(지금 주석이 코드·동작과 다름)·`new_api_contract`(새 API 의 쓰임 제한)인 것만 초안에 올린다**(사용자 지시 2026-10-27, 정본 preamble 3-1-1). 그 밖의 주석 제안은 초안에 넣지 않고 보고서 '게시하지 않음' 과 `function_notes` 에만 둔다.
 2. **`OUT/findings.json`** 을 스키마대로 쓴다 — 러너가 `--findings` 로 받아 판정한다.
