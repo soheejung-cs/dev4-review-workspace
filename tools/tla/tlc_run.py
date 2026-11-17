@@ -178,7 +178,7 @@ def main(argv):
                 print('TRACE CONFORMS  %s  모델이 실행 전체를 설명한다 · %s' % (label, summary_line()))
                 return 0
             n = (result.get('depth') or 1) - 1   # TLC 깊이는 초기 상태를 1 로 센다
-            print('TRACE DIVERGES  %s  모델이 행동 %d개까지만 설명한다 — t0 순 %d번째 부근 행동의 기록 상태와 대응표를 본다 · %s'
+            print('TRACE DIVERGES  %s  모델이 행동 %d개까지만 설명한다 — start 순 %d번째 부근 행동의 기록 상태와 대응표를 본다 · %s'
                   % (label, n, n + 1, summary_line()))
             return 1
         if a.expect and verdict in ('ok', 'violation'):

@@ -38,11 +38,21 @@ SKILL.md 절차 3-2 에서 이 파일을 연다. 첫 적용: CUBRID/cubrid#8472(
 **언제**: 동시성 명세의 after 성립을 보고서 §0 근거로 쓸 때는 **한다**(못 하면 §0 에 "모델 안에서만 확인 — 코드 대조 안 함 + 이유"). 모델 반례만으로 🔴 를 내려 할 때 재현이 안 되면 한다. 동시성 없는 상태기계는 선택(대응표 + before 위반으로 충분한 경우가 많다).
 
 **절차** (도구: `tools/tla/trace/tla_trace.h` · `tools/tla/trace_to_tla.py` · `tlc_run.py --expect trace`, 끝까지 도는 예 `tools/tla/trace/selftest/run.sh`)
-1. **계측 자리** — 모델 행동 하나 = `TLA_TRACE_BEGIN`/`END` 한 쌍, `ev` 이름 = 행동 이름(1:1). 구간은 모델의 원자 단위와 같게(§3 규칙 5: 잠금 안 구간 하나, 원자 연산 하나). 상태(`END_ST`)는 그 행동이 바꾸거나 본 모델 변수만 — **기록한 필드는 모두 대조한다**, 대조하지 않을 필드는 기록하지 않는다.
+1. **계측 자리** — 모델 행동 하나 = `TLA_TRACE_BEGIN`/`END` 한 쌍, `event` 이름 = 행동 이름(1:1). 구간은 모델의 원자 단위와 같게(§3 규칙 5: 잠금 안 구간 하나, 원자 연산 하나). 상태(`END_ST`)는 그 행동이 바꾸거나 본 모델 변수만 — **기록한 필드는 모두 대조한다**, 대조하지 않을 필드는 기록하지 않는다.
 2. **패치로만** — 엔진 worktree 에서 계측하고 `git diff > tla/<모듈>/<이름>/trace/instrument.patch`. 엔진 브랜치에 커밋하지 않는다. `#include "tla_trace.h"` 는 `-DTLA_TRACE` 가 없으면 빈 매크로다.
 3. **실제 코드를 돌린다** — 기본은 단위 suite: `python3 -m tools.harness.unitseam run … --patch <instrument.patch> --cflags "-DTLA_TRACE -I $PWD/tools/tla/trace"` 를 `TLA_TRACE_DIR=<dir>` 로, 테스트가 스레드 2~3개(시작 장벽)로 대상 함수를 부른다. 서버가 있어야 하는 경로는 사용자 확인 뒤 전용 브랜치·goto 빌드로만(H-05 동시 실행 금지). **손으로 쓴 trace·시뮬레이터·기록용 뮤텍스는 쓰지 않는다**(Specula 규칙 — 관찰하려는 엇갈림이 바뀐다).
-4. **변환** — `python3 tools/tla/trace_to_tla.py <dir> --out tla/<…>/trace/TraceData.tla --events <행동,…>`. 오류(이름 불일치·한 스레드 안 겹침·손으로 쓴 시각)면 계측부터 고친다. "스레드 사이 겹친 구간이 없다" 경고면 엇갈림을 시험하지 못한 실행이다 — 시나리오를 다시 짠다(selftest 의 첫 판이 그랬다).
-5. **TraceCheck** — `tools/tla/trace/selftest/TraceCheck.tla` 를 `trace/` 로 복사해 `VARIABLES`·`INSTANCE`·`Apply`(행동 이름 → 모델 행동 ∧ 기록 상태 대조)만 바꾼다. 겹친 구간은 TLC 가 모든 순서를 시도한다(시간 상자).
+4. **변환** — `python3 tools/tla/trace_to_tla.py <dir> --out tla/<…>/trace/TraceData.tla --merged <dir>/merged.json --events <행동,…>`. 오류(이름 불일치·한 스레드 안 겹침·손으로 쓴 시각)면 계측부터 고친다. "스레드 사이 겹친 구간이 없다" 경고면 엇갈림을 시험하지 못한 실행이다 — 시나리오를 다시 짠다(selftest 의 첫 판이 그랬다).
+5. **TraceCheck** — `tools/tla/trace/selftest/TraceCheck.tla` 를 `trace/` 로 복사해 `VARIABLES`·`INSTANCE`·`MatchEvent`(행동 이름 → 모델 행동 ∧ 기록 상태 대조)만 바꾼다. 겹친 구간은 TLC 가 모든 순서를 시도한다(`ViablePIDs`, 시간 상자).
+
+**Specula 형식과 맞춤**(2026-11-17, 사용자 "지금 맞춰줘" — Specula `skills/harness-generation/references/concurrent-timebox-guide.md`):
+| 층 | Specula | 여기 |
+|---|---|---|
+| 기록 한 줄 | `{"tag":"trace","event","tid"(0부터),"start","end","state",["args","msg"]}` | 같다(`tla_trace.h`) |
+| 파일 | `<prefix>-thread-<tid>.ndjson` | 같다(`TLA_TRACE_PREFIX`, 기본 `trace`) |
+| 병합 | 전처리기 → `{"num_threads","max_timestamp","traces":{"<tid>":[…]}}`, 시각은 1부터 조밀한 순위 | 같다(`trace_to_tla.py --merged`) — Specula `Trace.tla`·`trace_debugger` 에 넘길 수 있는 꼴. 그쪽 실행은 Specula 설치 뒤 첫 사용 때 확인 |
+| Trace 명세 | `Trace.tla`: `pc`·`ViablePIDs`·`MatchEvent`, `JsonDeserialize(TraceFile)` | 같은 구조·이름, 데이터만 TLA 리터럴(`TraceData.tla`) — Json 모듈(CommunityModules jar) 없이 우리 tla2tools.jar 하나로 돈다 |
+| 완료 판정 | `PROPERTY TraceFullyConsumed`(<> 모두 소비) | 불변식 `TraceIncomplete` 위반 = 모두 소비한 상태에 닿는 순서가 **하나라도** 있음. Specula 꼴은 겹친 구간에서 한 순서만 막혀도 불일치로 나와(모든 행동열을 본다) 여기서는 쓰지 않는다 |
+옛 우리 형식(`ev`·`t0`·`t1`·`st`, `trace.<pid>.<tid>.ndjson`)도 변환기가 읽는다.
 6. **돌리기** — `python3 tools/tla/tlc_run.py tla/<…>/trace/TraceCheck.tla --config tla/<…>/trace/TraceCheck.cfg --expect trace`
 
 | 결과 | 뜻 | 할 일 |

@@ -12,7 +12,8 @@ for mode in locked racy; do
   W="$OUT/$mode"; rm -rf "$W"; mkdir -p "$W/traces"
   cp "$HERE/Counter.tla" "$HERE/TraceCheck.tla" "$HERE/TraceCheck.cfg" "$W/"
   (cd "$W/traces" && TLA_TRACE_DIR=. "$OUT/counter" "$mode" 30)
-  python3 "$TOOLS/trace_to_tla.py" "$W/traces" --out "$W/TraceData.tla" --events Inc
+  python3 "$TOOLS/trace_to_tla.py" "$W/traces" --out "$W/TraceData.tla" --merged "$W/merged.json" --events Inc
+  ls "$W/traces" | head -2   # Specula 이름 규약: trace-thread-<tid>.ndjson
   set +e
   python3 "$TOOLS/tlc_run.py" "$W/TraceCheck.tla" --config "$W/TraceCheck.cfg" --out "$W/tlc" --expect trace
   got=$?
