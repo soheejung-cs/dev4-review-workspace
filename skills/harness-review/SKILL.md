@@ -27,6 +27,7 @@ description: 통합 리뷰 하네스 실행 — `/harness-review <PR번호>`. �
    `tla/<모듈>/<이름>/` 의 명세를 쓰거나(이미 있으면 이 PR 판으로 맞춰) `tools/tla/tlc_run.py` 로 before(develop)·after(PR) 를 돌린다.
    before 위반·after 성립이면 §0 '리뷰 신뢰도' 에 한 줄(명세·범위·상태 수), after 가 위반하면 반례를 코드 경로로 옮겨 지적한다(`verification.method=model`, 재현되면 `dynamic`).
    후보인데 돌리지 않으면 그 이유를 §0 에 쓴다.
+   동시성 명세의 after 성립을 근거로 쓰려면 코드 대조(tla.md §3-T, trace validation — 2026-11-17)까지 한다. 못 하면 §0 에 "모델 안에서만".
 4. `python3 -m tools.harness.run full --pr <PR> --findings OUT/findings.json` → `findings.adjudicated.json`, `requery.json`, `report.md`.
 5. `requery.json` 이 비어 있지 않으면 **한 번만** 그 항목을 다시 검토해 findings.json 을 고치고 4 를 재실행한다(그래도 inconclusive 면 보고서 "판정 보류"에 남긴다).
 6. `report.md` 를 사람 말투(`references/글쓰기-말투.md` — 코멘트 초안도 같다)로 다듬되, **맨 앞에 `## 0. 먼저 알아야 할 것`** 을 둔다 — 항목의 정본은 `code-review` §5 표(9항목, 하네스 골격 report.md 에는 없다). 서브에이전트 사슬이면 synthesizer 의 `report.head.md` 를 검토·보완하고, 단일 세션이면 직접 쓴다. 그다음 `claude-workspace/projects/<JIRA>/리뷰보고서-PR<PR>.md`(비공개)에만 둔다 — 이 리포는 공개라 `examples/` 에 사본을 두지 않는다(2026-10-27: 공개 사본에 참조 구현 언급이 섞여 있었다). **게시는 하지 않는다** — 사용자에게 `comments.draft.md`(형식 정본: `tools/harness/post_review.py` 머리말) 초안을 보이고 승인 후 `post_review --draft` 로 인라인 게시 — 초안이 없는 지적이 있으면 도구가 게시를 거부한다.

@@ -9,6 +9,8 @@
   prelude   부팅된 프로세스라면 가졌을 값이 필요한 전역(예: mmon_disabled=true)은 unitseam_prelude.cpp 에 weak 로 둔다.
   patch     (변이) 제안 수정 diff(헤더 포함 아무 파일, repo 기준 -p1)를 그 리비전의 전용 worktree 에 git apply 해 돌린다 — [defect] 가 FAIL,
             [contract] 가 PASS 면 테스트가 그 조건을 정확히 가리킨다. 전용 worktree 는 실행 뒤 지운다.
+  cflags    (선택) 더할 컴파일 플래그. TLA+ 코드 대조(skills/harness-review/tla.md §3-T)는 계측 패치를 --patch 로,
+            `--cflags "-DTLA_TRACE -I <dev4>/tools/tla/trace"` 로 켜고 TLA_TRACE_DIR 에 스레드별 trace 를 남긴다.
   extra     (선택) 같은 모드 플래그로 따로 컴파일해 함께 링크할 엔진 TU(repo 경로, 쉼표). 실제 코드를 쓸 때 — 한 test.cpp 에 여러 .c 를
             #include 하면 memory_wrapper.hpp 의 new 매크로·static 이름이 부딪힌다. 그 리비전에 없는 파일은 건너뛴다(심볼은 stub).
   stub      링크 때 해석되지 않는 외부 심볼은 자동으로 weak stub 을 만든다. 함수는 호출되면 이름을 찍고 abort
@@ -300,6 +302,8 @@ def _build_and_run(a, sha, wt, db, srcroot):
     log = []
     cc, flags = flags_for(db, srcroot, a.file, a.mode)
     flags = retarget(flags, srcroot, wt)
+    # --cflags: 계측(trace validation, tools/tla/trace/tla_trace.h 의 -DTLA_TRACE -I…)처럼 TU·extra·테스트에 더할 플래그
+    flags = flags + shlex.split(getattr(a, 'cflags', '') or '')
     src = os.path.join(wt, a.file)
     if not os.path.exists(src):
         res = {'rev': sha, 'status': 'no-file', 'note': f'{a.file} 가 이 리비전에 없다'}
@@ -403,7 +407,7 @@ def run_suite(suite_dir, revs, out, repo=DEF_REPO, build=DEF_BUILD, timeout=300)
                            seam=','.join(s.get('seams', [])),
                            appendix=os.path.join(suite_dir, s['appendix']) if s.get('appendix') else '',
                            test=os.path.join(suite_dir, s.get('test', 'test.cpp')), out=out, timeout=timeout, catch_args=[], patch='',
-                           extra=','.join(s.get('extra', [])))
+                           extra=','.join(s.get('extra', [])), cflags=s.get('cflags', ''))
     os.makedirs(out, exist_ok=True)
     db = compdb(build)
     return [build_and_run(a, rev, db, source_root(build)) for rev in revs]
@@ -421,6 +425,7 @@ def main():
     r.add_argument('--seam', default='', help='weak 로 바꿀 함수, 쉼표 구분. static 변수는 var:이름')
     r.add_argument('--appendix', default='')
     r.add_argument('--extra', default='', help='함께 링크할 엔진 TU(repo 경로, 쉼표) — 같은 모드 플래그로 따로 컴파일. 그 리비전에 없으면 건너뜀')
+    r.add_argument('--cflags', default='', help='TU·extra·테스트 컴파일에 더할 플래그(공백 구분). trace 계측: "-DTLA_TRACE -I <dev4>/tools/tla/trace"')
     r.add_argument('--patch', default='', help='변이: 제안 수정 unified diff(repo 기준, 헤더 포함). 전용 worktree 에 적용해 [defect] 가 FAIL 하는지 본다')
     r.add_argument('--out', default='')
     r.add_argument('--repo', default=DEF_REPO)

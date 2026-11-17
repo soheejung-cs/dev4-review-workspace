@@ -4,6 +4,7 @@ harness-review 하위 스킬 [`skills/harness-review/tla.md`](../skills/harness-
 다음 PR 이 같은 함수를 바꾸면 그 명세를 그 PR 판으로 맞춰 다시 돌린다(회귀). 실행 도구는 `tools/tla/tlc_run.py`, 후보 고르기는 `tools/tla/tla_candidates.py`.
 
 디렉터리 하나 = 모델 하나: `<Spec>.tla` · `before.cfg`(develop, 위반 기대) · `after.cfg`(PR, 성립 기대) · `README.md`(대상 함수, 모델 ↔ file:line 대응표, 성질, 결과 표, 모델이 보지 않는 것). `out/` 은 커밋하지 않는다.
+코드 대조(tla.md §3-T)를 한 모델은 `trace/`(`instrument.patch`·`TraceCheck.tla`·`TraceCheck.cfg`)를 더 둔다 — `TraceData.tla`·원 trace 는 커밋하지 않는다.
 
 | 명세 | 대상 함수 | 이슈·PR | 종류 | 결과 |
 |---|---|---|---|---|

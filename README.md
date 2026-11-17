@@ -117,8 +117,9 @@ references/
   글쓰기-말투.md              밖으로 나가는 글(코멘트·답글·PR·JIRA)의 문장 정본 — 결론 먼저·기계 티 꼴·코멘트 수
 members/             팀 명단(GitHub 기준)·가입 템플릿·사람별 공간(컨테이너 사실은 여기에만)
 tools/               roster.json(추적 GitHub ID) · review_board_gen.py(review-to-do 보드)
+  tla/               tlc_run.py(TLA+ 모델 검사·`--expect trace` 코드 대조) · tla_candidates.py · trace_to_tla.py + trace/tla_trace.h(계측, selftest/run.sh) — skills/harness-review/tla.md
   ab/                A/B 표준 스크립트 — pick_ref.sh(REF 후보) · ab_sa.sh(정합 byte) · ab_time.sh + ab_summarize.py(교대·median·MAD) · mkbench_numeric.sql(합성 벤치)
-  harness/           review_threads.py(미해결 스레드 분류) · missed_review.py(다른 리뷰어 지적 ↔ 우리 리뷰 대조, 놓친 지적 반성) · review_reply.py(답글 dry-run/게시) · pr_refs.py(본문 참조 PR 상태·커밋 존재) · compile_check.py(파일/커밋 단위 컴파일) · unitseam.py(리뷰용 단위 테스트: TU 단독 컴파일 + 가짜·stub, head/base 비교) — 구조도 harness/구조도.html, 나머지는 harness/ARCHITECTURE.md
+  harness/           eval_score.py(평가셋 채점 — harness/평가.md) · review_threads.py(미해결 스레드 분류) · missed_review.py(다른 리뷰어 지적 ↔ 우리 리뷰 대조, 놓친 지적 반성) · review_reply.py(답글 dry-run/게시) · pr_refs.py(본문 참조 PR 상태·커밋 존재) · compile_check.py(파일/커밋 단위 컴파일) · unitseam.py(리뷰용 단위 테스트: TU 단독 컴파일 + 가짜·stub, head/base 비교) — 구조도 harness/구조도.html, 나머지는 harness/ARCHITECTURE.md
 imports/xmilex-git/    송일한 워크스페이스에서 들여온 원문(PR 리뷰 스킬·설계 어휘·ctp-run 등) — README 에 대응표
 examples/
   리뷰답글-예시-PR7900.md      엔진 스레드 5 + TC PR 답글 2 — 문체·구조 예시

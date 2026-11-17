@@ -5,7 +5,7 @@ harness-review 하위 스킬 skills/harness-review/tla.md 의 실행 도구다(�
 "TLA 검증 단계를 추가하고 싶어 … harness review 시의 세미 스킬로").
 
 사용:
-  python3 tools/tla/tlc_run.py <spec.tla> [--config <x.cfg>] [--out <dir>] [--expect ok|violation]
+  python3 tools/tla/tlc_run.py <spec.tla> [--config <x.cfg>] [--out <dir>] [--expect ok|violation|trace]
                                [--workers N] [--timeout SEC] [--heap SIZE] [--no-deadlock] [--pcal]
   예) python3 tools/tla/tlc_run.py tla/query/scan_minmax_turn/ScanMinMaxTurn.tla \\
           --config tla/query/scan_minmax_turn/before.cfg --expect violation
@@ -15,6 +15,9 @@ harness-review 하위 스킬 skills/harness-review/tla.md 의 실행 도구다(�
   violation  불변식·성질 위반 또는 교착 — 반례 trace 를 trace.txt 에
   error      문법·설정·평가 오류, 도구를 못 찾음
   timeout    --timeout 안에 끝나지 않음 — cfg 의 상수 범위를 줄인다
+--expect trace (코드 대조 — tla.md §3-T, TraceCheck 명세): 교착 검사를 끄고, 불변식 TraceIncomplete 위반 = 모델이 trace 를
+  끝까지 설명함(TRACE CONFORMS, 0) · 위반 없이 끝남 = 설명하지 못함(TRACE DIVERGES, 1 — depth-1 = 설명한 행동 수, 그다음부터 본다).
+  BFS 는 막다른 갈래를 먼저 만나므로 교착을 결함으로 세지 않는다 — 다른 순서가 끝까지 갈 수 있다.
 종료 코드: ok 0 · violation 1 · error 2 · timeout 3. --expect 를 주면 ok·violation 은 기대와 같을 때 0, 다르면 1
   (error·timeout 은 그대로 2·3 — 도구 문제를 '기대와 다름' 과 섞지 않는다).
 산출물(--out, 기본 <spec 디렉터리>/out/<cfg 이름>/): result.json(판정·위반한 성질·상태 수·깊이·시간·TLC 판·jar sha256),
@@ -131,7 +134,7 @@ def main(argv):
     ap.add_argument('spec')
     ap.add_argument('--config', help='TLC 설정(.cfg). 기본: 명세와 같은 이름의 .cfg')
     ap.add_argument('--out', help='산출 디렉터리. 기본: <명세 디렉터리>/out/<cfg 이름>')
-    ap.add_argument('--expect', choices=('ok', 'violation'), help='기대 판정 — 같으면 종료 코드 0')
+    ap.add_argument('--expect', choices=('ok', 'violation', 'trace'), help='기대 판정 — 같으면 종료 코드 0. trace 는 코드 대조 판정')
     ap.add_argument('--workers', type=int, default=DEFAULT_WORKERS)
     ap.add_argument('--timeout', type=int, default=DEFAULT_TIMEOUT, help='초')
     ap.add_argument('--heap', default=DEFAULT_HEAP, help='JVM 최대 힙(-Xmx)')
@@ -162,6 +165,22 @@ def main(argv):
             f.write(log)
         with open(os.path.join(out, 'result.json'), 'w') as f:
             json.dump(result, f, ensure_ascii=False, indent=1)
+        if a.expect == 'trace' and verdict in ('ok', 'violation'):
+            conforms = verdict == 'violation' and result.get('violated') == 'TraceIncomplete'
+            if verdict == 'violation' and not conforms:
+                print('UNEXPECTED  %s  (trace 대조 중 TraceIncomplete 가 아닌 성질이 깨졌다 — 명세의 다른 불변식을 cfg 에서 뺀다)  %s'
+                      % (label, summary_line()))
+                return 1
+            result['trace_verdict'] = 'conforms' if conforms else 'diverges'
+            with open(os.path.join(out, 'result.json'), 'w') as f:
+                json.dump(result, f, ensure_ascii=False, indent=1)
+            if conforms:
+                print('TRACE CONFORMS  %s  모델이 실행 전체를 설명한다 · %s' % (label, summary_line()))
+                return 0
+            n = (result.get('depth') or 1) - 1   # TLC 깊이는 초기 상태를 1 로 센다
+            print('TRACE DIVERGES  %s  모델이 행동 %d개까지만 설명한다 — t0 순 %d번째 부근 행동의 기록 상태와 대응표를 본다 · %s'
+                  % (label, n, n + 1, summary_line()))
+            return 1
         if a.expect and verdict in ('ok', 'violation'):
             match = (verdict == a.expect)
             print('%s  %s  (expect %s, got %s)  %s' % ('AS EXPECTED' if match else 'UNEXPECTED', label, a.expect,
@@ -214,7 +233,7 @@ def main(argv):
         states = os.path.join(out, 'states')
         # SpecTE(반례 재현 명세)는 v1.7.4 에서 -generateSpecTE 를 줄 때만 만든다 — 명세 디렉터리에 파일을 남기지 않게 주지 않는다
         cmd = base + ['tlc2.TLC', '-workers', str(a.workers), '-config', cfg, '-metadir', states] + \
-            (['-deadlock'] if a.no_deadlock else []) + [spec]
+            (['-deadlock'] if (a.no_deadlock or a.expect == 'trace') else []) + [spec]
         p = subprocess.run(cmd, cwd=sdir, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                            universal_newlines=True, timeout=max(1, a.timeout - int(time.time() - t0)))
         log += '=== TLC (%s)\n' % ' '.join(cmd[len(base):]) + p.stdout

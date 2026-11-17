@@ -30,6 +30,31 @@ SKILL.md 절차 3-2 에서 이 파일을 연다. 첫 적용: CUBRID/cubrid#8472(
 8. **수정이 기대는 패스 순서·시점(표시 → 접기 등)은 가정으로 두지 않고 상수로 둔다** — 늦은 쪽 상수로 위반을 기대하는 cfg 를 함께 돌리고, 그 상수가 코드에서 참인지는 패스 순서표로 확인한다(등록부 #111·#108, set_op_fold 의 `EarlyMark`).
 9. **「모델이 보지 않는 것」 은 안전 지대가 아니다** — 고친 코드가 그 목록의 항목을 읽거나 옮기면(set_op_fold: 접기가 옮기는 집합 연산의 ORDER BY·LIMIT 자리에 DISTINCT 를 더함) 그 항목을 상수로 넣고, 고치기 전 판에서 위반을 기대하는 cfg 를 함께 돌린다. 보고에는 목록에 남은 항목을 '확인하지 않은 것' 으로 적는다(등록부 #117, set_op_fold 의 `TClauseChoice`·`ViewChoice`·`GroupChoice`).
 
+## 3-T. 코드 대조 — 모델이 실제 실행을 설명하나 (trace validation, 2026-11-17)
+사용자 지시 2026-11-17 "이거 넣어 줬으면" — Specula(arXiv 2607.25333, `github.com/specula-org/Specula`, 하네스-작성-규칙 R-24)의 방식이다.
+§3 의 대응표는 사람이 쓴 주장이고, before 위반은 "모델이 결함을 담았다" 만 보인다. **after 성립이 "모델이 코드와 달라서" 일 수 있다** — 그것을 실제 실행으로 막는다.
+코드에 계측을 넣어 돌리고, 그 실행의 행동 순서·상태를 TLC 가 모델 행동으로 하나도 빠짐없이 설명할 수 있는지 본다.
+
+**언제**: 동시성 명세의 after 성립을 보고서 §0 근거로 쓸 때는 **한다**(못 하면 §0 에 "모델 안에서만 확인 — 코드 대조 안 함 + 이유"). 모델 반례만으로 🔴 를 내려 할 때 재현이 안 되면 한다. 동시성 없는 상태기계는 선택(대응표 + before 위반으로 충분한 경우가 많다).
+
+**절차** (도구: `tools/tla/trace/tla_trace.h` · `tools/tla/trace_to_tla.py` · `tlc_run.py --expect trace`, 끝까지 도는 예 `tools/tla/trace/selftest/run.sh`)
+1. **계측 자리** — 모델 행동 하나 = `TLA_TRACE_BEGIN`/`END` 한 쌍, `ev` 이름 = 행동 이름(1:1). 구간은 모델의 원자 단위와 같게(§3 규칙 5: 잠금 안 구간 하나, 원자 연산 하나). 상태(`END_ST`)는 그 행동이 바꾸거나 본 모델 변수만 — **기록한 필드는 모두 대조한다**, 대조하지 않을 필드는 기록하지 않는다.
+2. **패치로만** — 엔진 worktree 에서 계측하고 `git diff > tla/<모듈>/<이름>/trace/instrument.patch`. 엔진 브랜치에 커밋하지 않는다. `#include "tla_trace.h"` 는 `-DTLA_TRACE` 가 없으면 빈 매크로다.
+3. **실제 코드를 돌린다** — 기본은 단위 suite: `python3 -m tools.harness.unitseam run … --patch <instrument.patch> --cflags "-DTLA_TRACE -I $PWD/tools/tla/trace"` 를 `TLA_TRACE_DIR=<dir>` 로, 테스트가 스레드 2~3개(시작 장벽)로 대상 함수를 부른다. 서버가 있어야 하는 경로는 사용자 확인 뒤 전용 브랜치·goto 빌드로만(H-05 동시 실행 금지). **손으로 쓴 trace·시뮬레이터·기록용 뮤텍스는 쓰지 않는다**(Specula 규칙 — 관찰하려는 엇갈림이 바뀐다).
+4. **변환** — `python3 tools/tla/trace_to_tla.py <dir> --out tla/<…>/trace/TraceData.tla --events <행동,…>`. 오류(이름 불일치·한 스레드 안 겹침·손으로 쓴 시각)면 계측부터 고친다. "스레드 사이 겹친 구간이 없다" 경고면 엇갈림을 시험하지 못한 실행이다 — 시나리오를 다시 짠다(selftest 의 첫 판이 그랬다).
+5. **TraceCheck** — `tools/tla/trace/selftest/TraceCheck.tla` 를 `trace/` 로 복사해 `VARIABLES`·`INSTANCE`·`Apply`(행동 이름 → 모델 행동 ∧ 기록 상태 대조)만 바꾼다. 겹친 구간은 TLC 가 모든 순서를 시도한다(시간 상자).
+6. **돌리기** — `python3 tools/tla/tlc_run.py tla/<…>/trace/TraceCheck.tla --config tla/<…>/trace/TraceCheck.cfg --expect trace`
+
+| 결과 | 뜻 | 할 일 |
+|---|---|---|
+| `TRACE CONFORMS` | 이 실행은 모델로 설명된다 — 대응표가 그 실행 범위에서 확인됐다 | §0 에 "코드 대조: 행동 N개·스레드 k·겹친 쌍 m" 한 줄 |
+| `TRACE DIVERGES` (행동 n개까지) | n+1 번째 부근에서 모델이 코드를 못 따라간다 | 셋 중 무엇인지 가른다: ① 계측 자리·이름 오류 ② 모델 추상화가 틀림 → 모델을 고치고 before/after 를 **다시** 돌린다 ③ 코드가 모델의 계약을 어김(selftest 의 racy 판: 잃은 갱신) → 결함 후보, 재현으로 |
+
+**Specula 를 그대로 쓸 때**(사람이 설치 — §4 아래 설치 절):
+- 새 명세를 처음 쓸 때 `specula-lite` 스킬의 순서(불변식마다 근거 인용한 `modeling-brief.md` → 모델 → 커버리지 감사 → TLC → 재현)를 따른다. trace 대조는 하지 않으므로 위 1~6 은 따로 한다.
+- 버퍼 latch·락 관리자·로그처럼 큰 동시성 하위 시스템은 리뷰 밖 캠페인으로 `specula run --byom=<우리 명세 디렉터리> --artifact=<엔진 전용 worktree> --guidance=<g.md> --keep-original`. 실행 시간 중앙값 3.7시간·시스템당 $19~168(저자 보고)이고 자체 빌드를 하므로 **사용자 승인 뒤, CTP·goto·벤치가 돌지 않을 때만**. guidance 의 Priority Questions 는 "When [사건], can [보이는 나쁜 결과]?" 꼴로, 영역 판정 4단계(①~④)에서 뽑는다.
+- `TRACE DIVERGES` 원인 찾기에 Specula 의 MCP `trace_debugger` 를 쓸 수 있는지는 **첫 사용 때 확인**한다(우리 TraceData 형식과 맞는지 미확인).
+
 ## 4. 돌리기
 ```bash
 cd ~/dev/docs/dev4-review-workspace
@@ -37,6 +62,16 @@ python3 tools/tla/tlc_run.py tla/<모듈>/<이름>/<Spec>.tla --config tla/<모�
 python3 tools/tla/tlc_run.py tla/<모듈>/<이름>/<Spec>.tla --config tla/<모듈>/<이름>/after.cfg  --expect ok
 ```
 한 줄 출력(AS EXPECTED / UNEXPECTED · 위반한 성질 · 상태 수 · 깊이 · 시간), 상세는 `out/<cfg>/`(result.json·tlc.log·trace.txt). 도구가 없으면 설치 명령을 찍는다 — 외부 코드라 **설치는 사람이 한다**(2026-11-10 자동 모드가 에이전트의 내려받기·실행을 막았다).
+코드 대조 도구가 바뀌면 `sh tools/tla/trace/selftest/run.sh <스크래치 디렉터리>` — locked PASS(CONFORMS)·racy PASS(DIVERGES) 둘 다여야 한다.
+
+**Specula 설치(선택, 사람이)** — Java 21 이상·Python 3.10 이상·`uv`·Maven·`gh` 가 필요하다(우리 TLC 는 Java 11·tla2tools v1.7.4 고정이고, Specula 는 자기 TLA+ jar 를 따로 받는다 — 결과 표에 그 판을 따로 적는다).
+```bash
+curl -LsSf https://astral.sh/uv/install.sh | sh          # ~/.local/bin/uv
+uv python install 3.12                                    # pip 없는 python3.11 대신
+# JDK 21: 사용자 공간 tarball 을 ~/tools/jdk-21 에 풀고 JAVA_HOME 을 그쪽으로(시스템 rpm 은 sudo)
+git clone https://github.com/specula-org/Specula.git ~/tools/specula && cd ~/tools/specula && uv tool install -e . && specula setup
+```
+`specula setup` 은 스킬을 전역·프로젝트 중 어디에 깔지 묻는다 — **프로젝트(dev4-review-workspace)** 로 고르고, 깔린 스킬 이름이 우리 스킬과 겹치는지 본다.
 
 ## 5. 판정과 보고
 | before | after | 뜻 | 할 일 |
@@ -46,13 +81,17 @@ python3 tools/tla/tlc_run.py tla/<모듈>/<이름>/<Spec>.tla --config tla/<모�
 | 성립 | — | 모델이 결함을 담지 못했다 | 대응표부터 다시 — 이 상태의 after 성립은 근거로 쓰지 않는다 |
 | 오류·시간 초과 | | 문법·범위 문제 | 고치거나 범위를 줄인다. 못 하면 §0 에 "모델 검사 못 함 + 이유" |
 
+after 성립의 무게는 코드 대조(§3-T)에 달렸다 — `CONFORMS` 면 "코드 대조 확인", 대조를 안 했으면 "모델 안에서만", `DIVERGES` 를 풀지 못했으면 after 성립을 근거로 쓰지 않는다.
+
 - **반례를 지적으로 낼 때**: trace 의 상태마다 대응표로 코드 경로(file:line)를 적고, 할 수 있으면 재현(SQL·`harness-unit`)으로 확인한다. finding 의 `verification` 은 재현까지 되면 `dynamic`, 모델만이면 `method: "model"`, `result` 에 "성질 X 위반, 반례 N걸음: <코드 경로 요약>", `artifact` 에 명세 디렉터리. 판정기는 `model` 을 에러 우려의 확인으로 세되 artifact 가 있어야 하고, 도달 가능성(`reach_trace`) 증명으로는 세지 않는다.
 - 게시 코멘트에는 모델 이름·반례의 코드 경로·재현 SQL 을 쓴다. TLA+ 문법을 리뷰 대상자가 읽어야 하는 글로 만들지 않는다.
 
 ## 6. 남기기
+- 코드 대조를 했으면 `tla/<모듈>/<이름>/trace/` 에 `instrument.patch`·`TraceCheck.tla`·`TraceCheck.cfg`·시나리오(단위 test.cpp 경로)를 커밋한다. `TraceData.tla` 와 원 trace 는 실행마다 다르므로 커밋하지 않고, 결과 표에 행동 수·스레드·겹친 쌍·판정만 남긴다.
 - 명세·cfg·README(대응표·결과 표)는 `tla/<모듈>/<이름>/` 로 커밋한다(dev4 는 공개 리포 — 참조 구현 이름·로컬 경로를 쓰지 않는다). `out/` 은 커밋하지 않는다(.gitignore).
 - 결과 표에는 날짜·PR 헤드·cfg·판정·상태 수·깊이·시간과 tla2tools 판(result.json 의 `tlc_version`·`jar_sha256`)을 남긴다.
 
 ## 무엇을 보장하나 / 못 하나
 - 보장: cfg 의 상수 범위 안에서, 모델로 옮긴 갈래에 대해서는 모든 경우를 봤다.
-- 못 함: 범위 밖(대개 작은 범위의 결함이 큰 범위에도 있다 — "small scope hypothesis" 일 뿐 증명은 아니다), 대응표 밖의 코드, 모델과 코드의 차이(추상화가 틀리면 결론도 틀린다 — 그래서 before 가 위반해야 after 를 믿는다). 범위 없는 증명(TLAPS)은 쓰지 않는다.
+- 코드 대조(§3-T)를 했으면 더해서: 그 실행에서 코드가 한 일은 모델 행동으로 설명된다 — 대응표가 그 실행 범위에서는 사람 주장이 아니다.
+- 못 함: 범위 밖(대개 작은 범위의 결함이 큰 범위에도 있다 — "small scope hypothesis" 일 뿐 증명은 아니다), 대응표 밖의 코드, 모델과 코드의 차이(추상화가 틀리면 결론도 틀린다 — 그래서 before 가 위반해야 after 를 믿고, 코드 대조로 그 차이를 실행 단위로 줄인다). 코드 대조는 돌린 실행만 본다 — 안 나온 엇갈림은 여전히 모델 검사의 몫이다. 범위 없는 증명(TLAPS)은 쓰지 않는다.
