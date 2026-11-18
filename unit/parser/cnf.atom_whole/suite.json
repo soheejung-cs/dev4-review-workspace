@@ -1,0 +1,47 @@
+{
+ "name": "PR#8590 (CBRD-28027) pt_transform_cnf_pre () -- CNF 걷기가 PT_AND/PT_OR 로만 내려가고 원자(비교·IS [NOT] TRUE·CASE·IF·XOR·함수, PT_SELECT 아닌 비 EXPR)에서 멈춤(PT_LIST_WALK), PT_AND/PT_OR 에서 PT_CONTINUE_WALK 로 되돌림(앞 원자가 남긴 PT_LIST_WALK 를 형제가 물려받음). C1 IS TRUE 원자 두 가지가 공통 인수로 합쳐지지 않음(pt_cnf·pt_cnf_where), C2 원자 뒤 AND/OR 이 여전히 펼쳐짐(경계·변이 감지), C3 CASE·IF·XOR 조건의 AND 트리 유지",
+ "requires": [
+  "pt_cnf",
+  "pt_cnf_where"
+ ],
+ "file": "src/parser/cnf.c",
+ "mode": "cs",
+ "seams": [],
+ "appendix": "",
+ "test": "test.cpp",
+ "extra": [
+  "src/parser/parse_tree.c",
+  "src/parser/parse_tree_cl.c",
+  "src/parser/parser_support.c",
+  "src/base/language_support.c",
+  "src/base/intl_support.c",
+  "src/base/chartype.c",
+  "src/object/object_domain.c",
+  "src/object/object_primitive.c",
+  "src/query/domain_rules.c",
+  "src/compat/db_macro.c",
+  "src/base/memory_alloc.c",
+  "src/base/system_parameter.c"
+ ],
+ "watch": [
+  "src/parser/parse_tree.h",
+  "src/parser/parser.h",
+  "src/parser/parse_tree_cl.c",
+  "src/parser/query_rewrite.c",
+  "src/parser/semantic_check.c",
+  "src/parser/csql_grammar.y"
+ ],
+ "fakes": "진짜: cnf.c(TU: pt_cnf·pt_and_or_form·count_and_or·pt_transform_cnf_pre/_post·pt_calculate_similarity·pt_cnf_column_pre·pt_cnf_over_one_column·pt_cnf_or_list_to_tree·pt_tag_start_of_cnf_post), parse_tree.c + parse_tree_cl.c(parser_create_parser·parser_new_node·parser_walk_tree·parser_copy_tree_list·parser_free_tree·parser_append_node·parser_print_tree), parser_support.c(pt_and·pt_name_equal·pt_datatypes_match), language_support.c + intl_support.c + chartype.c(intl_identifier_casecmp/_cmp, en_US.utf8), object_domain.c + object_primitive.c + domain_rules.c, db_macro.c, memory_alloc.c, system_parameter.c. 가짜: pt_count_input_markers = semantic_check.c:16138 본문 그대로, pt_str_compare = name_resolution.c:8441 본문 그대로, pt_is_keyword = keyword.c:1064 에서 예약어가 아닌 이름(a·b·c·x·y·z·id)의 결과 false, er_* = 오류 코드 하나(호출 안 됨), pt_parser_line_col = 위치 0(lexer 없음), pt_free_dblink_remote_cols = dblink 없는 parser 의 빈 루프, init_builtin_calendar_names·db_date_locale_init·envvar_get/_trim_char·cubregex::get_engine_name = 로캘·환경 초기화. 트리: 진짜 parser_new_node 로 문법이 채우는 필드 -- IS TRUE = parser_make_expression (PT_IS, cond, LOGICAL 값 text \"true\" i=1)(csql_grammar.y boolean_term_is·boolean), 검색 CASE = PT_CASE qualifier PT_SEARCHED_CASE arg3 조건·arg1 then·arg2 else(searched_when_clause), IF = PT_IF (cond, a, b), XOR = PT_XOR (a, b), 괄호 AND 는 paren_type 1. 걷기 의미는 진짜 pt_walk_private ()(parse_tree_cl.c:1121, 피연산자를 걸은 뒤 continue_walk 를 save_continue 로 되돌림).",
+ "note": "C2a·C2b(두 단계)는 PR 이 말한 경계의 모양 그대로지만, PT_AND/PT_OR 의 PT_CONTINUE_WALK 되돌림을 빼도 PASS 한다 -- 걷지 않은 안쪽 AND 도 post 는 돌고 그 피연산자가 원자라 목록이 된다. 되돌림이 빠진 것을 잡는 것은 세 단계 C2c·C2d·C2f(안쪽 AND 의 AND 가 post 되지 않고 남음). C3 의 CASE 조건은 실제 흐름에서 의미 검사가 먼저 pt_do_cnf 로 바꿔 둘 수 있다(keep_or_whole K6 참고) -- 여기서는 pt_cnf 가 받는 모양만 고정한다.",
+ "origin": {
+  "pr": 8590,
+  "jira": "CBRD-28027",
+  "finding": "contract (원자 피연산자 유지 + CONTINUE_WALK 되돌림 경계)",
+  "comment": null,
+  "date": "2026-11-18",
+  "reviewed_head": "d2f562e58",
+  "base": "8b9e7fd01",
+  "artifact": "harness-out/8590/d2f562e58/unit/contract/",
+  "result": "2026-11-18: head d2f562e58 12/12 PASS, base 8b9e7fd01 5/12 -- C2a·C2b·C2c·C2d·C2e PASS(바뀌지 않은 동작), C1a·C1b·C1c·C2f·C3a·C3b·C3c FAIL(이 PR 이 고친 꼴: develop 은 원자 아래 AND 를 next 목록으로 바꾸고, C1a·C1b 는 두 IS TRUE 가 하나로 합쳐짐 -- gdb 로 pt_transform_cnf_post 의 pt_str_compare 인자가 둘 다 \"t.a>0 is true\" 임을 확인, 목록 머리가 아직 is_cnf_start 가 아니라 parse_tree_cl.c:2622 pt_print_and_list 를 타지 않음), stub 호출 0. 변이 m1_no_continue_reset(harness-out/8590/d2f562e58/unit/contract/mut/m1_no_continue_reset.diff, PT_AND/PT_OR 의 *continue_walk = PT_CONTINUE_WALK 두 줄 삭제) -> C2c·C2d·C2f FAIL, 나머지 9 PASS(두 단계 C2a·C2b 는 되돌림 누락을 못 잡음)."
+ }
+}
