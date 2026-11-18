@@ -1,0 +1,14 @@
+{
+ "name": "PR#8625(CBRD-28066) tp_domain_coll_flags_match — 집합 도메인 캐시(tp_domain_find_set·tp_is_domain_cached)가 원소 콜레이션 플래그를 중첩까지 비교: 같은 플래그 일치·ENFORCE/LEAVE 대 NORMAL 불일치(양방향)·중첩 원소·길이 다름·NULL·콜레이션 없는 타입·순서 다른 원소 + [defect] U1 이력(9599c3513: 짝지은 원소의 타입이 달라도 첫 원소 플래그만 봐 순서 다른 미결정 도메인이 일치)",
+ "file": "src/object/object_domain.c",
+ "mode": "sa",
+ "seams": [],
+ "appendix": "hooks.cpp",
+ "test": "test.cpp",
+ "extra": ["src/object/object_primitive.c"],
+ "requires": ["tp_domain_coll_flags_match"],
+ "watch": ["src/object/object_domain.h", "src/object/object_representation.c"],
+ "fakes": "없음 — 도메인을 calloc 으로 만들고 object_primitive.c 의 실제 PR_TYPE(tp_Type_string·integer·set·multiset·sequence)을 가리킨다. 캐시에 넣지 않으므로 tp_init 이 필요 없다. hooks.cpp 가 static 도우미를 연다.",
+ "defects_fixed_in": {"PR8625 U1": "cc1a69380"},
+ "origin": {"pr": 8625, "finding": "자기 리뷰 S1 (tp_domain_coll_flags_match 의 순서 짝짓기)", "date": "2026-11-19"}
+}
