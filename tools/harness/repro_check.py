@@ -102,7 +102,9 @@ def _conf(inst, params, max_buffer, dest):
     if not extra:
         return None, notes
     with open(dest, 'w', encoding='utf-8') as f:
-        f.write(txt + '\n# repro_check\n' + '\n'.join(extra) + '\n')
+        # under its own [common] header: appended bare, the lines fell into the last [@db] section of the copy and
+        # did not reach the repro DB (2026-11-18 PR#8609, oracle_style_empty_string)
+        f.write(txt + '\n# repro_check\n[common]\n' + '\n'.join(extra) + '\n')
     return dest, notes + (['--param ' + ' '.join(params)] if params else [])
 
 
