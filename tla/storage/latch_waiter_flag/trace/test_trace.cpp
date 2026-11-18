@@ -172,5 +172,12 @@ TEST_CASE ("trace: H holds READ, r1 and r2 fix, wait, give up or are woken, unfi
   ut_unfix (h, bcb);	/* H: the scan ends */
   t1.join ();
   t2.join ();
+
+  /* Each entry lock is released as often as it is taken. A second unlock of a default mutex leaves its user count at
+   * -1 and destroying it fails with EBUSY -- the shutdown assertion in cubthread::entry::clear_resources () that the
+   * page latch timeout branch of pgbuf_timed_sleep () reached before it took the lock again (CI run 44049957988). */
+  CHECK (pthread_mutex_destroy (&h->th_entry_lock) == 0);
+  CHECK (pthread_mutex_destroy (&r1->th_entry_lock) == 0);
+  CHECK (pthread_mutex_destroy (&r2->th_entry_lock) == 0);
   SUCCEED ("traced");
 }

@@ -58,6 +58,7 @@ before 반례(TC `cbrd_28163` 과 같은 꼴): H 가 READ 로 쥔 페이지에 r
 | 2026-11-18 (.51) | head `cae32d077` → FIX="pr" | 80(TC 꼴 3 · 무작위 38 · 깨우기=타임아웃 맞춤 39) | **80/80 CONFORMS** | develop 모델 15 DIVERGES · 65 CONFORMS | Fix 240 · Unfix 222 · Woken 64 · GiveUpStart 18 · GiveUp 18 | 0 |
 | 2026-11-18 (.51) | base `bb71348d6` → FIX="develop" | 같은 구성 80 | **80/80 CONFORMS** | pr 모델 14 DIVERGES · 66 CONFORMS | Fix 240 · Unfix 223 · Woken 75 · GiveUpStart 17 · GiveUp 17 | 0 |
 | 2026-11-18 (.51) | TC 꼴 한 실행씩, Specula MCP `run_trace_validation` | head·base | `success`(9·10 states) | 둘 다 4번째 상태 뒤 `GiveUp` 에서 Deadlock(불일치) | | |
+| 2026-11-18 (.51) | 수정 헤드 `f796f7bd7`(타임아웃 갈래가 엔트리 락을 다시 잡음) → FIX="pr", 40회(run.sh 와 같은 구성) + LD_PRELOAD unlock 검사 + 엔트리 락 destroy CHECK | 40 | **40/40 CONFORMS**, Specula MCP **40/40 success**, 여분 unlock 0, destroy 40/40 성공 | develop 모델 13 DIVERGES · 27 CONFORMS | | |
 | 2026-11-18 (.51) | 위 160회 전부, Specula MCP `run_trace_validation_parallel`(Specula TLC 2026.11.15, `PROPERTY TraceFullyConsumed`) | head 80 · base 80 | **160/160 success** | head×develop 15 · base×pr 14 불일치 — TraceCheck 의 DIVERGES 와 같은 실행 | | |
 
 - 상대 모델이 불일치를 내는 실행은 모두 포기(`GiveUp`)가 있는 실행이다. 같은 실행을 두 모델이 다르게 설명하는 자리가 PR 이 바꾼 표시 하나뿐이라는 뜻이다. 포기가 없는 실행은 두 모델 모두 설명한다(바뀐 갈래를 안 지남). 포기가 있는데도 두 모델이 다 설명하는 실행은 60번 하나(head·base 같은 매개변수)로, 포기한 writer 뒤에 다른 writer 가 줄에 남아 있어 두 리비전 모두 표시를 그대로 두는 경우다.
@@ -65,7 +66,7 @@ before 반례(TC `cbrd_28163` 과 같은 꼴): H 가 READ 로 쥔 페이지에 r
 - **확인하지 못한 것**: 스레드 사이에 겹친 구간이 한 번도 없었다. 깨우기와 타임아웃을 같은 순간에 맞춘 39회도 BCB mutex·엔트리 lock 이 순서를 정해, 행동 구간이 겹치지 않았다. 그래서 대응표(행동 ↔ 코드)는 실행으로 확인됐지만, 엇갈림에 대한 결론(교착 없음·`FlagComplete` 등)은 여전히 **모델 안에서만** 확인한 것이다. CBRD-27739 의 두 엇갈림(아래)도 이 실행에서 일어나지 않았다.
 
 ## 모델이 보지 않는 것
-- **포기 쪽의 엔트리 락 없는 확인(CBRD-27739 원인 A)**: `pgbuf_timed_sleep ()` 의 타임아웃 갈래는 `thread_suspend_timeout_wakeup_and_unlock_entry ()` 가 엔트리 락을 풀고 돌아온 뒤 락 없이 `resume_status` 를 보고 `request_latch_mode` 를 쓴다. 모델은 확인과 쓰기를 한 걸음(`GiveUpStart`)으로 두었다 — 깨우는 쪽과의 그 엇갈림은 CBRD-27739 의 몫이다.
+- **포기 쪽의 엔트리 락 없는 확인(CBRD-27739 원인 A) — `f796f7bd7` 에서 코드가 모델과 맞춰졌다**: `cae32d077` 까지 `pgbuf_timed_sleep ()` 의 타임아웃 갈래는 `thread_suspend_timeout_wakeup_and_unlock_entry ()` 가 엔트리 락을 풀고 돌아온 뒤 락 없이 `resume_status` 를 보고 `request_latch_mode` 를 쓰고, 풀린 락을 한 번 더 풀었다(종료 때 `pthread_mutex_destroy` EBUSY → debug assert, CI run 44049957988). 모델은 처음부터 확인과 쓰기를 한 걸음(`GiveUpStart`)으로 두었고, `f796f7bd7` 이 그 갈래 첫머리에서 락을 다시 잡아 코드도 한 걸음이 됐다(사용자 결정 11-18 — CBRD-27739 에 코멘트). `trace/test_trace.cpp` 끝의 destroy CHECK 가 develop·`cae32d077` 에서 실패(16), `f796f7bd7` 에서 통과한다.
 - **승계 루프가 엔트리 락 전에 fcnt 를 더하는 순서(CBRD-27739 원인 B)**: `Succ` 는 READ 대기자의 확인과 fcnt 더하기를 한 걸음으로 두었다. 단위 suite `unit/storage/page_buffer.timed_sleep_error_handling` 의 R1 이 그 순서를 실제 함수로 재현한다(develop 동일).
 - **조건부 래치 요청**(`PGBUF_CONDITIONAL_LATCH`): 거절될 때도 CAS 로 표시를 세우고 줄 서지 않고 돌아간다(:7092-7095·:7108-7112, 거절 :7227-7259) — 같은 '대기자 없는 표시' 의 다른 원천이고 PR 범위 밖(PR 본문 Remarks 의 확인 부탁).
 - 보유자의 재고정·READ→WRITE 승격(`wait_for_latch_promote`, 맨 앞 끼우기), flush 대기자(`PGBUF_LATCH_FLUSH` — 표시를 세우지 않고 `pgbuf_wake_flush_waiters ()` 가 깨움; 단위 suite 의 e2·f·f2 가 포기 경로와의 조합을 확인), 페이지 폐기 경로가 flush 대기 전에 표시를 세우는 :3648, 한 스레드의 fix 여러 개(`request_fix_count` > 1 — 단위 suite c·h).
