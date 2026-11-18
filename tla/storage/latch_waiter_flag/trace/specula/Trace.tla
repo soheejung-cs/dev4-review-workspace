@@ -2,9 +2,13 @@
 \* Specula-form Trace spec (concurrent-timebox-guide.md) for LatchWaiterFlag -- read by the MCP tracedebugger
 \* (run_trace_validation) from trace_to_tla.py --merged JSON.  MatchEvent is TraceCheck.tla's; the model's own pc is
 \* renamed mpc because Specula's trace cursor is pc.  FIX is fixed per config (TraceFix).
-EXTENDS Json, Naturals, Sequences, TLC
+EXTENDS Json, IOUtils, Naturals, Sequences, TLC
 CONSTANTS TraceFile, TraceFix
-traceData == JsonDeserialize(TraceFile)
+\* the MCP (run_trace_validation[_parallel]) passes the trace in the environment variable JSON (Specula's Trace.tla
+\* idiom); TraceFile is only the fallback for a hand run.  Reading the constant alone made the MCP's trace_file
+\* argument a no-op -- every trace of a parallel run would have been judged as the same traces/merged.json.
+JsonFile == IF "JSON" \in DOMAIN IOEnv THEN IOEnv.JSON ELSE TraceFile
+traceData == JsonDeserialize(JsonFile)
 traces == traceData.traces
 VARIABLES mode, fcnt, wex, q, kind, req, resumed, mpc, pc
 vars == <<mode, fcnt, wex, q, kind, req, resumed, mpc>>

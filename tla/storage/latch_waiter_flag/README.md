@@ -51,15 +51,17 @@ before 반례(TC `cbrd_28163` 과 같은 꼴): H 가 READ 로 쥔 페이지에 r
   `GiveUp`(`pgbuf_timed_sleep_error_handling ()` 의 BCB lock → 호출자가 BCB 를 풀기 직전), `Unfix`(`pgbuf_unlatch_bcb_upon_unfix ()` 시작 → 깨우기 뒤). 상태는 `mode`·`fcnt`·`wex`·`q`(대기열 스레드 번호, 앞부터) — 모두 대조한다.
 - **실행** `trace/test_trace.cpp` + `trace/hooks_trace.cpp`: unitseam 으로 page_buffer.c 번역 단위를 PR 빌드 플래그로 컴파일하고, 스레드 셋(H 가 READ 를 먼저 잡음, r1·r2 가 R/W 요청)이 실제 fix·대기·타임아웃·깨우기·unfix 를 돈다. page_buffer.c 안은 하나도 가짜로 바꾸지 않았다. 바꾼 것은 다른 번역 단위의 엔트리 lock/unlock·`thread_suspend_timeout_wakeup_and_unlock_entry ()`(같은 `pthread_cond_timedwait` 루프)·`logtb_is_current_active ()`=true·timeval 두 개와, 오류 메시지 경로(`er_set`·`logtb_find_client_name_host_pid` → 0)다.
   빌드: `python3 -m tools.harness.unitseam run --rev <rev> --file src/storage/page_buffer.c --mode server --test tla/storage/latch_waiter_flag/trace/test_trace.cpp --appendix …/trace/hooks_trace.cpp --patch …/trace/instrument.patch --cflags "-DTLA_TRACE -I $PWD/tools/tla/trace" --out <OUT>/build`(head·base 각각, `UNITSEAM_STUB=zero`) → `sh trace/run.sh <OUT> 80`.
-- **판정**: 우리 `trace/TraceCheck.tla`(`tlc_run --expect trace`)와 Specula 꼴 `trace/specula/Trace.tla`(MCP `tracedebugger` 의 `run_trace_validation`). 요청 종류(`kind`)는 trace 의 `Fix` args 로 고정한다. `Init` 이 고르게 두면, Specula 꼴에서는 다른 종류를 고른 갈래가 교착해 불일치로 나온다.
+- **판정**: 우리 `trace/TraceCheck.tla`(`tlc_run --expect trace`)와 Specula 꼴 `trace/specula/Trace.tla`(MCP `tracedebugger` 의 `run_trace_validation`·`run_trace_validation_parallel` — trace 경로는 환경 변수 `JSON`(`IOEnv.JSON`)으로 받는다, cfg 의 `TraceFile` 은 손으로 돌릴 때의 대체값). 요청 종류(`kind`)는 trace 의 `Fix` args 로 고정한다. `Init` 이 고르게 두면, Specula 꼴에서는 다른 종류를 고른 갈래가 교착해 불일치로 나온다.
 
 | 날짜 | 대상 | 실행 | 자기 리비전의 모델 | 상대 모델(감도) | 행동 횟수 | 겹친 구간 |
 |---|---|---|---|---|---|---|
 | 2026-11-18 (.51) | head `cae32d077` → FIX="pr" | 80(TC 꼴 3 · 무작위 38 · 깨우기=타임아웃 맞춤 39) | **80/80 CONFORMS** | develop 모델 15 DIVERGES · 65 CONFORMS | Fix 240 · Unfix 222 · Woken 64 · GiveUpStart 18 · GiveUp 18 | 0 |
 | 2026-11-18 (.51) | base `bb71348d6` → FIX="develop" | 같은 구성 80 | **80/80 CONFORMS** | pr 모델 14 DIVERGES · 66 CONFORMS | Fix 240 · Unfix 223 · Woken 75 · GiveUpStart 17 · GiveUp 17 | 0 |
 | 2026-11-18 (.51) | TC 꼴 한 실행씩, Specula MCP `run_trace_validation` | head·base | `success`(9·10 states) | 둘 다 4번째 상태 뒤 `GiveUp` 에서 Deadlock(불일치) | | |
+| 2026-11-18 (.51) | 위 160회 전부, Specula MCP `run_trace_validation_parallel`(Specula TLC 2026.11.15, `PROPERTY TraceFullyConsumed`) | head 80 · base 80 | **160/160 success** | head×develop 15 · base×pr 14 불일치 — TraceCheck 의 DIVERGES 와 같은 실행 | | |
 
-- 상대 모델이 불일치를 내는 실행은 모두 포기(`GiveUp`)가 있는 실행이다. 같은 실행을 두 모델이 다르게 설명하는 자리가 PR 이 바꾼 표시 하나뿐이라는 뜻이다. 포기가 없는 실행은 두 모델 모두 설명한다(바뀐 갈래를 안 지남).
+- 상대 모델이 불일치를 내는 실행은 모두 포기(`GiveUp`)가 있는 실행이다. 같은 실행을 두 모델이 다르게 설명하는 자리가 PR 이 바꾼 표시 하나뿐이라는 뜻이다. 포기가 없는 실행은 두 모델 모두 설명한다(바뀐 갈래를 안 지남). 포기가 있는데도 두 모델이 다 설명하는 실행은 60번 하나(head·base 같은 매개변수)로, 포기한 writer 뒤에 다른 writer 가 줄에 남아 있어 두 리비전 모두 표시를 그대로 두는 경우다.
+- Specula 꼴의 통과는 우리 TraceCheck(**어떤 순서 하나**로 끝까지 소비하면 일치)보다 강하다 — 모델의 **모든 갈래**가 trace 를 끝까지 소비해야 한다. 160/160 이므로 trace 에 적지 않는 모델 변수(`req`·`resumed`·`mpc`)도 trace 만으로 하나로 정해지고, 모델에 trace 가 못 막는 다른 갈래가 없다.
 - **확인하지 못한 것**: 스레드 사이에 겹친 구간이 한 번도 없었다. 깨우기와 타임아웃을 같은 순간에 맞춘 39회도 BCB mutex·엔트리 lock 이 순서를 정해, 행동 구간이 겹치지 않았다. 그래서 대응표(행동 ↔ 코드)는 실행으로 확인됐지만, 엇갈림에 대한 결론(교착 없음·`FlagComplete` 등)은 여전히 **모델 안에서만** 확인한 것이다. CBRD-27739 의 두 엇갈림(아래)도 이 실행에서 일어나지 않았다.
 
 ## 모델이 보지 않는 것

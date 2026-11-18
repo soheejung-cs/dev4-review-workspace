@@ -1,8 +1,11 @@
 ---- MODULE Trace ----
 \* selftest 의 Counter.tla 를 base 로 한 Specula 꼴 Trace 명세(concurrent-timebox-guide.md 그대로 + WF). tla.md §3-T "Specula 로 확인".
-EXTENDS Counter, Json, Naturals, Sequences, TLC
+EXTENDS Counter, Json, IOUtils, Naturals, Sequences, TLC
 CONSTANT TraceFile
-traceData == JsonDeserialize(TraceFile)
+\* the MCP passes the trace in the environment variable JSON (Specula's idiom) -- TraceFile is only the fallback for a
+\* hand run.  Reading the constant alone ignores the MCP's trace_file: a parallel run judges one file N times.
+JsonFile == IF "JSON" \in DOMAIN IOEnv THEN IOEnv.JSON ELSE TraceFile
+traceData == JsonDeserialize(JsonFile)
 traces == traceData.traces
 VARIABLE pc
 vars == <<c>>
