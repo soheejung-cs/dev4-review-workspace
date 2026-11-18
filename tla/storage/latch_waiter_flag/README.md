@@ -44,6 +44,24 @@ before 반례(TC `cbrd_28163` 과 같은 꼴): H 가 READ 로 쥔 페이지에 r
 코드로는 page_buffer.c(base) :8035 → :7892-7938(표시를 건드리지 않고 return) → 다음 READ 요청의 :7054-7059(표시가 있고 보유자가 아님 → 줄 섬).
 변이 반례: [r1 W, r2 W] 에서 r1 이 포기하면 r2 가 막힌 채 표시가 지워진다 — 뒤이은 READ 가 r2 를 앞지른다.
 
+## 코드 대조 (trace validation, tla.md §3-T — 2026-11-18 .51)
+모델이 실제 실행을 설명하는지 본다. 실행은 `trace/` 에 있다.
+- **계측** `trace/instrument.patch`(엔진에 커밋하지 않음, head·base 둘 다에 적용): 행동마다 BCB mutex 구간 하나 = 기록 한 줄.
+  `Fix`(`pgbuf_latch_bcb_upon_fix ()` 시작 → 승인 CAS 뒤 또는 `pgbuf_block_bcb ()` 의 줄 붙이기 뒤, args `who`·`kind`), `GiveUpStart`·`Woken`(`pgbuf_timed_sleep ()` 의 대기 복귀 → `request_latch_mode = PGBUF_NO_LATCH`·엔트리 unlock / RESUMED 확인),
+  `GiveUp`(`pgbuf_timed_sleep_error_handling ()` 의 BCB lock → 호출자가 BCB 를 풀기 직전), `Unfix`(`pgbuf_unlatch_bcb_upon_unfix ()` 시작 → 깨우기 뒤). 상태는 `mode`·`fcnt`·`wex`·`q`(대기열 스레드 번호, 앞부터) — 모두 대조한다.
+- **실행** `trace/test_trace.cpp` + `trace/hooks_trace.cpp`: unitseam 으로 page_buffer.c 번역 단위를 PR 빌드 플래그로 컴파일하고, 스레드 셋(H 가 READ 를 먼저 잡음, r1·r2 가 R/W 요청)이 실제 fix·대기·타임아웃·깨우기·unfix 를 돈다. page_buffer.c 안은 하나도 가짜로 바꾸지 않았다. 바꾼 것은 다른 번역 단위의 엔트리 lock/unlock·`thread_suspend_timeout_wakeup_and_unlock_entry ()`(같은 `pthread_cond_timedwait` 루프)·`logtb_is_current_active ()`=true·timeval 두 개와, 오류 메시지 경로(`er_set`·`logtb_find_client_name_host_pid` → 0)다.
+  빌드: `python3 -m tools.harness.unitseam run --rev <rev> --file src/storage/page_buffer.c --mode server --test tla/storage/latch_waiter_flag/trace/test_trace.cpp --appendix …/trace/hooks_trace.cpp --patch …/trace/instrument.patch --cflags "-DTLA_TRACE -I $PWD/tools/tla/trace" --out <OUT>/build`(head·base 각각, `UNITSEAM_STUB=zero`) → `sh trace/run.sh <OUT> 80`.
+- **판정**: 우리 `trace/TraceCheck.tla`(`tlc_run --expect trace`)와 Specula 꼴 `trace/specula/Trace.tla`(MCP `tracedebugger` 의 `run_trace_validation`). 요청 종류(`kind`)는 trace 의 `Fix` args 로 고정한다. `Init` 이 고르게 두면, Specula 꼴에서는 다른 종류를 고른 갈래가 교착해 불일치로 나온다.
+
+| 날짜 | 대상 | 실행 | 자기 리비전의 모델 | 상대 모델(감도) | 행동 횟수 | 겹친 구간 |
+|---|---|---|---|---|---|---|
+| 2026-11-18 (.51) | head `cae32d077` → FIX="pr" | 80(TC 꼴 3 · 무작위 38 · 깨우기=타임아웃 맞춤 39) | **80/80 CONFORMS** | develop 모델 15 DIVERGES · 65 CONFORMS | Fix 240 · Unfix 222 · Woken 64 · GiveUpStart 18 · GiveUp 18 | 0 |
+| 2026-11-18 (.51) | base `bb71348d6` → FIX="develop" | 같은 구성 80 | **80/80 CONFORMS** | pr 모델 14 DIVERGES · 66 CONFORMS | Fix 240 · Unfix 223 · Woken 75 · GiveUpStart 17 · GiveUp 17 | 0 |
+| 2026-11-18 (.51) | TC 꼴 한 실행씩, Specula MCP `run_trace_validation` | head·base | `success`(9·10 states) | 둘 다 4번째 상태 뒤 `GiveUp` 에서 Deadlock(불일치) | | |
+
+- 상대 모델이 불일치를 내는 실행은 모두 포기(`GiveUp`)가 있는 실행이다. 같은 실행을 두 모델이 다르게 설명하는 자리가 PR 이 바꾼 표시 하나뿐이라는 뜻이다. 포기가 없는 실행은 두 모델 모두 설명한다(바뀐 갈래를 안 지남).
+- **확인하지 못한 것**: 스레드 사이에 겹친 구간이 한 번도 없었다. 깨우기와 타임아웃을 같은 순간에 맞춘 39회도 BCB mutex·엔트리 lock 이 순서를 정해, 행동 구간이 겹치지 않았다. 그래서 대응표(행동 ↔ 코드)는 실행으로 확인됐지만, 엇갈림에 대한 결론(교착 없음·`FlagComplete` 등)은 여전히 **모델 안에서만** 확인한 것이다. CBRD-27739 의 두 엇갈림(아래)도 이 실행에서 일어나지 않았다.
+
 ## 모델이 보지 않는 것
 - **포기 쪽의 엔트리 락 없는 확인(CBRD-27739 원인 A)**: `pgbuf_timed_sleep ()` 의 타임아웃 갈래는 `thread_suspend_timeout_wakeup_and_unlock_entry ()` 가 엔트리 락을 풀고 돌아온 뒤 락 없이 `resume_status` 를 보고 `request_latch_mode` 를 쓴다. 모델은 확인과 쓰기를 한 걸음(`GiveUpStart`)으로 두었다 — 깨우는 쪽과의 그 엇갈림은 CBRD-27739 의 몫이다.
 - **승계 루프가 엔트리 락 전에 fcnt 를 더하는 순서(CBRD-27739 원인 B)**: `Succ` 는 READ 대기자의 확인과 fcnt 더하기를 한 걸음으로 두었다. 단위 suite `unit/storage/page_buffer.timed_sleep_error_handling` 의 R1 이 그 순서를 실제 함수로 재현한다(develop 동일).

@@ -1,0 +1,176 @@
+diff --git a/src/storage/page_buffer.c b/src/storage/page_buffer.c
+index ae4f1313f..2f5ea288a 100644
+--- a/src/storage/page_buffer.c
++++ b/src/storage/page_buffer.c
+@@ -79,6 +79,13 @@
+ // XXX: SHOULD BE THE LAST INCLUDE HEADER
+ #include "memory_wrapper.hpp"
+ 
++/* TLA+ trace (dev4 tla/storage/latch_waiter_flag/trace) -- instrument.patch only, never committed */
++#include "tla_trace.h"
++#if defined (TLA_TRACE) && defined (SERVER_MODE)
++static __thread uint64_t tla_fix_t0_, tla_sleep_t0_, tla_giveup_t0_, tla_unfix_t0_;
++#define TLA_WHO(th) ((th)->index)
++#endif
++
+ const VPID vpid_Null_vpid = { NULL_PAGEID, NULL_VOLID };
+ 
+ /* minimum number of buffers */
+@@ -6961,6 +6968,26 @@ exit_on_error:
+  *       of the page that BCB points is P_BPLEAF, latch BCB with latch
+  *       mode LeafLatchMode.
+  */
++#if defined (TLA_TRACE) && defined (SERVER_MODE)
++/* the model's view of the BCB: mode, fcnt, waiter_exists, the wait queue as thread indexes (front first) */
++static const char *
++tla_bcb_state_ (PGBUF_BCB * bcb, char *buf, size_t len)
++{
++  PGBUF_ATOMIC_LATCH_IMPL impl = get_impl (&bcb->atomic_latch);
++  const char *m = impl.impl.latch_mode == PGBUF_LATCH_READ ? "R" : impl.impl.latch_mode == PGBUF_LATCH_WRITE ? "W"
++    : impl.impl.latch_mode == PGBUF_NO_LATCH ? "N" : "X";
++  int n = snprintf (buf, len, "\"mode\":\"%s\",\"fcnt\":%d,\"wex\":%s,\"q\":[", m, (int) impl.impl.fcnt,
++		    impl.impl.waiter_exists ? "true" : "false");
++  THREAD_ENTRY *t;
++  for (t = bcb->next_wait_thrd; t != NULL && n < (int) len - 16; t = t->next_wait_thrd)
++    {
++      n += snprintf (buf + n, len - n, "%s%d", t == bcb->next_wait_thrd ? "" : ",", TLA_WHO (t));
++    }
++  snprintf (buf + n, len - n, "]");
++  return buf;
++}
++#endif
++
+ STATIC_INLINE int
+ pgbuf_latch_bcb_upon_fix (THREAD_ENTRY * thread_p, PGBUF_BCB * bufptr, PGBUF_LATCH_MODE request_mode,
+ 			  int buf_lock_acquired, PGBUF_LATCH_CONDITION condition, bool * is_latch_wait)
+@@ -6983,6 +7010,9 @@ pgbuf_latch_bcb_upon_fix (THREAD_ENTRY * thread_p, PGBUF_BCB * bufptr, PGBUF_LAT
+   assert (is_latch_wait != NULL);
+ 
+   *is_latch_wait = false;
++#if defined (TLA_TRACE) && defined (SERVER_MODE)
++  tla_fix_t0_ = tla_trace_now_ ();	/* Fix: the caller holds the BCB mutex */
++#endif
+   holder = pgbuf_find_thrd_holder (thread_p, bufptr);
+ #if defined (SERVER_MODE)
+   /* fail-closed safety net: an idle bcb (PGBUF_NO_LATCH) with an EMPTY wait queue must never carry
+@@ -7121,6 +7151,16 @@ pgbuf_latch_bcb_upon_fix (THREAD_ENTRY * thread_p, PGBUF_BCB * bufptr, PGBUF_LAT
+ 
+   buf_is_dirty = pgbuf_bcb_is_dirty (bufptr);
+ 
++#if defined (TLA_TRACE) && defined (SERVER_MODE)
++  if (is_page_idle || can_latch)
++    {
++      char tla_st[256];
++      char tla_a[64];
++      snprintf (tla_a, sizeof (tla_a), "\"who\":%d,\"kind\":\"%s\"", TLA_WHO (thread_p), request_mode == PGBUF_LATCH_READ ? "R" : "W");
++      TLA_TRACE_END_ARGS (tla_fix_t0_, "Fix", "%s", tla_a, "%s", tla_bcb_state_ (bufptr, tla_st, sizeof (tla_st)));
++    }
++#endif
++
+   if (is_page_idle)
+     {
+       PGBUF_BCB_UNLOCK (bufptr);
+@@ -7331,6 +7371,9 @@ pgbuf_unlatch_bcb_upon_unfix (THREAD_ENTRY * thread_p, PGBUF_BCB * bufptr, int h
+   bool blocked_reader_writer = false, is_zero_fcnt = false;
+ 
+   assert (holder_status == NO_ERROR);
++#if defined (TLA_TRACE) && defined (SERVER_MODE)
++  tla_unfix_t0_ = tla_trace_now_ ();	/* Unfix: the caller holds the BCB mutex */
++#endif
+ 
+   /* the caller is holding bufptr->mutex */
+ 
+@@ -7522,6 +7565,12 @@ pgbuf_unlatch_bcb_upon_unfix (THREAD_ENTRY * thread_p, PGBUF_BCB * bufptr, int h
+ #endif /* SERVER_MODE */
+     }
+ 
++#if defined (TLA_TRACE) && defined (SERVER_MODE)
++  {
++    char tla_st[256];
++    TLA_TRACE_END_ARGS (tla_unfix_t0_, "Unfix", "\"who\":%d", TLA_WHO (thread_p), "%s", tla_bcb_state_ (bufptr, tla_st, sizeof (tla_st)));
++  }
++#endif
+   assert (get_latch (&bufptr->atomic_latch) != PGBUF_LATCH_FLUSH);
+ 
+   if (pgbuf_bcb_is_async_flush_request (bufptr))
+@@ -7762,6 +7811,15 @@ pgbuf_block_bcb (THREAD_ENTRY * thread_p, PGBUF_BCB * bufptr, PGBUF_LATCH_MODE r
+ 	}
+     }
+ 
++#if defined (TLA_TRACE)
++  if (request_mode != PGBUF_LATCH_FLUSH && !as_promote)
++    {
++      char tla_st[256];
++      char tla_a[64];
++      snprintf (tla_a, sizeof (tla_a), "\"who\":%d,\"kind\":\"%s\"", TLA_WHO (thread_p), request_mode == PGBUF_LATCH_READ ? "R" : "W");
++      TLA_TRACE_END_ARGS (tla_fix_t0_, "Fix", "%s", tla_a, "%s", tla_bcb_state_ (bufptr, tla_st, sizeof (tla_st)));
++    }
++#endif
+   if (request_mode == PGBUF_LATCH_FLUSH)
+     {
+       /* is it safe to use infinite wait instead of timed sleep? */
+@@ -7864,6 +7922,9 @@ pgbuf_timed_sleep_error_handling (THREAD_ENTRY * thrd_entry, PGBUF_BCB * bufptr)
+   bool can_grant = false;
+ 
+   PGBUF_BCB_LOCK (bufptr);
++#if defined (TLA_TRACE)
++  tla_giveup_t0_ = tla_trace_now_ ();	/* GiveUp: ends in pgbuf_timed_sleep () before it releases the BCB mutex */
++#endif
+ 
+   /* case 1 : empty waiting queue */
+   if (bufptr->next_wait_thrd == NULL)
+@@ -7990,6 +8051,9 @@ try_again:
+ 
+   thread_p->resume_status = THREAD_PGBUF_SUSPENDED;
+   r = thread_suspend_timeout_wakeup_and_unlock_entry (thread_p, &to, THREAD_PGBUF_SUSPENDED);
++#if defined (TLA_TRACE)
++  tla_sleep_t0_ = tla_trace_now_ ();	/* Woken or GiveUpStart */
++#endif
+ 
+   if (r == NO_ERROR)
+     {
+@@ -7998,15 +8062,21 @@ try_again:
+       if (thread_p->resume_status == THREAD_PGBUF_RESUMED)
+ 	{
+ 	  thread_unlock_entry (thread_p);
++	  TLA_TRACE_END_ARGS (tla_sleep_t0_, "Woken", "\"who\":%d", TLA_WHO (thread_p), "%s", "");
+ 	  return NO_ERROR;
+ 	}
+ 
+       /* interrupt operation */
+       thread_p->request_latch_mode = PGBUF_NO_LATCH;
+       thread_unlock_entry (thread_p);
++      TLA_TRACE_END_ARGS (tla_sleep_t0_, "GiveUpStart", "\"who\":%d", TLA_WHO (thread_p), "%s", "");
+ 
+       if (pgbuf_timed_sleep_error_handling (thread_p, bufptr) == NO_ERROR)
+ 	{
++#if defined (TLA_TRACE)
++	  char tla_st[256];
++	  TLA_TRACE_END_ARGS (tla_giveup_t0_, "GiveUp", "\"who\":%d", TLA_WHO (thread_p), "%s", tla_bcb_state_ (bufptr, tla_st, sizeof (tla_st)));
++#endif
+ 	  PGBUF_BCB_UNLOCK (bufptr);
+ 	}
+ 
+@@ -8019,6 +8089,7 @@ try_again:
+       if (thread_p->resume_status == THREAD_PGBUF_RESUMED)
+ 	{
+ 	  thread_unlock_entry (thread_p);
++	  TLA_TRACE_END_ARGS (tla_sleep_t0_, "Woken", "\"who\":%d", TLA_WHO (thread_p), "%s", "");
+ 	  return NO_ERROR;
+ 	}
+ 
+@@ -8034,9 +8105,14 @@ try_again:
+       save_request_latch_mode = thread_p->request_latch_mode;
+       thread_p->request_latch_mode = PGBUF_NO_LATCH;
+       thread_unlock_entry (thread_p);
++      TLA_TRACE_END_ARGS (tla_sleep_t0_, "GiveUpStart", "\"who\":%d", TLA_WHO (thread_p), "%s", "");
+ 
+       if (pgbuf_timed_sleep_error_handling (thread_p, bufptr) == NO_ERROR)
+ 	{
++#if defined (TLA_TRACE)
++	  char tla_st[256];
++	  TLA_TRACE_END_ARGS (tla_giveup_t0_, "GiveUp", "\"who\":%d", TLA_WHO (thread_p), "%s", tla_bcb_state_ (bufptr, tla_st, sizeof (tla_st)));
++#endif
+ 	  goto er_set_return;
+ 	}
+ 
