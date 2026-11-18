@@ -15,6 +15,17 @@ import re as _re
 from . import codegraph as CG, reachability as R, adjudicate as AD, context_pack as CP
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+
+def in_plan_scope(file, name, plan_fns):
+    """그래프의 함수 이름이 plan.changes 에 있나 — C++ 메서드는 'class::method'(클래스 본문은 'class::?')로 오고,
+    plan 토큰은 식별자 단위라 '::' 로 나눈 조각이 모두(‘?’ 제외) 그 파일의 plan 토큰이어야 한다
+    (2026-11-18 CBRD-28184: px_scan_trace_handler 메서드 8개가 plan 에 적혀 있는데도 범위 밖으로 걸림)."""
+    if (file, name) in plan_fns:
+        return True
+    parts = [t for t in name.split('::') if t and t != '?']
+    return len(parts) > 1 and all((file, t) in plan_fns for t in parts) or \
+        (len(parts) == 1 and '::' in name and (file, parts[0]) in plan_fns)
+
 def sh(*a, cwd=None): return subprocess.run(list(a), stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True, cwd=cwd)
 
 # ---- (6) 수명 있는 상태의 해제 경로 전수 (META-REVIEW PR#7658 → H-33) ----
@@ -260,7 +271,7 @@ def main():
         for f, lns in changed_lines.items():
             for fn in g_after.functions_in(f, lns):
                 touched.append(fn.fid)
-                if (fn.file, fn.name) not in plan_fns and fn.file not in plan_wild: fail('scope', f'plan 밖 함수 변경: {fn.fid}')
+                if not in_plan_scope(fn.file, fn.name, plan_fns) and fn.file not in plan_wild: fail('scope', f'plan 밖 함수 변경: {fn.fid}')
                 pa = R.latch_pairing(g_after, fn.fid); pb = R.latch_pairing(g_before, fn.fid) if g_before and g_before.function(fn.fid) else {}
                 delta = {k: pa.get(k, 0) - pb.get(k, 0) for k in set(pa) | set(pb) if pa.get(k, 0) != pb.get(k, 0)}
                 unbalanced = {k: v for k, v in pa.items() if v}
