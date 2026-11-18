@@ -16,13 +16,23 @@ from . import codegraph as CG, reachability as R, adjudicate as AD, context_pack
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 
+import re as _re_mod
+
+
 def in_plan_scope(file, name, plan_fns):
     """그래프의 함수 이름이 plan.changes 에 있나 — C++ 메서드는 'class::method'(클래스 본문은 'class::?')로 오고,
     plan 토큰은 식별자 단위라 '::' 로 나눈 조각이 모두(‘?’ 제외) 그 파일의 plan 토큰이어야 한다
     (2026-11-18 CBRD-28184: px_scan_trace_handler 메서드 8개가 plan 에 적혀 있는데도 범위 밖으로 걸림)."""
     if (file, name) in plan_fns:
         return True
-    parts = [t for t in name.split('::') if t and t != '?']
+    # 템플릿 인자는 떼고 본다: 'task<result_type, ST>::initialize' → task, initialize
+    bare = name
+    while True:
+        nb = _re_mod.sub(r'<[^<>]*>', '', bare)
+        if nb == bare:
+            break
+        bare = nb
+    parts = [t.strip() for t in bare.split('::') if t.strip() and t.strip() != '?']
     return len(parts) > 1 and all((file, t) in plan_fns for t in parts) or \
         (len(parts) == 1 and '::' in name and (file, parts[0]) in plan_fns)
 

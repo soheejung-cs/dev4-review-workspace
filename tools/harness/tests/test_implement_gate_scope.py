@@ -22,6 +22,11 @@ class InPlanScope(unittest.TestCase):
         self.assertTrue(in_plan_scope(F, 'accumulative_trace_storage::?', PLAN))
         self.assertFalse(in_plan_scope(F, 'other_class::?', PLAN))
 
+    def test_template_method(self):
+        plan = PLAN | {(F, 'task'), (F, 'initialize')}
+        self.assertTrue(in_plan_scope(F, 'task<result_type, ST>::initialize', plan))
+        self.assertFalse(in_plan_scope(F, 'task<result_type, ST>::finalize', plan))
+
     def test_other_file(self):
         self.assertFalse(in_plan_scope('src/q/b.cpp', 'trace_handler::add_trace', PLAN))
 
