@@ -1,0 +1,10 @@
+--- a/src/optimizer/rewriter/query_rewrite_term.c
++++ b/src/optimizer/rewriter/query_rewrite_term.c
+@@ -1075,7 +1075,6 @@
+     case PT_POWER:
+     case PT_POSITION:
+     case PT_FINDINSET:
+-    case PT_LOCATE:
+       /* NULL when any operand is NULL, the target column may be any of them (fetch_op_datediff (), fetch_op_locate (),
+        * db_power_dbval () and the others check every operand) */
+       values = QO_NULL_EVAL_STRICT (qo_null_eval_list (parser, arg1, target, true),

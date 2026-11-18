@@ -1,0 +1,29 @@
+{
+ "name": "PR#8609 (CBRD-28029) qo_null_eval_expr () NULL 거부 증명기의 연산자 분류 -- 기본(default) 갈래는 '목록에 없는 연산은 첫 피연산자가 NULL 이면 NULL'(fail-open, 사용자 결정 2026-11-18 Q7). N1 PT_OP_TYPE 전 열거자(PT_AND..PT_LAST_OPCODE) = 검토한 분류표(새 연산자는 이름으로 실패), N2 분류마다 switch 와 같은 동작(탐침), N3 대표 술어, N4 default 갈래",
+ "requires": [
+  "qo_null_eval_expr"
+ ],
+ "file": "src/optimizer/rewriter/query_rewrite_term.c",
+ "mode": "cs",
+ "seams": [],
+ "appendix": "hooks.cpp",
+ "test": "test.cpp",
+ "extra": [
+  "src/base/system_parameter.c"
+ ],
+ "watch": [
+  "src/parser/parse_tree.h"
+ ],
+ "fakes": "진짜: query_rewrite_term.c(TU: qo_null_eval·qo_null_eval_expr·_list·_combine·_map·_quantified·qo_null_target_matches), system_parameter.c(prm_get_bool_value 의 prm_Def — oracle_style_empty_string 기본값 false). 가짜: cubregex::get_engine_name(system_parameter.c 정적 초기화가 부름, or_extract_gate 와 같음). 이음매 없음. 노드는 calloc 한 PT_NODE(파서 없음), 대상은 spec id 1 의 PT_NORMAL 열 전부(target.name NULL — pt_name_equal 안 부름). hooks.cpp 는 static qo_null_eval/_expr 래퍼와 TU 사본의 __FILE__(같은 리비전 worktree 의 parse_tree.h 를 읽어 열거자 이름을 얻는다).",
+ "note": "분류표를 바꿀 때: qo_null_eval_expr () 의 switch 를 고치면 test.cpp 의 T_* 표도 같이 옮긴다(N2 가 어긋난 연산자를 '이름 [분류] 탐침: got/class says' 로 낸다). 새 연산자를 parse_tree.h 에 더하면 N1 이 그 이름으로 실패한다 — NULL 동작을 정해 표의 한 분류(또는 첫 피연산자 NULL = NULL 이 맞으면 T_DEFAULT)에 넣는다. 열거자를 지우거나 이름을 바꾸면 test.cpp 가 컴파일되지 않는다(unit_regress 'suite 갱신 필요'). oracle_style_empty_string=yes 의 STRCAT/CONCAT/PLUS(문자열) = ANY 는 이 suite 가 보지 않는다(기본값만).",
+ "origin": {
+  "pr": 8609,
+  "jira": "CBRD-28029",
+  "finding": "사용자 결정 2026-11-18 Q7 — NULL 거부 증명기 기본값 fail-open 유지, 단위 suite 로 지킨다",
+  "comment": null,
+  "date": "2026-11-18",
+  "reviewed_head": "3a69da257",
+  "base": "25b933925",
+  "result": "2026-11-18: head 3a69da257 4/4 PASS(분류표 284 연산자 = PT_LAST_OPCODE - PT_AND, 명시 87 + default 197; 탐침 통과), stub 호출 0. base 25b933925 는 qo_null_eval 이 없다(신설 코드 — compile-error, unit_regress 는 requires 로 '적용 안 됨'). 변이 3종 감도(mut_*.diff): m1 parse_tree.h 에 PT_NEW_TEST_OP 추가 -> N1 FAIL('PT_NEW_TEST_OP' 이름), m2 switch 에서 PT_LOCATE 를 빼 default 로 -> N2·N3 FAIL, m3 PT_UPPER 를 ANY 갈래로 -> N2('PT_UPPER [DEFAULT] op (x, 1, 1): got TFU, class says U')·N4 FAIL."
+ }
+}

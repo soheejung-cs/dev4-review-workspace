@@ -1,0 +1,10 @@
+--- a/src/optimizer/rewriter/query_rewrite_term.c
++++ b/src/optimizer/rewriter/query_rewrite_term.c
+@@ -1110,6 +1110,7 @@
+     case PT_SYS_CONNECT_BY_PATH:
+     case PT_PATH_EXPR_SET:
+     case PT_OID_OF_DUPLICATE_KEY:
++    case PT_UPPER:
+       /* can be other than NULL on a NULL operand, or reads another row */
+       return QO_NULL_EVAL_ANY;
+ 

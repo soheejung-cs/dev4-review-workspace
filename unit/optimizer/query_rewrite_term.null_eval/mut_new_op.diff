@@ -1,0 +1,10 @@
+--- a/src/parser/parse_tree.h
++++ b/src/parser/parse_tree.h
+@@ -1617,6 +1617,7 @@
+   PT_COLLECTION_TO_STRING,
+ 
+   /* This is the last entry. Please add a new one before it. */
++  PT_NEW_TEST_OP,
+   PT_LAST_OPCODE
+ } PT_OP_TYPE;
+ 
