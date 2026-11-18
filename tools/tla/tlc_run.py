@@ -48,7 +48,7 @@ DEFAULT_JAR = os.path.expanduser('~/tools/tla/tla2tools.jar')
 DEFAULT_WORKERS = 2
 # 리뷰 단계 한 번에 쓰는 시간 상한. 넘으면 범위를 줄이라는 뜻이다(규칙: 큰 모델은 따로 돌리고 리뷰에는 결과만).
 DEFAULT_TIMEOUT = 600
-# 컨테이너 메모리 한도 64GiB(메모리 rules/메모리-과다-테스트-금지). JVM 기본 최대 힙은 호스트 메모리의 1/4(188G → 47G)이라 묶는다.
+# 컨테이너 메모리 한도 64GiB(자가진화 규칙 #151). JVM 기본 최대 힙은 호스트 메모리의 1/4(188G → 47G)이라 묶는다.
 DEFAULT_HEAP = '8g'
 # v1.7.4 tla2tools.jar — 2026-11-10 .52 에 사용자가 받은 파일(크기 2274532 = GitHub 릴리스 자산 크기). 다르면 받다 깨졌거나 다른 판이다.
 PINNED_SHA256 = '936a262061c914694dfd669a543be24573c45d5aa0ff20a8b96b23d01e050e88'

@@ -45,7 +45,7 @@ python3 -m tools.harness.implement_pack --key CBRD-n --pr <PR>      # 리뷰 대
 
 ## S3. 구현
 - plan 의 `changes[]` 함수만 고친다. C 파일은 C 스타일(모던 C++ 관용구 금지), 성능규칙집은 **해당 축만**(핫패스일 때). 새 서버 요청은 3파일 계약(network.h·network_sr.c·network_interface_sr/cl).
-- 주석은 "왜"를 적는다(리뷰 하네스가 `why` 를 요구하듯). 저수준(pgbuf/heap/MVCC)은 검증된 코드 재사용(규칙 `저수준-검증된코드-재사용`).
+- 주석은 "왜"를 적는다(리뷰 하네스가 `why` 를 요구하듯). 저수준(pgbuf/heap/MVCC)은 검증된 코드 재사용(규칙 자가진화 규칙 #154).
 - **커밋 단위**: 리뷰 대응은 "지적 묶음 1커밋 + 성능 변경 1커밋" 처럼 나눈다. **헝크로 쪼개 커밋을 만들면(`git diff -U0` + `apply --cached`) 조각 커밋이 컴파일되지 않을 수 있다** — 쪼갠 커밋은 S4 의 `compile_check --commits` 로 각각 컴파일하거나, 편집 스크립트를 커밋 단위로 다시 적용해 만든다.
 - TC: plan.tests 를 `cubrid-testcases(-private-ex)` 의 해당 카테고리 형식으로. shell TC 는 `write_ok "<케이스> : <무엇>"`.
   shell TC 는 **private-ex 룰북을 먼저 읽는다**(`shell/AGENTS.md` → `shell/rules/test-perspectives.md`·`writing-rules.md`): 새 버그 수정 TC 는 쓰는 날의 반기 디렉터리 `shell/_06_issues/_<yy>_<1|2>h/`, release·debug 둘 다 CTP, **버그 수정이면 수정 없는 develop NOK·수정 빌드 OK 를 TC PR 에**, SQL 만으로 되는 시나리오는 sql TC 로. **TC push 는 엔진 PR 의 TC Branch Sync 가 끝나 Draft TC PR 이 생긴 뒤**(규칙 #058, H-91). **TC 파일을 `tc/pr-<n>` 에 push 했으면 그 TC PR 의 본문·제목을 같이 갱신한다** — 봇 기본 본문·`Draft: TC changes for PR` 제목을 남기지 않는다(사용자 지시 2026-11-03, 정본 메모리 PR브랜치-규칙 §3, 머지 전 검사 `tools/merge_gate.py` 4)). 쓰는 법: [`references/TC-PR-본문.md`](../../references/TC-PR-본문.md).
@@ -64,7 +64,7 @@ python3 -m tools.harness.implement_gate --plan <out>/plan.json [--base HEAD|upst
 
 ## S5. 자기 리뷰 → PR
 1. 커밋(브랜치 확인 — detached 면 `git checkout -B CBRD-n HEAD` 먼저) → `git push origin CBRD-n` → **draft PR**(PR브랜치-규칙 §3: 본문 한국어, Purpose/Implementation/Remarks, 리뷰어 지정 안 함, `gh api PATCH` 로 본문).
-   성능 PR 에 다른 DB 대비 측정이 있으면 그 수치는 **PR 본문의 절 하나**(`(머지 메시지에 넣지 않음)` 표시)에만 쓴다 — 코드 주석·커밋 메시지·머지 메시지·코멘트·답글에는 쓰지 않는다(사용자 지시 2026-10-27, 정본 claude-workspace `memory/rules/참조DB-표기.md`, guard 규칙 9·10 이 막는다).
+   성능 PR 에 다른 DB 대비 측정이 있으면 그 수치는 **PR 본문의 절 하나**(`(머지 메시지에 넣지 않음)` 표시)에만 쓴다 — 코드 주석·커밋 메시지·머지 메시지·코멘트·답글에는 쓰지 않는다(사용자 지시 2026-10-27, 정본 claude-workspace `claude-workspace/hooks/참조DB-표기.md`, guard 규칙 9·10 이 막는다).
 2. **`/harness-review <내 PR>`** 을 그대로 돈다. 🟡 이상이 나오면 게시하지 말고 고쳐 S4 부터(상한 2회). 자기 리뷰의 finding 은 PR 본문 Remarks 에 "자기 리뷰에서 걸러낸 것" 으로 한 줄 남긴다(무엇을 고쳤나). push 전엔 `python3 -m tools.harness.run full --pr <PR> --sha <로컬 rev> --base <머지 커밋>` 으로 **미push 커밋만의 팩**을 만들어 자기 리뷰한다(2026-09-30). 게이트는 `--commits base..head` 로 커밋마다 컴파일까지.
    기존 PR 이면 draft 전환·리뷰어 지정을 건드리지 않는다. 답글 초안(스레드별)·PR 본문 갱신분·resolve 요청은 `projects/CBRD-n/리뷰대응-YYYYMMDD/` 에 두고 **게시는 사용자 승인 후**(`review-response`).
 3. 사용자 승인 후 draft 해제. TC PR(`tc/pr-<n>`) 은 Merge Gate 순서(TC 먼저) — 엔진 PR 이 CI·머지 조건을 다 갖춘 뒤 TC PR 을 머지하고 엔진 PR 을 곧바로 이어서(룰북 「The PR」). 바꿀 TC 가 없는 리포의 Draft TC PR 은 **닫지 않고, 결정 요청·남은 일에도 넣지 않는다** — 사용자가 머지할 때 닫는다(사용자 지시 2026-11-10; 메모리 PR브랜치-규칙 §5; 2026-11-03 .50 PR#8378 에서 에이전트가 private-ex #4710 을 닫았다가 사용자 계정이 다시 열었다).

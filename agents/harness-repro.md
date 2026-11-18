@@ -23,4 +23,4 @@ develop 설치본·PR 설치본 경로(둘 다 `BUILD_REV` 로 리비전을 먼�
 
 ## 하지 않는 것
 - 서버 기동(CS 가 꼭 필요하면 메인 루프에 요청), CTP·벤치, 코드 수정, 게시.
-- **메모리 상한을 넘는 스트레스** — 바인드 ≤200 · 중첩 ≤100 · VALUES ≤100행(memory `rules/메모리-과다-테스트-금지`, 넘으면 메인 루프에 묻는다). 사용량은 `cat /sys/fs/cgroup/memory/memory.usage_in_bytes`(cgroup v1 — .50 확인, 다른 컨테이너는 미확인).
+- **메모리 상한을 넘는 스트레스** — 바인드 ≤200 · 중첩 ≤100 · VALUES ≤100행(자가진화 규칙 #151, 넘으면 메인 루프에 묻는다). 사용량은 `cat /sys/fs/cgroup/memory/memory.usage_in_bytes`(cgroup v1 — .50 확인, 다른 컨테이너는 미확인).

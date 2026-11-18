@@ -84,7 +84,7 @@ python3 -m tools.harness.annotate --pr <N> --head <sha> --notes notes.json --pus
 ```
 base `review/pr<N>-base`(merge-base) ← head `review/pr<N>-ko`(PR head + 주석 커밋).
 **upstream 에 열지 않는다** — 팀 PR 목록·알림에 끼지 않게 내 fork(`<gh 로그인>/cubrid`) 안에서 연다.
-**게시 승인을 요청할 때** §0 의 "사용자가 보게 되는 변화"(스펙·오류 코드·매뉴얼)가 비어 있지 않으면 그것만 `스펙 변화 확인:` 블록(AS-IS → TO-BE, 의도/부수)으로 다시 짚는다(메모리 `스펙변화-리마인드`).
+**게시 승인을 요청할 때** §0 의 "사용자가 보게 되는 변화"(스펙·오류 코드·매뉴얼)가 비어 있지 않으면 그것만 `스펙 변화 확인:` 블록(AS-IS → TO-BE, 의도/부수)으로 다시 짚는다(자가진화 규칙 #158).
 
 **보고서 본문**: 지적(Findings)은 **`### [설계 리뷰]` 와 `### [코드 리뷰]` 로 나눈다**(설계 층은 영역 판정 문장으로 시작). **한 지적 = 파일:라인 + 한 문장 + 근거**, 중요도는 `review-response` 「게시 형식」 의 🔴/🟡/🟢. 끝에 `## 돌릴 것 (제안 -- 확인 후 실행)` 을 붙여 `review-testing` 매트릭스 제안을 적고 요청자 확인을 받는다. 리뷰를 마칠 때 `skills/self-evolution` 루프를 돌려 `[회고 및 자가진화 리포트]`(RCA·사이드이펙트 도감·신규 규칙·하네스 반영)를 덧붙이고 규칙은 `references/자가진화-규칙.md` 에 등록한다(2026-10-23). 예: `examples/리뷰보고서-예시-PR7899.md`. 보고서는 `claude-workspace/projects/<JIRA>/리뷰보고서-PR<n>.md` 에 둔다(보드가 찾는다).
 - 답글: `review-response` 스킬 형식으로 **사용자 검토 후** 게시.

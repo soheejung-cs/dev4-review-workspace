@@ -33,7 +33,7 @@ description: 적대적 SQL 차분 테스트 — 같은 SQL 세트를 develop·PR
 | **모드 on/off** | `modes.sh`: 기본 / oracle 호환 / concat·escape·normalization·string_max / `max_plan_cache_entries=0` / `max_plan_cache_clones=0` (+ `review-testing` §1-1 의 신호별 모드) | 모드에 따라 원인 오류 대신 내부 오류 코드, 오류 인자가 빈 문자열 |
 | **세션 파라미터** | `SET NAMES`, `SET SYSTEM PARAMETERS`, 세션변수 `@v` 타입 바꿈(INT→'3'→2.5→NULL), 같은 PREPARE 유지 | 같은 PREPARE 결과가 바뀐 세션 값·타입을 PR 본문 의도와 다르게 따른다 |
 | **실행 사이 스키마 변경** | 같은 PREPARE 두고 `ALTER TABLE MODIFY` 타입 변경·`CREATE INDEX`·`ADD COLUMN`·`UPDATE STATISTICS` | 재실행이 새 열 타입을 따라가지 않는다 |
-| **특수 타입** | ENUM·SET·JSON·BIT VARYING·DATE/TIME/TIMESTAMP/DATETIME 교차, 날짜 산술, 인덱스 키 변환(10 / 10.0 / '10' / ' 10' / '1e1'), 바인드 IN(≤200개 — 메모리-과다-테스트-금지), `LIMIT ?, ?` | develop 과 다른 값·오류 |
+| **특수 타입** | ENUM·SET·JSON·BIT VARYING·DATE/TIME/TIMESTAMP/DATETIME 교차, 날짜 산술, 인덱스 키 변환(10 / 10.0 / '10' / ' 10' / '1e1'), 바인드 IN(≤200개 — 자가진화 규칙 #151), `LIMIT ?, ?` | develop 과 다른 값·오류 |
 | **수명·메모리** | `lifetime.sh`: 문장 1000개 PREPARE/EXECUTE×4/DEALLOCATE + 고유 문장 200개 × 6라운드, 오류 경로 600회 × 3 | RSS 가 1라운드 뒤에도 오른다, plandump churn 비정상 |
 | **PL/Java** | `loadjava` + `CREATE FUNCTION` + PREPARE 로 인자 타입 확인 함수(`BigDecimal.scale()` 등) | 받는 인자 타입이 develop 과 다르다(`int` 원시 인자 NULL 은 설계 오류) |
 

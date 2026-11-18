@@ -12,7 +12,7 @@ description: 세션에서 나온 것을 어디에 어떤 형식으로 남기는�
 |---|---|---|
 | 리뷰 답글 원문, 설계 리뷰 덱, 재현 스크립트, 결정 상태 | `claude-workspace/projects/CBRD-XXXXX/` (**프로젝트 디렉터리는 옮기지 않는다**) | `세션기록-YYYYMMDD.md`, `repro/*.sh`, `설계리뷰-덱.html`, `prNNNN_*.md` |
 | **검증된 코드 사실**(함수 계약, 락 수준, 카탈로그 스키마, 함정) | `dev4-ai-source/staging/<이름>-<이슈>.md` → 모듈 `§2·§3` (규약 `staging/README.md`·`skills/source-learning`) | 출처 컨테이너 + 기준 리비전, 미수정 상태 명시 |
-| **일하는 방식**(재현 순서, 문체, 사용자 지시) | 리뷰 방식이면 **이 리포 `skills/*/SKILL.md`**, 그 외는 `claude-workspace/memory/rules|howto` | 지시 날짜와 Why |
+| **일하는 방식**(재현 순서, 문체, 사용자 지시) | 판단 규칙은 **`references/자가진화-규칙.md` #NNN**, 절차는 그 스킬(리뷰면 이 리포 `skills/*/SKILL.md`, 빌드·측정·PR·TC 는 claude-workspace 스킬 문서), 기계로 막을 것은 대기열 H-NN. 메모리 `rules/` 새 파일은 훅이 막는다(guard 15, 2026-11-18) | 지시 날짜와 Why |
 | **리뷰가 잡아준 것**(사례: 지적 → 검증 → 고침 → 승격) | **`references/리뷰에서-배운것.md`** — 답글 게시와 한 세트 (`review-response` §7) | 맨 아래에 append, 항목마다 ①지적 ②검증 ③고친 것 ④승격(`→ 승격: <파일 §> / 규칙 #NNN`, 아직이면 일반화 문장) |
 | **다음 작업에 바로 쓸 규칙**(조건 → 금지/적용) | `references/자가진화-규칙.md` (`skills/self-evolution`) | 형식·기계화 판정은 self-evolution 3·4단계 |
 | **환경 함정**(재발 방지가 중요한 것) | 상세(현상·원인·우회·사고 이력)는 `claude-workspace/하네스-패치-대기열.md` 행(H-NN), 상시 로드 「함정」 절(`claude-workspace/공통-CLAUDE.md`, 한 컨테이너만이면 `hosts/<끝자리>.md`)에는 **한 줄 + (H-NN)** — 패치는 묶어서 | 실측 날짜·컨테이너 |

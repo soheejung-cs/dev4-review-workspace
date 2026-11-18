@@ -57,7 +57,7 @@ description: 리뷰 검증 규율 — 이 PR 에 무엇을 돌릴지(CTP sql/med
 | 동시성 재현 | 어느 컨테이너나, **demodb 또는 버릴 DB** | 벤치 볼륨에 재현하지 않는다 |
 
 ## 3. 측정 계약 (어기면 수치 무효)
-정본(상세·근거)은 `claude-workspace` 메모리 `rules/측정-규칙.md`·`howto/벤치마크-실행.md`(비공개) — 아래는 리뷰에 필요한 요약이고, 어긋나면 정본이 이긴다.
+정본(상세·근거)은 `claude-workspace` 메모리 `claude-workspace/skills/cubrid-server/측정-규칙.md`·`howto/벤치마크-실행.md`(비공개) — 아래는 리뷰에 필요한 요약이고, 어긋나면 정본이 이긴다.
 1. `~/bin/host_idle_guard.sh --wait 180` — 세 컨테이너가 한 물리 호스트·같은 `taskset -c 0-15` 를 쓴다. A/B 는 **팔마다** 게이트.
 2. 통계는 `UPDATE STATISTICS ON t WITH FULLSCAN, 300 BUCKETS` 표준 → **서버 재기동**(XASL 캐시가 옛 플랜을 쓴다).
 3. run 반복 median + MAD, 질의별 부호 분포 확인, 쏠리면 **순서 반전**. 1회 측정으로 판정하지 않는다.
@@ -66,7 +66,7 @@ description: 리뷰 검증 규율 — 이 PR 에 무엇을 돌릴지(CTP sql/med
 6. 빌드는 `goto <rev> release|debug`, 검증은 **release 로 성능·debug 로 assert** 둘 다.
 
 ## 4. CTP 판정 규칙
-정본은 메모리 `rules/테스트TC-규칙.md` §0·§1(비공개). CTP conf 잔재와 shell TC 단독 실행의 실측 기록은 메모리 `hosts/컨테이너-51.md` 「CTP — .51 고유」(2026-10-27 테스트TC-규칙 §6 에서 이관).
+정본은 메모리 `claude-workspace/skills/cubrid-ctp/테스트TC-규칙.md` §0·§1(비공개). CTP conf 잔재와 shell TC 단독 실행의 실측 기록은 메모리 `hosts/컨테이너-51.md` 「CTP — .51 고유」(2026-10-27 테스트TC-규칙 §6 에서 이관).
 - 로컬 CTP 는 **코어 발생 여부만** 본다. NOK 는 CI(`tc/pr-<n>` 짝)의 몫 — 단 NOK 가 수백 건이면 원인 분류(`tc-analysis`)는 한다(예: 2026-09-16 `-494` 캐스케이드는 PL 연결 잔존).
 - fault-injection 코어(`fi_handler_random_exit`)는 결함이 아니다.
 - **CTP 가 `$CUBRID/conf` 를 바꿔 놓는다** — `ha_mode=yes`·`port 1822`, `cubrid_locales.txt` 도 CTP 의 `make_locale` 이 채운다(그대로 두면 설치본 콜레이션 수가 DB 와 어긋나 `Number of collations do not match` 로 기동 실패). CTP 를 돌리기 전에 `conf/` 를 백업하고 끝나면 되돌린다.
