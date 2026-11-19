@@ -1,6 +1,6 @@
 --- a/src/transaction/locator_sr.c
 +++ b/src/transaction/locator_sr.c
-@@ -4143,15 +4143,6 @@
+@@ -4274,15 +4274,6 @@
  		}
  	    }
  
@@ -15,11 +15,11 @@
 -
  	  /* a NULL btid: no partition can hold the key */
  	  ret = BTID_IS_NULL (&local_btid) ? BTREE_KEY_NOTFOUND
- 	    : xbtree_find_unique (thread_p, &local_btid, S_SELECT_WITH_LOCK, key_dbvalue, &part_oid, &unique_oid, true);
-@@ -4187,6 +4178,14 @@
+ 	    : xbtree_find_unique_fk_existence (thread_p, &local_btid, key_dbvalue, &part_oid, &unique_oid, true);
+@@ -4317,6 +4308,14 @@
+ 	      goto error;
  	    }
  	  assert (ret == BTREE_KEY_FOUND);
- 	  /* TODO: For read committed... Do we need to keep the lock? */
 +	  /* the class representation and the pruning context only lead to the index to search: release them for this
 +	   * key, or each key but the last leaves the cache entry of its referenced class fixed */
 +	  if (clear_pcontext == true)

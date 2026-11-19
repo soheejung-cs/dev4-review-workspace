@@ -6,9 +6,12 @@
  * touched - every function it calls lives in another TU (heap_file.c, partition.c, btree.c, object_primitive.c,
  * log_tran_table.c, error_manager.c, memory_alloc.c) and is a fake in test.cpp.
  */
+/* develop after #8198 (CBRD-27463) takes the attributes an UPDATE assigns: NULL checks every foreign key, as an INSERT
+ * does -- the contract this suite pins */
 int
 unitseam_locator_check_foreign_key (THREAD_ENTRY * thread_p, HFID * hfid, OID * class_oid, OID * inst_oid,
 				    RECDES * recdes, RECDES * new_recdes, bool * is_cached, LC_COPYAREA ** copyarea)
 {
-  return locator_check_foreign_key (thread_p, hfid, class_oid, inst_oid, recdes, new_recdes, is_cached, copyarea);
+  return locator_check_foreign_key (thread_p, hfid, class_oid, inst_oid, recdes, new_recdes, is_cached, copyarea,
+				    NULL, 0);
 }

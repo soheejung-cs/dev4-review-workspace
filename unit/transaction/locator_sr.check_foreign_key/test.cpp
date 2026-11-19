@@ -6,8 +6,10 @@
  * fixes (heap_classrepr_get of the referenced class) is freed, and the pruning context of a partitioned referenced
  * class is cleared for each key -- nothing is left when the function returns, on the found path and on every exit
  * (ER_FK_INVALID, the log applier's go-on, a B-tree error, the error paths between the fix and the release).
- * Unchanged by the PR (body "Implementation"): error codes, the ER_FK_INVALID message, the lock (S_SELECT_WITH_LOCK),
- * the order of the checks, the index searched (the pruned partition's PK).
+ * Unchanged by the PR (body "Implementation"): error codes, the ER_FK_INVALID message, the order of the checks, the
+ * index searched (the pruned partition's PK). The lock is not the PR's: the parent search took S_SELECT_WITH_LOCK until
+ * CBRD-27463 (#8198) made it xbtree_find_unique_fk_existence, which checks the parent key without locking its row --
+ * K1 and R1 expect that search since the 2026-11-19 refresh (develop 5f5a345cf).
  * Second commit 196989e1a (self-review G1-01): the key value of a multi-column foreign key owns a buffer when the row
  * record is longer than DBVAL_BUFSIZE (heap_attrvalue_get_key allocates it); the error label clears the key value, so
  * the error exits between reading a key and finishing it (pruning, loading the pruning context, fixing the class
@@ -52,6 +54,8 @@
  *       check's own fixes and pruning-context resources are live at that moment; FOUND when the (PK root page, key)
  *       row was scripted, else NOTFOUND; BTREE_ERROR_OCCURRED with er_set (ER_LK_UNILATERALLY_ABORTED) at the
  *       scripted search (a deadlock victim while locking the parent row).
+ *   xbtree_find_unique_fk_existence (develop after #8198 -- the only parent search the function makes): the same record
+ *       and result as xbtree_find_unique, marked fk_existence (op recorded as S_SELECT: the real call takes no scan op).
  *   btree_multicol_key_has_null: the scripted NULL element of the key just read.
  *   pr_valstring: a malloc'ed print of the key (counted); db_private_free (_release | _debug): frees it (counted).
  *   pr_clear_value (object_primitive.c 1867-2023): NULL -> nothing; else MIDXKEY: a buf with need_clear is freed
@@ -134,6 +138,7 @@ namespace
     OID class_oid;
     SCAN_OPERATION_TYPE op;
     bool all_class;
+    bool fk_existence;		/* through xbtree_find_unique_fk_existence: no row lock (CBRD-27463) */
     bool key_is_read_key;	/* the key searched is the one heap_attrvalue_get_key returned */
     int key_id;
     int own_fixes;		/* this check's heap_classrepr_get fixes not yet freed */
@@ -900,6 +905,7 @@ xbtree_find_unique (THREAD_ENTRY * thread_p, BTID * btid, SCAN_OPERATION_TYPE sc
   s.class_oid = *class_oid;
   s.op = scan_op_type;
   s.all_class = is_all_class_srch;
+  s.fk_existence = false;
   s.key_is_read_key = (key == W.cur_key);
   s.key_id = key_identity (key);
   s.own_fixes = W.get_ok - W.free_ok;
@@ -917,6 +923,16 @@ xbtree_find_unique (THREAD_ENTRY * thread_p, BTID * btid, SCAN_OPERATION_TYPE sc
       return BTREE_KEY_FOUND;
     }
   return BTREE_KEY_NOTFOUND;
+}
+
+/* develop after #8198 (CBRD-27463): the parent search, without a row lock and without a scan op */
+BTREE_SEARCH
+xbtree_find_unique_fk_existence (THREAD_ENTRY * thread_p, BTID * btid, DB_VALUE * key, OID * class_oid, OID * oid,
+				 bool is_all_class_srch)
+{
+  BTREE_SEARCH ret = xbtree_find_unique (thread_p, btid, S_SELECT, key, class_oid, oid, is_all_class_srch);
+  W.searches.back ().fk_existence = true;
+  return ret;
 }
 
 /* ======================================================================================================= checks */
@@ -955,7 +971,7 @@ fixes_of (int c)
 
 /* ======================================================================================================== cases */
 
-TEST_CASE ("K1 정상: 일반 부모 FK 1개 - 부모 PK 를 S_SELECT_WITH_LOCK 으로 한 번 찾고 고정 1·해제 1", "[contract]")
+TEST_CASE ("K1 정상: 일반 부모 FK 1개 - 부모 PK 를 락 없는 존재 확인(CBRD-27463)으로 한 번 찾고 고정 1·해제 1", "[contract]")
 {
   reset ();
   W.child = add_class ();
@@ -968,7 +984,7 @@ TEST_CASE ("K1 정상: 일반 부모 FK 1개 - 부모 PK 를 S_SELECT_WITH_LOCK 
   REQUIRE (W.searches.size () == 1);
   CHECK (BTID_IS_EQUAL (&W.searches[0].btid, &W.cls[p].pk));
   CHECK (OID_EQ (&W.searches[0].class_oid, &W.cls[p].oid));
-  CHECK (W.searches[0].op == S_SELECT_WITH_LOCK);
+  CHECK (W.searches[0].fk_existence);	/* CBRD-27463 (#8198): no row lock */
   CHECK (W.searches[0].all_class == true);
   CHECK (W.searches[0].key_is_read_key);
   CHECK (W.searches[0].key_id == 7);
@@ -1902,7 +1918,7 @@ namespace
   }
 }
 
-TEST_CASE ("R1 생성 시나리오 3000개: 반환 코드·탐색 순서(분할 PK·OID)·ER_FK_INVALID 메시지·락 모드가 문서된 동작과 같다(PR 이 바꾸지 않는 것)",
+TEST_CASE ("R1 생성 시나리오 3000개: 반환 코드·탐색 순서(분할 PK·OID)·ER_FK_INVALID 메시지·탐색 방식(락 없는 존재 확인)이 문서된 동작과 같다(PR 이 바꾸지 않는 것)",
 	   "[contract]")
 {
   std::mt19937 rng (8394);
@@ -1934,7 +1950,7 @@ TEST_CASE ("R1 생성 시나리오 3000개: 반환 코드·탐색 순서(분할 
       for (size_t i = 0; ok && i < W.searches.size (); i++)
 	{
 	  ok = W.searches[i].btid.root_pageid == e.searches[i].first && W.searches[i].class_oid.pageid == e.searches[i].second
-	    && W.searches[i].op == S_SELECT_WITH_LOCK && W.searches[i].all_class && W.searches[i].key_is_read_key;
+	    && W.searches[i].fk_existence && W.searches[i].all_class && W.searches[i].key_is_read_key;
 	}
       ok = ok && W.fk_msg_name == e.msg_name && W.fk_msg_value == e.msg_value;
       if (!ok)
