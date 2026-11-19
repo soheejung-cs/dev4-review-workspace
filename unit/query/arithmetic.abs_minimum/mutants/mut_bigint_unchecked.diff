@@ -1,0 +1,13 @@
+--- a/src/query/arithmetic.c
++++ b/src/query/arithmetic.c
+@@ -627,10 +627,6 @@
+       break;
+     case DB_TYPE_BIGINT:
+       bitmp = db_get_bigint (value);
+-      if (bitmp == DB_BIGINT_MIN)
+-	{
+-	  goto overflow;
+-	}
+       bitmp = llabs (bitmp);
+       db_make_bigint (result, bitmp);
+       break;

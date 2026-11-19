@@ -1,0 +1,10 @@
+--- a/src/query/arithmetic.c
++++ b/src/query/arithmetic.c
+@@ -693,7 +693,6 @@
+    * overflow as for a CAST */
+   if (prm_get_bool_value (PRM_ID_RETURN_NULL_ON_FUNCTION_ERRORS) == true)
+     {
+-      db_make_null (result);
+       return NO_ERROR;
+     }
+   er_set (ER_ERROR_SEVERITY, ARG_FILE_LINE, ER_IT_DATA_OVERFLOW, 1, pr_type_name (res_type));

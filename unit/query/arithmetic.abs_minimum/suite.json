@@ -1,0 +1,40 @@
+{
+ "name": "CBRD-28015 SMALLINT·INTEGER·BIGINT 최솟값의 ABS — db_abs_dbval(최솟값이 아닌 값 = 같은 타입의 절댓값·오류 없음(경계 + 타입마다 무작위 20,000개를 넓은 오라클과 대조), 최솟값 = ER_IT_DATA_OVERFLOW(타입 이름, CAST 와 같은 오류), RETURN_NULL_ON_FUNCTION_ERRORS 면 NULL·오류 없음, NULL 값 = NO_ERROR·결과 그대로, DOUBLE·FLOAT·MONETARY = fabs) + [defect] D1 develop 의 음수 최솟값(이력)",
+ "file": "src/query/arithmetic.c",
+ "mode": "server",
+ "seams": [],
+ "appendix": "",
+ "test": "test.cpp",
+ "extra": [
+  "src/query/numeric_opfunc.c",
+  "src/compat/db_macro.c",
+  "src/object/object_primitive.c",
+  "src/object/object_domain.c",
+  "src/object/object_domain_convert.cpp"
+ ],
+ "requires": [
+  "db_abs_dbval"
+ ],
+ "watch": [
+  "src/query/arithmetic.h",
+  "src/compat/dbtype_def.h"
+ ],
+ "fakes": "er_set/er_errid/er_clear(마지막 id 하나 + ER_IT_DATA_OVERFLOW 의 타입 이름 인자 + 호출 수), prm_Def(RETURN_NULL_ON_FUNCTION_ERRORS 를 케이스마다 켬·끔, ORACLE_COMPAT_NUMBER_BEHAVIOR 끔, 그 밖은 0), area_alloc/area_free(tp_init 전이라 calloc/free). 그 밖은 실코드: arithmetic.c(대상 TU), numeric_opfunc.c, db_macro.c, object_primitive.c(pr_type_name), object_domain.c·object_domain_convert.cpp(arithmetic.c 가 링크하는 것). arithmetic.integer_round 의 가짜와 같은 꼴.",
+ "defects_fixed_in": {
+  "CBRD28015 D": "d0c4c7822"
+ },
+ "note": "결과 DB_VALUE 는 INTEGER 777 로 시작해 손대지 않은 결과가 보인다(A5 — NULL 값이면 함수가 결과를 건드리지 않는 현재 동작, 호출자 fetch_op_abs () 가 NULL 을 먼저 거른다). D1 의 INTEGER·BIGINT 는 develop 에서 abs (INT_MIN)·llabs (LLONG_MIN) 이 정의되지 않은 동작이라 x86-64 gcc 의 실제 답(최솟값 그대로)을 적은 것이다. PR 번호가 정해지면 origin.pr 을 채운다. 변이(mutants/, dcf66492f 에 적용): mut_no_null_result(yes 갈래에서 db_make_null 을 뺌 — fetch_op_abs () 의 결과 칸에 앞 행 값이 남는 꼴) → A4 FAIL / mut_bigint_unchecked(BIGINT 갈래의 최솟값 검사를 뺌) → A3·A4 FAIL. 머지 뒤 defects_fixed_in 을 develop 의 머지 커밋으로 바꾼다.",
+ "origin": {
+  "pr": null,
+  "jira": "CBRD-28015",
+  "finding": "구현 하네스 S5 자기 리뷰의 계약 suite(리뷰 3-1 (c)) — db_abs_dbval 의 최솟값 넘침",
+  "comment": "",
+  "date": "2026-11-19",
+  "verified": [
+   "d0c4c7822(develop de4f32740 위로 rebase 한 헤드): 계약 6/6 PASS, D1 FAIL(고쳐짐) — 아래 dcf66492f 는 rebase 전 같은 diff",
+   "dcf66492f(수정): 계약 A1~A6 6/6 PASS, D1 FAIL(고쳐짐)",
+   "5f5a345cf(develop, 브랜치 base): A1·A2·A5·A6 PASS, A3·A4 FAIL(이 수정이 바꾸는 동작), D1 PASS(결함 있음)",
+   "dcf66492f + mut_no_null_result: A4 FAIL / + mut_bigint_unchecked: A3·A4 FAIL"
+  ]
+ }
+}
