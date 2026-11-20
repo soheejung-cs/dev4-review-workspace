@@ -1,0 +1,40 @@
+{
+ "name": "PR#8660 배치의 once step 계산(CBRD-28249): expr_scan_pred_compute_step () 이 실행당 한 번 step 을 계산하고 표시해 행 루프가 다시 계산하지 않음, 행 루프가 이미 계산했으면 바로 돌아옴, 다음 실행에 다시, 실패하면 오류·표시를 남기지 않아 행 루프가 다시 계산해 오류를 냄, 앞서 있던 오류는 그대로",
+ "file": "src/query/expr_compile.c",
+ "mode": "server",
+ "seams": [],
+ "appendix": "hooks.cpp",
+ "test": "test.cpp",
+ "extra": [
+  "src/query/numeric_opfunc.c",
+  "src/query/query_opfunc.c",
+  "src/object/object_domain.c",
+  "src/object/object_domain_convert.cpp",
+  "src/query/fetch.c",
+  "src/object/object_primitive.c",
+  "src/compat/db_macro.c",
+  "src/base/chartype.c",
+  "src/base/intl_support.c"
+ ],
+ "requires": [
+  "expr_scan_pred_compute_step",
+  "expr_prog_compile_roots",
+  "expr_compile_generic"
+ ],
+ "watch": [
+  "src/query/expr_compile.h",
+  "src/query/fetch_arith_ops.h",
+  "src/query/fetch.c",
+  "src/query/fetch.h",
+  "src/query/regu_var.hpp"
+ ],
+ "fakes": "expr_compile.generic_step 의 가짜(er_set/er_errid/er_clear, prm_Def 부팅 기본값 — oracle_style_empty_string false 라 T_CONCAT 규칙이 'L?r', 0 으로 채운 스레드 엔트리, heap_attrinfo_access, area_alloc/area_free, lang_Collations)에서 develop 이 없앤 부분(domain_plan.h, plan_item, CAST·plan 산술 몸통 흉내)을 뺐다. fetch_arith_op: 모든 opcode 에 기록 몸통 하나 — 받은 피연산자('-' 안 읽음·'n' NULL·'v' 값)를 로그하고 값 개수를 INT 로 답한다(T_INCR/T_DECR 는 RAW_LEFT). qexec_execute_mainblock: 부질의 리프가 없어 닿으면 assert. 실행 = VAL_DESCR.xasl_state->query_id(0 이면 xasl_state 없음). 더해서 er_stack_push/er_stack_pop(가짜 오류 id 저장·복원), 몸통 실패 스위치(ER_QSTR_INVALID_ESCAPE_CHARACTER).",
+ "note": "head a5ad83d7f 4/4 PASS. 2ed4f34e0·5ff128e50 에서는 첫 케이스 FAIL(새 실행의 첫 호출이 앞 실행의 once 표시를 보고 계산하지 않음 — 확인이 expr_prog_prepare () 앞에 있었다; 배치는 적재 전에 expr_scan_pred_prepare () 를 불러 실제 경로는 맞았다) → a5ad83d7f 로 고침. base ab85c1240 은 함수가 없어 compile-error(적용 안 됨).",
+ "origin": {
+  "pr": 8660,
+  "jira": "CBRD-28249",
+  "finding": "계약 suite(자기 리뷰 절차 3-1(c)) — 이 suite 가 API 의 확인 순서를 잡아 a5ad83d7f 로 고침",
+  "comment": "https://github.com/CUBRID/cubrid/pull/8660",
+  "date": "2026-11-20"
+ }
+}
