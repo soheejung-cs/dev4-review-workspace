@@ -83,6 +83,9 @@ namespace wk
   std::vector<fkey> keys;
   int upper;			/* the range's upper bound (INF_LE), 0: INF_INF */
   bool key_filter;
+  bool desc;			/* INDX_INFO::use_desc_index: the walk goes from the leaf's last key back (PR#8667) */
+  INT16 slot_hint;		/* set_page ()'s slot_hint: the descent's slot, NULL_SLOTID for none (PR#8667) */
+  int missing_reads;		/* spage_get_record () of a slot the leaf does not have */
 
   /* the transaction's interrupt flag and its checks */
   bool tran_interrupt;
@@ -228,6 +231,10 @@ spage_get_record (THREAD_ENTRY * thread_p, PAGE_PTR pgptr, PGSLOTID slotid, RECD
   (void) ispeeking;
   if (slotid < 1 || slotid > (int) wk::keys.size ())
     {
+      /* slotted_page.c spage_get_record (): no such slot -- ER_SP_UNKNOWN_SLOTID (-46, "slot %d on page %d ... is not
+       * allocated") is set and S_DOESNT_EXIST returned */
+      wk::missing_reads++;
+      er_set (ER_ERROR_SEVERITY, ARG_FILE_LINE, ER_SP_UNKNOWN_SLOTID, 3, slotid, 0, "");
       return S_DOESNT_EXIST;
     }
   recdes->data = (char *) &wk::keys[slotid - 1];
@@ -389,14 +396,18 @@ eval_key_filter (THREAD_ENTRY * thread_p, DB_VALUE * value, int prefix_size, DB_
 
 SCAN_CODE
 heap_get_visible_version (THREAD_ENTRY * thread_p, const OID * oid, OID * class_oid, RECDES * recdes,
-			  HEAP_SCANCACHE * scan_cache, int ispeeking, int old_chn)
+			  HEAP_SCANCACHE * scan_cache, int ispeeking, int old_chn,
+			  HEAP_RECDES_CONSUMPTION_POLICY recdes_consumption_policy)
 {
+  /* develop 68a9c7766 (CBRD-26357, 2026-11-20) added recdes_consumption_policy: with the old signature this fake no
+   * longer replaced the engine's, the auto stub aborted and W1-W7 failed on every revision since */
   (void) thread_p;
   (void) class_oid;
   (void) recdes;
   (void) scan_cache;
   (void) ispeeking;
   (void) old_chn;
+  (void) recdes_consumption_policy;
   wk::lookup_calls++;
   if (wk::cancel_at_lookup == wk::lookup_calls)
     {
@@ -525,6 +536,9 @@ namespace wk
     live_tokens.clear ();
     next_token = 0;
     double_clears = 0;
+    desc = false;
+    slot_hint = NULL_SLOTID;
+    missing_reads = 0;
   }
 
   void
@@ -540,7 +554,7 @@ namespace wk
     memset (sid, 0, sizeof (SCAN_ID));
     memset (indx, 0, sizeof (INDX_INFO));
     indx->coverage = 0;
-    indx->use_desc_index = 0;
+    indx->use_desc_index = desc ? 1 : 0;
     indx->func_idx_col_id = -1;
     sid->type = S_INDX_SCAN;
     sid->s.isid.indx_info = indx;
@@ -621,7 +635,7 @@ namespace wk
       {
 	walker.set_range_idx (0);
 	fsm.cleanup_on_reset (thr);
-	walker.set_page (thr, (PAGE_PTR) leaf_page, NULL_SLOTID);
+	walker.set_page (thr, (PAGE_PTR) leaf_page, slot_hint);
 	while ((sc = next_row (walker, fsm)) == S_SUCCESS)
 	  {
 	    rows++;
@@ -723,6 +737,88 @@ TEST_CASE ("W1 no cancel: every qualified OID looked up once in key order, S_END
     {
       CHECK (r.second == 1);	/* a key the look-ahead queued is not read again */
     }
+  check_balanced ();
+}
+
+/* PR#8667 (CBRD-28104) 0658200ed -- where a walk starts in its leaf (leaf_slot_walker::set_page ()).  The descent's slot
+ * past the last key (btree_locate_key () BTREE_KEY_BIGGER: key_cnt + 1) is where an ascending walk ends at once; a
+ * descending one used to read it -- no record, ER_SP_UNKNOWN_SLOTID (-46) set and the slot skipped, so the rows came
+ * back with the error left for a later er_errid () (ROUND) to report.  0658200ed starts it at the last key. */
+static std::vector<OID>
+oids_backward_from (int first)
+{
+  std::vector<OID> v;
+  for (int s = first; s >= 1; s--)
+    {
+      for (int j = 0; j < wk::keys[s - 1].n_oids; j++)
+	{
+	  v.push_back (wk::oid_of (s, j));
+	}
+    }
+  return v;
+}
+
+TEST_CASE ("W8 a descending walk whose descent landed past the last key (slot n + 1) starts at the last key: every OID of keys n..1 in that order, S_END, no error, no read of a slot the leaf lacks (base: the read sets -46 and the rows come back with it)", "[contract]")
+{
+  wk::reset ();
+  wk::leaf (12, false, false);
+  wk::keys[5 - 1].n_oids = 3;
+  wk::desc = true;
+  wk::slot_hint = 13;
+  wk::outcome o = wk::run ();
+
+  CHECK (o.end == S_END);
+  CHECK (o.err == NO_ERROR);
+  CHECK (wk::missing_reads == 0);
+  CHECK (o.rows == 14);
+  CHECK (wk::same_oids (wk::looked_up, oids_backward_from (12)));
+  CHECK (wk::signals == 0);
+  check_balanced ();
+}
+
+TEST_CASE ("W9 a descending walk over a leaf with no key (slot hint 1 = past its last key): no row, S_END, no error, no read", "[contract]")
+{
+  wk::reset ();
+  wk::leaf (0, false, false);
+  wk::desc = true;
+  wk::slot_hint = 1;
+  wk::outcome o = wk::run ();
+
+  CHECK (o.end == S_END);
+  CHECK (o.err == NO_ERROR);
+  CHECK (wk::missing_reads == 0);
+  CHECK (o.rows == 0);
+  check_balanced ();
+}
+
+TEST_CASE ("W10 an ascending walk whose descent landed past the last key (slot n + 1) reads no key of the leaf: no row, S_END, no error (develop's behavior, kept)", "[contract]")
+{
+  wk::reset ();
+  wk::leaf (12, false, false);
+  wk::slot_hint = 13;
+  wk::outcome o = wk::run ();
+
+  CHECK (o.end == S_END);
+  CHECK (o.err == NO_ERROR);
+  CHECK (wk::missing_reads == 0);
+  CHECK (o.rows == 0);
+  CHECK (wk::reads_of.empty ());
+  check_balanced ();
+}
+
+TEST_CASE ("W11 a descending walk from a slot inside the leaf (slot 5 of 12) reads keys 5..1 and no other (develop's behavior, kept)", "[contract]")
+{
+  wk::reset ();
+  wk::leaf (12, false, false);
+  wk::desc = true;
+  wk::slot_hint = 5;
+  wk::outcome o = wk::run ();
+
+  CHECK (o.end == S_END);
+  CHECK (o.err == NO_ERROR);
+  CHECK (wk::missing_reads == 0);
+  CHECK (o.rows == 5);
+  CHECK (wk::same_oids (wk::looked_up, oids_backward_from (5)));
   check_balanced ();
 }
 
