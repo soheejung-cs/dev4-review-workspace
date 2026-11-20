@@ -1,0 +1,40 @@
+{
+ "name": "qo_converse_sarg_terms (): taking the unary minus signs off a comparison -- an operator without a converse (<=>) keeps them (PR#8666)",
+ "file": "src/optimizer/rewriter/query_rewrite_term.c",
+ "mode": "cs",
+ "seams": [],
+ "extra": [
+  "src/parser/parse_tree.c",
+  "src/parser/parse_tree_cl.c",
+  "src/parser/parser_support.c",
+  "src/base/language_support.c",
+  "src/base/intl_support.c",
+  "src/base/chartype.c",
+  "src/object/object_domain.c",
+  "src/object/object_primitive.c",
+  "src/query/domain_rules.c",
+  "src/compat/db_macro.c",
+  "src/base/memory_alloc.c",
+  "src/base/system_parameter.c"
+ ],
+ "appendix": "hooks.cpp",
+ "test": "test.cpp",
+ "requires": [
+  "qo_converse_sarg_terms"
+ ],
+ "watch": [
+  "src/parser/parse_tree_cl.c",
+  "src/parser/parser_support.c",
+  "src/parser/parse_tree.h"
+ ],
+ "fakes": "query_rewrite_term.or_extract_gate's: envvar, calendar names, the lexer's line/column, dblink columns, er_* (one error), pt_count_input_markers and pt_str_compare (bodies as is), pt_is_keyword (no keyword). Terms built by hand: PT_NAME of one spec (DOUBLE), PT_VALUE integers, PT_UNARY_MINUS. pt_converse_op (type_checking.c:20897) -- the body as is; pt_check_path_eq (semantic_check.c) -- its PT_NAME case only (the terms compare names).",
+ "note": "2026-11-21 (.51, PR#8666 self-review): head 2f0601515 C1-C4 PASS; base ec0ce9d7f C1 C2 FAIL (op 0 == 432: the operator written over with pt_converse_op ()'s 0 and the minus signs gone -- the defect), C3 C4 PASS (develop's rewrite of < and =, and the const cases, kept).",
+ "origin": {
+  "pr": 8666,
+  "jira": "CBRD-28078",
+  "head": "2f0601515",
+  "base": "ec0ce9d7f",
+  "finding": "self-review contract suite (harness-review 3-1 c)",
+  "date": "2026-11-21"
+ }
+}
