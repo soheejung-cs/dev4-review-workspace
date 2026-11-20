@@ -135,6 +135,32 @@ area_free (AREA * area, void *ptr)
   return NO_ERROR;
 }
 
+/* memory_alloc.c: the private heap.  An armed failure is the private heap running out (hl_lea_alloc ()): the
+ * allocation sets ER_OUT_OF_VIRTUAL_MEMORY and answers NULL -- a string's setval then answers that error with its
+ * destination left NULL (mr_setval_string ()). */
+static int g_alloc_fail_in = 0;	/* > 0: the n-th next private allocation fails */
+
+void *
+db_private_alloc_release (THREAD_ENTRY * thrd, size_t size, bool rc_track)
+{
+  (void) thrd;
+  (void) rc_track;
+  if (g_alloc_fail_in > 0 && --g_alloc_fail_in == 0)
+    {
+      er_set (ER_ERROR_SEVERITY, ARG_FILE_LINE, ER_OUT_OF_VIRTUAL_MEMORY, 1, size);
+      return NULL;
+    }
+  return malloc (size > 0 ? size : 1);
+}
+
+void
+db_private_free_release (THREAD_ENTRY * thrd, void *ptr, bool rc_track)
+{
+  (void) thrd;
+  (void) rc_track;
+  free (ptr);
+}
+
 /* language_support.c: every collation slot is iso88591_bin before the built-ins are registered */
 #include "language_support.h"
 LANG_COLLATION *lang_Collations[LANG_MAX_COLLATIONS];
@@ -175,6 +201,7 @@ qexec_execute_mainblock (THREAD_ENTRY * thread_p, xasl_node * xasl, xasl_state *
 
 /* ---- the operator body: one recording body for every opcode (fetch_arith_ops.c is not linked) */
 static std::vector<std::string> g_log;
+static bool g_body_string = false;	/* every body answers the VARCHAR 'pay' (a copy of it allocates), not an INT */
 
 static char
 opnd_mark (const DB_VALUE * v)
@@ -194,6 +221,11 @@ fake_body (THREAD_ENTRY * thread_p, FETCH_ARITH_ARGS * a)
   if (op == T_INCR || op == T_DECR)
     {
       return FETCH_ARITH_RAW_LEFT;
+    }
+  if (g_body_string)
+    {
+      db_make_string (a->arithptr->value, "pay");
+      return NO_ERROR;
     }
   int n = 0;
   for (char c : mask)
@@ -337,6 +369,10 @@ show (const DB_VALUE * v)
   if (DB_VALUE_DOMAIN_TYPE (v) == DB_TYPE_INTEGER)
     {
       return "INT:" + std::to_string (db_get_int (v));
+    }
+  if (DB_VALUE_DOMAIN_TYPE (v) == DB_TYPE_VARCHAR)
+    {
+      return "STR:" + std::string (db_get_string (v), db_get_string_size (v));
     }
   return "type" + std::to_string ((int) DB_VALUE_DOMAIN_TYPE (v));
 }
@@ -517,6 +553,121 @@ TEST_CASE ("a generic step over another once-per-execution step computes once pe
   CHECK (unitseam_generic_slots (p) == 2);
   CHECK (calls_per_eval (p, idx, T_CONCAT, { 7, 7, 8 }) == std::vector<int> ({ 1, 0, 1 }));
   CHECK (calls_per_eval (p, idx, T_LIKE_LOWER_BOUND, { 9, 9 }) == std::vector<int> ({ 1, 0 }));
+  expr_prog_free (p);
+  exec_unbind ();
+}
+
+/* ---- PR#8623 review T0: a copy into a step's own slot that runs out of memory (pr_clone_value () drops the error of
+ * the type's setval).  The [defect] cases pass while the copy's failure is dropped; the [contract] cases are the fix. */
+
+/* the bodies answer a VARCHAR for the case, and no armed failure outlives it */
+struct string_bodies
+{
+  string_bodies ()
+  {
+    g_body_string = true;
+  }
+  ~string_bodies ()
+  {
+    g_body_string = false;
+    g_alloc_fail_in = 0;
+  }
+};
+
+/* LIKE_LOWER_BOUND (?): a once-per-execution generic step, which copies the body's value into its slot */
+static EXPR_PROG *
+compile_once_bound (int *idx)
+{
+  exec_bind (7, "pay%", NULL);
+  EXPR_PROG *p = compile1 (arith (T_LIKE_LOWER_BOUND, D (DB_TYPE_VARCHAR), hv (0), NULL), idx);
+  if (p != NULL && unitseam_generic_slots (p) != 1)
+    {
+      expr_prog_free (p);
+      return NULL;
+    }
+  return p;
+}
+
+/* LIKE_LOWER_BOUND (col) COLLATE: a per-row generic step and its relabel step, which copies the value into its slot */
+static EXPR_PROG *
+compile_relabel (int *idx)
+{
+  db_make_string (&g_attrs[1].v, "payx");
+  exec_bind (7, NULL, NULL);
+  REGU_VARIABLE *r = arith (T_LIKE_LOWER_BOUND, D (DB_TYPE_VARCHAR), attr (1, D (DB_TYPE_VARCHAR)), NULL);
+  REGU_VARIABLE_SET_FLAG (r, REGU_VARIABLE_APPLY_COLLATION);
+  return compile1 (r, idx);
+}
+
+TEST_CASE ("PR#8623 T0 once: a failed copy into a once-per-execution step's slot is kept as NULL for the execution -- "
+	   "the evaluation answers NULL with the allocation's error set, the later ones answer it without the body",
+	   "[defect]")
+{
+  string_bodies scope;
+  int idx = -1;
+  EXPR_PROG *p = compile_once_bound (&idx);
+  REQUIRE (p != NULL);
+  g_alloc_fail_in = 1;
+  outcome o = run_prog (p, idx);
+  CHECK (o.value == "NULL");
+  CHECK (g_errid == ER_OUT_OF_VIRTUAL_MEMORY);
+  o = run_prog (p, idx);
+  CHECK (o.value == "NULL");
+  CHECK (body_calls (o, T_LIKE_LOWER_BOUND) == 0);
+  expr_prog_free (p);
+  exec_unbind ();
+}
+
+TEST_CASE ("a copy into a once-per-execution step's slot that runs out of memory fails the evaluation with the "
+	   "allocation's error and keeps nothing -- the next evaluation of the execution computes and keeps the value",
+	   "[contract]")
+{
+  string_bodies scope;
+  int idx = -1;
+  EXPR_PROG *p = compile_once_bound (&idx);
+  REQUIRE (p != NULL);
+  g_alloc_fail_in = 1;
+  outcome o = run_prog (p, idx);
+  CHECK (o.value == "ERR:" + std::to_string (ER_OUT_OF_VIRTUAL_MEMORY));
+  CHECK (body_calls (o, T_LIKE_LOWER_BOUND) == 1);
+  o = run_prog (p, idx);
+  CHECK (o.value == "STR:pay");
+  CHECK (body_calls (o, T_LIKE_LOWER_BOUND) == 1);
+  o = run_prog (p, idx);
+  CHECK (o.value == "STR:pay");
+  CHECK (body_calls (o, T_LIKE_LOWER_BOUND) == 0);
+  expr_prog_free (p);
+  exec_unbind ();
+}
+
+TEST_CASE ("PR#8623 T0 relabel: a failed copy into a COLLATE relabel step's slot answers the row a NULL with the "
+	   "allocation's error set", "[defect]")
+{
+  string_bodies scope;
+  int idx = -1;
+  EXPR_PROG *p = compile_relabel (&idx);
+  REQUIRE (p != NULL);
+  g_alloc_fail_in = 1;
+  outcome o = run_prog (p, idx);
+  CHECK (o.value == "NULL");
+  CHECK (g_errid == ER_OUT_OF_VIRTUAL_MEMORY);
+  expr_prog_free (p);
+  exec_unbind ();
+}
+
+TEST_CASE ("a copy into a COLLATE relabel step's slot that runs out of memory fails the row with the allocation's "
+	   "error -- the next row relabels its value", "[contract]")
+{
+  string_bodies scope;
+  int idx = -1;
+  EXPR_PROG *p = compile_relabel (&idx);
+  REQUIRE (p != NULL);
+  g_alloc_fail_in = 1;
+  outcome o = run_prog (p, idx);
+  CHECK (o.value == "ERR:" + std::to_string (ER_OUT_OF_VIRTUAL_MEMORY));
+  o = run_prog (p, idx);
+  CHECK (o.value == "STR:pay");
+  CHECK (body_calls (o, T_LIKE_LOWER_BOUND) == 1);
   expr_prog_free (p);
   exec_unbind ();
 }
