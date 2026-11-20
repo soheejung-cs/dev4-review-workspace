@@ -1,0 +1,24 @@
+{
+ "name": "PR#8669 (CBRD-28295) pt_check_cast_op () -- an operand CAST without a cast type (a COLLATE modifier on a non-string value, left so by type evaluation that went on after its error inside a collection) makes the check fail without reading the NULL cast type, keeping the error already set or setting an internal one; an operand CAST with a cast type is read as before",
+ "requires": ["pt_check_cast_op"],
+ "file": "src/parser/semantic_check.c",
+ "mode": "cs",
+ "seams": ["pt_check_order_by"],
+ "appendix": "",
+ "test": "test.cpp",
+ "extra": ["src/parser/parse_tree.c", "src/parser/parse_tree_cl.c", "src/base/language_support.c", "src/base/intl_support.c", "src/base/chartype.c", "src/object/object_domain.c", "src/object/object_primitive.c", "src/query/domain_rules.c", "src/compat/db_macro.c", "src/base/memory_alloc.c", "src/base/system_parameter.c"],
+ "watch": ["src/parser/csql_grammar.y", "src/parser/type_checking.c"],
+ "fakes": "semantic_check.fold_union_text 와 같다(TU 링크용, 이 케이스들은 읽지 않음). 진짜: pt_record_error·pt_internal_error(parse_tree_cl.c). 오류 메시지 카탈로그를 읽는 경로(PT_ERRORmf2 의 CANT_COERCE_TO 등)는 이 하네스에서 abort(pt_is_keyword stub) — 그래서 '캐스트 불가 형' 대조 케이스(K4)는 두지 않았다.",
+ "note": "K1·K2 는 base(develop de4bb116e) 에서 SIGSEGV(rc -11, semantic_check.c:1177 의 NULL cast_type 역참조) = 이 PR 이 고친 동작. K3 는 base 도 PASS(바뀌지 않은 정상 경로).",
+ "origin": {
+  "pr": 8669,
+  "jira": "CBRD-28295",
+  "finding": "자기 리뷰 [contract] suite(harness-review 3-1(c)) -- 바뀐 함수의 실패 계약 고정",
+  "comment": null,
+  "date": "2026-11-20",
+  "reviewed_head": "08a74f505",
+  "base": "de4bb116e",
+  "artifact": "harness-out/8669/08a74f505/unit/semantic_check.cast_coll_modifier/",
+  "result": "2026-11-20: head 08a74f505 3/3 PASS, base de4bb116e K1·K2 SIGSEGV(케이스별 실행), K3 PASS."
+ }
+}
