@@ -1,0 +1,29 @@
+{
+ "name": "index scan OID buffer reuse (PR#8668, CBRD-28138): a buffer taken from the server-wide reuse list keeps its OID count limit (max_oid_cnt) within its capacity after index_scan_oid_buffer_size grows or shrinks; a reused buffer smaller than the parameter asks is replaced (freed, a new one allocated) and the reuse list's count stays right",
+ "file": "src/query/scan_manager.c",
+ "mode": "server",
+ "seams": [],
+ "appendix": "hooks.cpp",
+ "test": "test.cpp",
+ "requires": [
+  "scan_index_alloc_oid_buffer",
+  "scan_alloc_iscan_oid_buf_list"
+ ],
+ "watch": [
+  "src/query/scan_manager.h",
+  "src/storage/storage_common.h",
+  "src/storage/btree.h"
+ ],
+ "fakes": "Real: scan_index_alloc_oid_buffer () (extern, SERVER_MODE), scan_alloc_iscan_oid_buf_list (), scan_alloc_oid_list (), scan_free_oid_list (), scan_free_iscan_oid_buf_list () (static, reached through hooks.cpp appended to the TU). prm_Def: a zeroed byte table of the real layout under the name prm_Def (asm label -- SYSPRM_PARAM has const members), the index_scan_oid_buffer_size entry PRM_FLOAT, no session flag, value in pages; prm_get_float_value () is the header's inline. db_Io_page_size 16384, db_User_page_size 16384 - RESERVED_SIZE_IN_PAGE. css_get_max_conn (): 100 (MAX_NTRANS bounds the reuse list). malloc/free and the mutex are real.",
+ "note": "2026-11-20 head 9d0c8d16e: 4/4 PASS. base de4bb116e (develop): C1 C2 C4 FAIL -- the reused 8192-OID buffer gets max_oid_cnt 32768 after the parameter grew to 16 pages (the defect), C3 PASS. Note: ISCAN_OID_BUFFER_SIZE reads index_scan_oid_buffer_pages (PRM_ID_BT_OID_NBUFFERS), the deprecated pair of index_scan_oid_buffer_size -- the fake sets both. The reuse list is static and keeps buffers across cases (cases are written to hold whatever buffer the list hands).",
+ "origin": {
+  "pr": 8668,
+  "jira": "CBRD-28138",
+  "head": "9d0c8d16e",
+  "base": "de4bb116e",
+  "finding": "contract suite (harness-review 3-8, no finding)",
+  "comment": null,
+  "artifacts": "/home/cubrid/dev/utils/harness-out/8668/9d0c8d16e/unit/oid_buffer_reuse/",
+  "date": "2026-11-20"
+ }
+}
