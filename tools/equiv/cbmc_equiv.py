@@ -92,6 +92,21 @@ def extract_function(src, name):
     return None
 
 
+def cex_inputs(trace):
+    """반례 trace 에서 harness main 의 변수 대입 — 이름마다 마지막 값(원소 대입 a[1l]=… 은 a[1] 로)"""
+    vals = {}
+    in_main = False
+    for line in trace.splitlines():
+        st = re.match(r'^State \d+ file \S+ function (\S+) line', line)
+        if st:
+            in_main = (st.group(1) == 'main')
+            continue
+        m = re.match(r'^\s+([A-Za-z_]\w*(?:\[\d+l?\])*)=(.+?)(?: \(.*\))?$', line)
+        if in_main and m and not m.group(1).startswith('return_value_nondet') and not re.match(r'^\w+!\d+@\d+$', m.group(2).strip()):
+            vals[m.group(1).replace('l]', ']')] = m.group(2).strip()
+    return vals
+
+
 def sha(s):
     return hashlib.sha256(s.encode('utf-8', 'replace')).hexdigest()
 
@@ -160,9 +175,12 @@ def cmd_run(a):
         result = 'FAILED'
     else:
         result = 'ERROR'
+    cex = {}
     if result == 'FAILED':
         t = sh(*(cmd + ['--trace']), cwd=d)
         open(os.path.join(d, 'cex.txt'), 'w').write(t.stdout)
+        cex = cex_inputs(t.stdout)
+        json.dump(cex, open(os.path.join(d, 'cex_inputs.json'), 'w'), ensure_ascii=False, indent=1)
     ver = sh(cbmc, '--version').stdout.strip()
     proof = {'result': result, 'cbmc': ver, 'cmd': ' '.join(cmd[1:]), 'case': case,
              'function_sha256': hashes, 'model_sha256': model_hashes(case, d),
@@ -173,7 +191,8 @@ def cmd_run(a):
     for l in failed[:12]:
         print('  ' + l.strip())
     if result == 'FAILED':
-        print(f'  반례: {os.path.join(d, "cex.txt")} — 입력값(nondet 대입)을 변형 단계에 되돌려 고친다(상한은 절차 문서)')
+        print('  반례 입력(main 의 변수, 마지막 값): ' + ', '.join(f'{k}={v}' for k, v in list(cex.items())[:16]))
+        print(f'  전체 trace: {os.path.join(d, "cex.txt")} — 이 입력에서 두 함수가 왜 다른지 설명하고 변형을 고친다(3회 넘으면 접고 보고)')
     if result == 'ERROR':
         print(f'  cbmc 가 판정을 내지 못했다(파싱·링크 오류 등): {os.path.join(d, "cbmc.log")}')
     return 0 if result == 'SUCCESSFUL' else 1
