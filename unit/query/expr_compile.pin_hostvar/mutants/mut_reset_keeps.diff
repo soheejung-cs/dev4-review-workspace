@@ -1,0 +1,13 @@
+--- a/src/query/expr_compile.c
++++ b/src/query/expr_compile.c
+@@ -3606,10 +3606,6 @@
+ 	{
+ 	  expr_prog_reset (root->prog);
+ 	}
+-      if (root->pin_hostvar_any != 1)
+-	{
+-	  expr_pred_pin_reset (root);
+-	}
+     }
+ }
+ 

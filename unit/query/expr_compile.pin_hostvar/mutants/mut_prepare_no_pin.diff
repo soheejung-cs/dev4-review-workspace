@@ -1,0 +1,11 @@
+--- a/src/query/expr_compile.c
++++ b/src/query/expr_compile.c
+@@ -4575,7 +4575,7 @@
+     {
+       root->pin_hostvar_any = expr_pred_has_pin_hostvar (root) ? 2 : 1;
+     }
+-  if (root->pin_hostvar_any == 2)
++  if (root->pin_hostvar_any == 3)
+     {
+       const int error = expr_pred_pin_hostvars (root, thread_p, vd);
+ 

@@ -1,0 +1,13 @@
+--- a/src/query/expr_compile.c
++++ b/src/query/expr_compile.c
+@@ -3331,10 +3331,6 @@
+     (vd != NULL && vd->xasl_state != NULL) ? (unsigned long long) vd->xasl_state->query_id : 0;
+   DB_VALUE *bound = NULL;
+ 
+-  if (pred->pin_stamp_valid && pred->pin_stamp == stamp)
+-    {
+-      return NO_ERROR;
+-    }
+   pr_clear_value (&pred->pinned_rhs);
+   db_make_null (&pred->pinned_rhs);
+   if (fetch_peek_dbval (thread_p, pred->fetch_rhs, vd, NULL, NULL, NULL, &bound) != NO_ERROR)
