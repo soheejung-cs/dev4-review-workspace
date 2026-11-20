@@ -17,6 +17,11 @@ description: 통합 리뷰 하네스 실행 — `/harness-review <PR번호>`. �
    손댄 모듈의 `dev4-ai-source/modules/<모듈>.md` §3(이미 규명된 함정)은 팩의 **`known pitfalls`** 절에 실린다(그 모듈 함수가 든 배치에만, 해소됨 항목은 첫 줄만). **예외**: 그 절이 상한으로 잘렸다고 적혀 있으면 그 노트의 §3 을 연다.
    배치가 많으면 **`OUT/batch_index.md` 를 먼저** 본다 — 배치별 파일·변경 함수 수와 **그룹 제안**(연속 배치를 주 파일로 묶은 것)이 있다. 어느 배치에 무엇이 들었는지 번호로 짐작하지 않는다. `manifest.json` 의 `codegraph_complete` 가 false 면 보고서에 적고 `codegraph_parse_quality`(파일별 파서가 잃은 함수 정의 수/전체)의 파일은 팩이 불완전할 수 있다고 본다.
    본문이 기대는 외부 사실은 `python3 -m tools.harness.pr_refs --pr <PR>` 로 한 번 확인한다 — 참조 PR 의 상태(미머지로 닫힌 것을 "포트했다" 고 적었나), 언급한 커밋 해시가 head 에 있나. 어긋나면 그 자체가 지적(`문서 제안` 또는 `설계 판정`)이다.
+2-2. **TC PR 도 함께 리뷰한다**(사용자 지시 2026-11-20 "리뷰할때 tc 변경 사항 있으면 같이 리뷰하는거 잊지 말고 하네스에 넣어놔" — 계기: PR#8613 리뷰가 cubrid-testcases#4303 을 보지 않고 게시됐다).
+   `run full` 의 `tc_pack` 노드가 두 TC 리포의 `tc/pr-<PR>` 을 `OUT/tc_pack.md`(본문·바뀐 파일·파일별 diff·결정론 점검)로 모으고 review_request 에 요약을 싣는다(단독: `python3 -m tools.harness.tc_pack --pr <PR>`). 바뀐 파일이 있는 TC PR 이 하나라도 있으면 리뷰를 끝내기 전에 읽는다 — 바뀐 파일 0 인 Draft 는 대상이 아니다.
+   - 볼 것: ① 케이스가 엔진 변경을 실제로 지키나(바뀐 분기·경계에 닿나 — 규칙 #086, 결과 비교만으로 끝나지 않나) ② 수정 전 NOK·수정 후 OK 근거가 본문에 있나 ③ 답안만 바뀐 TC 는 바뀐 줄이 엔진 변경으로 설명되고 의도를 해치지 않나(정렬 5항목) ④ shell TC 는 private-ex 룰북(`shell/AGENTS.md` → `shell/rules/*.md`)과 대조 ⑤ 제목·본문 형식(`references/TC-PR-본문.md`), 실행 잔재(`.result`·`_temp_diff`) 커밋.
+   - TC 지적은 finding 의 `file` 을 TC 리포 경로로, `repo` 에 TC 리포를 적고, 게시는 그 TC PR 에 `post_review --repo <TC 리포> --pr <TC PR>`. 서브에이전트 사슬이면 TC 가 있는 그룹을 하나 더 두거나(TC 가 크면) 가장 가까운 그룹의 판정 에이전트에게 `tc_pack.md` 를 함께 준다.
+   - 보고서 §0 에 'TC' 한 줄(리뷰한 TC PR·지적 수, 없으면 "TC 변경 없음")을 둔다.
 3. 지적을 `OUT/findings.json` 으로 쓴다 — **필드·필수 여부·쓰는 법의 정본은 preamble 의 지시 3~3-8 과 스키마 `harness/schemas/finding.json`** 이다(모든 지적에 `why`·`proposal`, 에러 우려는 확인(static/dynamic) 없이는 `question` — 사용자 지시 2026-09-17: 지적만 있고 결과가 없는 코멘트는 작성자가 우선순위를 판단할 수 없다. 재현 SQL 최소 테이블·suggestion 울타리 줄 맨 앞도 preamble 지시 3-1·3-2-1 에 있다). `findings.auto.json`(MEAS) 은 건드리지 않는다(러너가 합친다).
 3-1. **단위 테스트 — 모든 PR 리뷰에 붙인다**(사용자 지시 2026-10-16 — "PR 을 리뷰할 때마다 단위 테스트를 진행") — `harness-unit` / `tools/harness/unitseam.py`, 목 허용, gha-ci 용 아님.
    - **(a) 회귀**: `run full` 의 `unit_regress` 가 `unit/` 에 쌓인 suite 중 이 PR 이 건드린 파일 것을 head/base 에 자동으로 돌린다. `[contract]` 회귀 후보·`[defect]` 재현 안 됨은 지적 후보로 본다.

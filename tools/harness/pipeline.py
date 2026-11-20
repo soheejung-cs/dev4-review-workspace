@@ -7,6 +7,7 @@ import hashlib, json, os, re, subprocess, sys, time
 import yaml
 from . import merge_check as MC
 from . import codegraph as CG, context_pack as CP, arch_infer as AI, adjudicate as AD, perf_claims as PC, episodic as EP, or_buf as OB, pr_refs as PR, unit_regress as UR
+from . import tc_pack as TP      # TC PR 팩 노드 tc_pack (사용자 지시 2026-11-20 — TC 변경도 함께 리뷰)
 from . import static_lint as SL   # 정적 린트 노드 static_lint (H-15·H-33) — 노드 함수는 static_lint.node
 from .run_support import Worktree, sh
 
@@ -238,6 +239,7 @@ def n_review_request(c, a):
 
 {_unit_md}
 {_cs_md}
+{TP.summary_md(c)}
 ## 아키텍처 유추 (arch.json 요약)
 """ + (('- touched layers: ' + ', '.join(arch['architecture']['touched_layers']) + '\n- edges: ' + '; '.join(f"{e['source']}->{e['target']}({e['calls']})" for e in arch['architecture']['connections'][:30]) + '\n- risks: ' + ('\n  - '.join(f"[{r['severity']}] {r['kind']} {r['component']}: {r['issue']}" for r in arch['risks']) or 'none')) if arch else '- (design infer 미실행)') + f"""
 
@@ -339,6 +341,10 @@ def n_report(c, a):
         rr = json.load(open(pr_p, encoding='utf-8'))
         md += ['', '## 본문 참조 확인 (pr_refs)', ''] + ([f'- ⚠ {w}' for w in rr['warnings']] or ['- 참조 PR·커밋 해시·JIRA 모두 정상'])
         md += [f"- 참조 PR: " + ', '.join(f'{a} {b}' for a, b, _ in rr['prs'])] if rr['prs'] else []   # 예전엔 이 조건식이 위 줄까지 묶어 참조 PR 이 없으면 경고도 빠졌다
+    tp_p = os.path.join(c['out'], 'tc_pack.json')
+    if os.path.isfile(tp_p):
+        tp = json.load(open(tp_p, encoding='utf-8')); rv = [r for r in tp['repos'] if r.get('changedFiles')]
+        md += ['', '## TC PR (tc_pack)', ''] + ([f"- {r['repo']}#{r['number']} ({r['changedFiles']} files) — " + ('; '.join(f'[{lv}] {t}' for lv, t in r['checks']) or '점검 이상 없음') for r in rv] or ['- 바뀐 파일이 있는 TC PR 없음'])
     ur_p = os.path.join(c['out'], 'unit_regress.md')
     if os.path.isfile(ur_p):
         md += [''] + open(ur_p, encoding='utf-8').read().rstrip().split('\n')
@@ -347,6 +353,7 @@ def n_report(c, a):
 
 REGISTRY = {'review_request': n_review_request, 'report': n_report, 'worktree': n_worktree, 'diff_map': n_diff_map, 'codegraph': n_codegraph, 'pack': n_pack, 'arch': n_arch, 'perf_claims': n_perf_claims, 'or_buf': n_or_buf,
             'validate': n_validate, 'gate': n_gate, 'self_check': n_self_check, 'episodic': n_episodic, 'pr_refs': n_pr_refs, 'unit_regress': n_unit_regress}
+REGISTRY['tc_pack'] = TP.node     # tc/pr-<N> 두 TC 리포의 본문·diff·결정론 점검 → tc_pack.md
 REGISTRY['static_lint'] = SL.node   # findings.auto.json 에 append(or_buf 뒤) — 실수 범위 바깥 꼴·상태 버림·에러 경로·정렬 할당·조인 형상
 
 def load(path):
