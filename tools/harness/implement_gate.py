@@ -9,6 +9,7 @@
           release_sites 에 나와야 한다(META-REVIEW PR#7658 — '만드는 곳' 이 아니라 '놓는 곳' 을 전수로, H-33)
       (0-1) plan.develop_repro — 최신 develop 을 새로 빌드한 설치본에서의 재현(rev·BUILD_REV 대조, H-169)
       (2-2) 앞 상태를 er_errid () 로 재는 er_clear () 분기 — 참고(H-181)  (7) NUMERIC 경로 전환이면 performance 악영향 항목 필수(H-180)
+      (5-1) 성능 변경(rule_ids)은 CBMC 동치 증명(variant.equiv) 또는 증명 대상이 아닌 이유(variant_exempt) — harness/동치검증-성능변형.md
 결과: <out>/gate.json + 표준출력 요약. 실패 = 코드를 고쳐 다시(재질의 1회 규칙은 스킬이 관리)."""
 import argparse, sys, json, os, subprocess, sys, tempfile, shutil
 import re as _re
@@ -299,6 +300,21 @@ def main():
         for e in errs: fail('structure', e)
         for n in notes: res['checks'].setdefault('structure-note', []).append(n)
         if perf_like and not plan.get('perf'): res['checks'].setdefault('structure-note', []).append('changes 에 성능 rule_ids 가 있어 성능 작업으로 보고 검사했다 — plan.perf=true 로 적는다')
+    # (5-1) 성능 변형의 동치 증명 — 사용자 지시 2026-11-20(perf → LLM 변형 → CBMC 동치 검증, 성능 변형일 때만 필수).
+    #       rule_ids 가 붙은 변경은 variant.equiv(증명 케이스, proof.json SUCCESSFUL·지금 본문과 같음) 이나 variant_exempt(대상이 아닌 이유)
+    sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'equiv'))
+    import cbmc_equiv
+    for c in plan.get('changes', []):
+        if not c.get('rule_ids'):
+            continue
+        v = c.get('variant') or {}
+        if v.get('equiv'):
+            cp = v['equiv'] if os.path.isabs(os.path.expanduser(v['equiv'])) else os.path.join(out, v['equiv'])
+            okq, qmsgs = cbmc_equiv.check(os.path.expanduser(cp), repo)
+            for m in qmsgs:
+                fail('equiv', f"{c.get('file')}:{c.get('function')}: {m}")
+        elif not str(c.get('variant_exempt', '')).strip():
+            fail('equiv', f"{c.get('file')}:{c.get('function')}: 성능 변경(rule_ids)인데 variant.equiv(CBMC 동치 증명 케이스)도 variant_exempt(증명 대상이 아닌 이유)도 없다 — harness/동치검증-성능변형.md")
     # (6) 수명 있는 상태 — 해제 경로 전수 (META-REVIEW PR#7658 → H-33)
     if g_after is not None:
         from .static_lint import _added

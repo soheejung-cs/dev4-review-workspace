@@ -1,0 +1,3 @@
+{"file": "src/query/expr_batch.c", "function": "eb_str_eq_binary", "base": "2e67e1d94", "head": "2e67e1d94",
+ "sources": ["stubs.h", "orig.c", "variant.c", "harness.c"], "unwind": 6,
+ "assumptions": ["the strings are at most 4 bytes (harness MAXN) — the install check, not a proof of a real variant"]}

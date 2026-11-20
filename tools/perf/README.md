@@ -12,3 +12,5 @@
 | `shapes_filter_scan.txt` | lineitem 필터 스캔 15모양(숫자·날짜·BETWEEN·두 컬럼·LIKE·CHAR·IN·OR·SUBSTRING·행 반환·GROUP BY) | 출발점 |
 
 함정: batch 로 돈 스캔은 trace 의 heap time·fetch 가 0 이다(2026-10 현재) — 그 스캔은 perf 로 본다. trace 시간은 중첩(바깥에 안쪽이 들어감)이라 비교용으로만.
+
+**변형과 동치 증명(2026-11-20)**: 시간 지도로 고른 함수를 다시 쓰는 성능 변형은 `tools/equiv/cbmc_equiv.py` 로 원래 함수와의 동치를 CBMC 로 증명한 뒤 벤치한다 — 절차 [`harness/동치검증-성능변형.md`](../../harness/동치검증-성능변형.md). 캐시 미스는 `valgrind --tool=cachegrind --cache-sim=yes`(SA csql, 작은 데이터) + `cg_annotate` 로 그 함수의 D1·LL miss 를 본다. `llvm-mca` 는 LLVM 설치 뒤.

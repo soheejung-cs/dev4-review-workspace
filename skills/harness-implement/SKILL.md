@@ -50,11 +50,20 @@ python3 -m tools.harness.implement_pack --key CBRD-n --pr <PR>      # 리뷰 대
 - TC: plan.tests 를 `cubrid-testcases(-private-ex)` 의 해당 카테고리 형식으로. shell TC 는 `write_ok "<케이스> : <무엇>"`.
   shell TC 는 **private-ex 룰북을 먼저 읽는다**(`shell/AGENTS.md` → `shell/rules/test-perspectives.md`·`writing-rules.md`): 새 버그 수정 TC 는 쓰는 날의 반기 디렉터리 `shell/_06_issues/_<yy>_<1|2>h/`, release·debug 둘 다 CTP, **버그 수정이면 수정 없는 develop NOK·수정 빌드 OK 를 TC PR 에**, SQL 만으로 되는 시나리오는 sql TC 로. **TC push 는 엔진 PR 의 TC Branch Sync 가 끝나 Draft TC PR 이 생긴 뒤**(규칙 #058, H-91). **TC 파일을 `tc/pr-<n>` 에 push 했으면 그 TC PR 의 본문·제목을 같이 갱신한다** — 봇 기본 본문·`Draft: TC changes for PR` 제목을 남기지 않는다(사용자 지시 2026-11-03, 정본 메모리 PR브랜치-규칙 §3, 머지 전 검사 `tools/merge_gate.py` 4)). 쓰는 법: [`references/TC-PR-본문.md`](../../references/TC-PR-본문.md).
 
+## S3.5 성능 변형의 동치 증명 — 성능 변형이면 필수 (사용자 지시 2026-11-20)
+같은 계산을 더 빠르게 다시 쓴 함수(SIMD·AoS→SoA·루프·분기 제거·표)는 **증명 → 벤치** 순서다. 정본 [`harness/동치검증-성능변형.md`](../../harness/동치검증-성능변형.md).
+1. 병목: S1.5 시간 지도에서 자기 시간이 큰 함수 하나, 캐시 미스는 Cachegrind(SA).
+2. 변형: 원래 함수는 두고 같은 시그니처로 쓴다 — plan `changes[].variant.kind`.
+3. 증명: `python3 tools/equiv/cbmc_equiv.py run --case <dir>`(템플릿 `tools/equiv/template/example`) — 원래·변형 본문을 소스와 글자 대조한 뒤 CBMC(`--unwinding-assertions`).
+   FAILED 면 `cex.txt` 의 입력으로 변형을 고친다(**3회** 넘으면 접고 반례와 함께 보고). SUCCESSFUL 이면 plan `variant.equiv` 에 케이스 경로.
+4. 증명 대상이 아닌 성능 변경(새 알고리즘·구조·동작 변경, C 로 옮길 수 없는 함수)은 `variant_exempt` 에 이유와 대신 볼 것.
+CBMC 는 사람이 설치한다(절차 문서 §설치). 없으면 도구가 rc 3 으로 알린다 — 그 PR 은 `variant_exempt` 에 "CBMC 미설치" 로 두지 않고 사용자에게 설치를 요청한다.
+
 ## S4. 게이트 (결정론)
 ```bash
 python3 -m tools.harness.implement_gate --plan <out>/plan.json [--base HEAD|upstream/develop]
 ```
-① 범위 — 바뀐 파일·함수 ⊆ plan.changes ② `codestyle.sh` 로 포맷 차이 0 ③ 컴파일 — `compile_commands.json` 이 있으면 `-fsyntax-only`, 없으면(goto 빌드 디렉터리는 비어 있다) **ninja 오브젝트 타깃으로 실제 컴파일** ④ 바뀐 함수의 **관문 카운트 불균형**이 있는데 `gate_contract` 가 없으면 실패 ⑤ **성능 작업이면 `structure.json`**(`structure_check --stage gate`: 도착 증거·미시 벤치 결과까지 채워져 있어야) ⑥ **수명 있는 상태 — 해제 경로 전수**: diff 가 구조체에 원시 포인터 필드를 더했거나 `lifetime_state` 가 있으면, 그래프가 뽑은 해제 경로 후보(놓는 이름 + 그 구조체를 쓰거나 새 필드를 만지는 함수) 하나하나가 `release_sites` 에 있어야 통과(`gate.json` `lifetime_candidates`). ⑦ **`develop_repro`**(H-169) ⑧ **NUMERIC 경로 전환**이면 performance 악영향 항목 필수(H-180) — 참고로 앞 상태를 `er_errid ()` 로 재고 `er_clear ()` 를 고르는 분기도 짚는다(H-181, 규칙 #120). 건너뛴 검사가 있으면 `GATE OK*` 로 찍힌다 — `*` 가 있으면 컴파일을 확인한 것이 아니다.
+① 범위 — 바뀐 파일·함수 ⊆ plan.changes ② `codestyle.sh` 로 포맷 차이 0 ③ 컴파일 — `compile_commands.json` 이 있으면 `-fsyntax-only`, 없으면(goto 빌드 디렉터리는 비어 있다) **ninja 오브젝트 타깃으로 실제 컴파일** ④ 바뀐 함수의 **관문 카운트 불균형**이 있는데 `gate_contract` 가 없으면 실패 ⑤ **성능 작업이면 `structure.json`**(`structure_check --stage gate`: 도착 증거·미시 벤치 결과까지 채워져 있어야) ⑥ **수명 있는 상태 — 해제 경로 전수**: diff 가 구조체에 원시 포인터 필드를 더했거나 `lifetime_state` 가 있으면, 그래프가 뽑은 해제 경로 후보(놓는 이름 + 그 구조체를 쓰거나 새 필드를 만지는 함수) 하나하나가 `release_sites` 에 있어야 통과(`gate.json` `lifetime_candidates`). ⑦ **`develop_repro`**(H-169) ⑧ **NUMERIC 경로 전환**이면 performance 악영향 항목 필수(H-180) ⑨ **성능 변경(`rule_ids`)은 동치 증명**(`variant.equiv` 의 proof.json SUCCESSFUL·지금 본문과 같음) 또는 `variant_exempt`(S3.5) — 참고로 앞 상태를 `er_errid ()` 로 재고 `er_clear ()` 를 고르는 분기도 짚는다(H-181, 규칙 #120). 건너뛴 검사가 있으면 `GATE OK*` 로 찍힌다 — `*` 가 있으면 컴파일을 확인한 것이 아니다.
 커밋을 나눴으면 **커밋마다** 컴파일: `python3 -m tools.harness.compile_check --commits <base>..<head>`(깨끗한 트리에서 커밋을 차례로 체크아웃해 그 커밋이 바꾼 파일만 굽고 원래 ref 로 돌아온다). 파일만 보려면 `--files a.c,b.cpp`. 실패 → 고치고 재실행(**재질의 상한 1회**; 두 번째도 실패면 사용자에게 상태 보고). 그다음 사용자 허락 하에 `goto CBRD-n` 빌드 → 재현 스크립트(`harness/templates/repro.sh`, `ServerSession`) → TC. **CTP 는 요청자 확인 후**(`review-testing`).
 - 빌드는 `cubrid-build` 스킬대로 — 백그라운드면 `nohup bash ~/bin/goto.sh <br> release > log 2>&1 &`(`goto` 는 alias 라 nohup 이 못 찾는다, H-24). 실패해 `cubrid` 가 사라지면 고친 rev 로 다시 goto 하면 복구(H-01). 빌드 중엔 엔진 소스를 고치지 않는다.
 - `cubrid server start` 를 **파이프로 받지 않는다**(데몬이 stdout 을 물어 안 끝난다 — `> file` 로, H-23).
