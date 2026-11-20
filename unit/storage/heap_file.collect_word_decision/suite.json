@@ -1,0 +1,33 @@
+{
+ "name": "PR#8614 (CBRD-28188) -- heap_page_collect_visible (): the first-word decision. A REC_HOME record with no MVCC id of the expected representation is a row without snapshot_fnc (); on a page that precedes the snapshot (slot 0 a HEAP_CHAIN, snapshot_fnc == mvcc_satisfies_snapshot, MVCC_ID_PRECEDES (chain->max_mvccid, lowest_active_mvccid)) an INSID-only word of the expected representation is a row and a DELID word is skipped without snapshot_fnc (); everything else is decided from its header as before. Boundaries (max == lowest, another snapshot function, the heap header page, bestspace), representations (inside repids, outside = exception), hdr_size, and generated-page properties (outcome = the row path's record-by-record decision; no snapshot_fnc () on preceding pages)",
+ "file": "src/storage/heap_file.c",
+ "mode": "server",
+ "seams": [],
+ "appendix": "hooks.cpp",
+ "test": "test.cpp",
+ "requires": [
+  "heap_page_collect_visible"
+ ],
+ "watch": [
+  "src/storage/heap_file.h",
+  "src/transaction/mvcc.h",
+  "src/transaction/mvcc.c",
+  "src/base/object_representation.h",
+  "src/base/object_representation_constants.h",
+  "src/object/object_representation.c",
+  "src/storage/slotted_page.h"
+ ],
+ "fakes": "mvcc_satisfies_snapshot: the real symbol (mvcc.c not linked) so the collector's `snapshot_fnc == mvcc_satisfies_snapshot` compares against it; follows mvcc.c mvcc_satisfies_snapshot () branch by branch (not deleted: no INSID -> SATISFIED, inserter in snapshot -> TOO_NEW, else SATISFIED; deleted: inserter in snapshot -> TOO_NEW, deleter in snapshot -> SATISFIED, else TOO_OLD) with mvcc_is_id_in_snapshot () for a snapshot whose highest_completed_mvccid == lowest_active_mvccid (in snapshot iff id >= lowest, no active list) and a transaction with no MVCCID (INSERTED_BY_ME / DELETED_BY_ME never true); counts calls. w_other_snapshot: the same answers at another address (a snapshot function that is not mvcc_satisfies_snapshot), counted apart. spage_get_record: slot 0 only -- the chain bytes (hooks.cpp fills a HEAP_CHAIN with max_mvccid and the bestspace flag) or zero HEAP_HDR_STATS bytes for the heap header page, PEEK, S_SUCCESS. spage_next_record: the next record above *slotid, S_END past the last (slotted_page.c walk, PEEK). pgbuf_get_vpid_ptr: the fake page's VPID (the watcher already holds the page: no unfix/fetch). mvcc_header_size_lookup[8]: object_representation.c's table copied. oid_Root_class_oid: an OID on another page. Records are real MVCC headers (OR_PUT_INT repid|flags<<24, OR_PUT_INT chn, OR_PUT_BIGINT insid/delid where flagged, raw LOG_LSA for a previous version) decoded by the TU's own heap_page_row_mvcc_header (). MVCC_SNAPSHOT is raw memory (no constructor): lowest_active_mvccid, highest_completed_mvccid, snapshot_fnc written. Release flags (-DNDEBUG): heap_page_check_word_decision () and the or_mvcc_get_header () cross-check are compiled out; the fake snapshot gives the answers those debug asserts expect. Extra TU src/base/mem_block.cpp: heap_file.c's static cubmem::block_allocator constructor.",
+ "note": "Ran 2026-11-20: head 619e3f403 13/13 PASS; base 406d2d87a 9/13 -- C2, C3a, C4c, P2 FAIL on the snapshot_fnc () call count only (the PR's change; the rows, codes, slots and hdr_size match in every case, P1 outcome property PASS on both). Mutants on head (OUT mut/): MVCC_ID_PRECEDES -> <=, any snapshot function, no chain length check, precedes mask without repid, hdr_size without the PREV flag, DELID skip on any page, word_want not updated, DELID record kept -- all 8 detected.",
+ "origin": {
+  "pr": 8614,
+  "jira": "CBRD-28188",
+  "finding": "none -- contract suite for the PR's core decision (review procedure 3-1 (c))",
+  "reviewed_head": "619e3f403",
+  "base": "406d2d87a",
+  "date": "2026-11-20"
+ },
+ "extra": [
+  "src/base/mem_block.cpp"
+ ]
+}
