@@ -1,0 +1,229 @@
+diff --git a/src/query/parallel/px_scan/px_scan_input_handler_index.cpp b/src/query/parallel/px_scan/px_scan_input_handler_index.cpp
+index bbbdb5ace..783088877 100644
+--- a/src/query/parallel/px_scan/px_scan_input_handler_index.cpp
++++ b/src/query/parallel/px_scan/px_scan_input_handler_index.cpp
+@@ -80,17 +80,40 @@ namespace parallel_scan
+   void
+   input_handler_index::bitmap_leave_index_step ()
+   {
++#if defined (TLA_TRACE)
++    std::uint64_t tla_t0 = tla_trace_now_ ();
++#endif
+     std::lock_guard<std::mutex> lock (m_bm_mutex);
+ 
+     if (--m_bm_index_pending == 0)
+       {
+ 	m_bm_cv.notify_all ();
+       }
++#if defined (TLA_TRACE)
++    char tla_a[32], tla_s[32];
++    snprintf (tla_a, sizeof (tla_a), "\"w\":%d", tla_bm_w_);
++    snprintf (tla_s, sizeof (tla_s), "\"pending\":%d", m_bm_index_pending);
++    tla_bm_emit ("Leave", tla_t0, tla_a, tla_s);
++#endif
+   }
+ 
+   bool
+   input_handler_index::bitmap_wait_index_step ()
+   {
++#if defined (TLA_TRACE)
++    std::uint64_t tla_t0 = tla_trace_now_ ();
++    struct tla_wait_scope
++    {
++      std::uint64_t t0;
++      bool r;
++      ~tla_wait_scope ()
++      {
++	char tla_a[32];
++	snprintf (tla_a, sizeof (tla_a), "\"w\":%d", tla_bm_w_);
++	tla_bm_emit (r ? "WaitPass" : "WaitStop", t0, tla_a, "");
++      }
++    } tla_sc { tla_t0, false };
++#endif
+     std::unique_lock<std::mutex> lock (m_bm_mutex);
+ 
+     /* a worker that failed before its index step never leaves it: it raised the interrupt instead */
+@@ -98,7 +121,12 @@ namespace parallel_scan
+       {
+ 	m_bm_cv.wait_for (lock, std::chrono::milliseconds (10));
+       }
++#if defined (TLA_TRACE)
++    tla_sc.r = m_interrupt_p->get_code () == interrupt::interrupt_code::NO_INTERRUPT;
++    return tla_sc.r;
++#else
+     return m_interrupt_p->get_code () == interrupt::interrupt_code::NO_INTERRUPT;
++#endif
+   }
+ 
+   /* No-op: slot_iterator_index drives the leaf-page cursor directly. */
+diff --git a/src/query/scan_manager.c b/src/query/scan_manager.c
+index 816b4a0c0..92e9aefff 100644
+--- a/src/query/scan_manager.c
++++ b/src/query/scan_manager.c
+@@ -7192,6 +7192,30 @@ scan_next_index_scan (THREAD_ENTRY * thread_p, SCAN_ID * scan_id)
+ }
+ 
+ // *INDENT-OFF*
++#if defined (TLA_TRACE)
++#include <string>
++void
++tla_bm_emit (const char *ev, std::uint64_t t0, const char *args, const char *state)
++{
++  TLA_TRACE_HEAD_ (t0, ev);
++  fprintf (tla_f_, ",\"args\":{%s},\"state\":{%s}}\n", args, state);
++}
++
++/* one record at scope exit: the function's whole body is the action */
++struct tla_bm_scope
++{
++  const char *ev;
++  std::uint64_t t0;
++  std::string args;
++  std::string state;
++  tla_bm_scope (const char *e, int w) : ev (e), t0 (tla_trace_now_ ()), args ("\"w\":" + std::to_string (w)) {}
++  ~tla_bm_scope ()
++  {
++    tla_bm_emit (ev, t0, args.c_str (), state.c_str ());
++  }
++};
++#endif
++
+ scan_bitmap_marks::~scan_bitmap_marks ()
+ {
+   THREAD_ENTRY *thread_p = thread_get_thread_entry_info ();
+@@ -7401,6 +7425,10 @@ scan_bitmap_marks::read_chain (THREAD_ENTRY *thread_p, const scan_bitmap_writer
+ int
+ scan_bitmap_marks::mark (THREAD_ENTRY *thread_p, scan_bitmap_worker *w, const OID *oid, int *sector_hint)
+ {
++#if defined (TLA_TRACE)
++  tla_bm_scope tla_sc ("Mark", (int) (w - m_bm_workers) + 1);
++  tla_sc.args += ",\"oid\":" + std::to_string (oid->pageid * 1000 + oid->slotid);
++#endif
+   const int sectid = SECTOR_FROM_PAGEID (oid->pageid);
+   int s = *sector_hint;
+ 
+@@ -7536,6 +7564,9 @@ scan_bitmap_marks::mark (THREAD_ENTRY *thread_p, scan_bitmap_worker *w, const OI
+ int
+ scan_bitmap_marks::end_marks (THREAD_ENTRY *thread_p, scan_bitmap_worker *w)
+ {
++#if defined (TLA_TRACE)
++  tla_bm_scope tla_sc ("EndMarks", (int) (w - m_bm_workers) + 1);
++#endif
+   if (w->over != nullptr)
+     {
+       /* the list's last page is fixed by this thread */
+@@ -7570,6 +7601,35 @@ scan_bitmap_marks::load (THREAD_ENTRY *thread_p, scan_bitmap_worker *w, std::uin
+ {
+   scan_bitmap_table &table = w->heap_tbl;
+   int error_code = NO_ERROR;
++#if defined (TLA_TRACE)
++  /* state: the OIDs heap_tbl holds when load () returns, as page * 1000 + slot (page = VPID pageid here: the test's
++   * sectors are 0 and 1 of volume 0, so the place in the sector list * 64 + offset is the pageid) */
++  struct tla_load_scope : tla_bm_scope
++  {
++    scan_bitmap_table *t;
++    tla_load_scope (int wi, std::uint32_t p, scan_bitmap_table *tb) : tla_bm_scope ("Load", wi), t (tb)
++    {
++      args += ",\"part\":" + std::to_string (p);
++    }
++    ~tla_load_scope ()
++    {
++      state = "\"heap\":[";
++      bool first = true;
++      for (int i = 0; t->e != nullptr && i < t->n; i++)
++	{
++	  for (int b = 0; b < SCAN_BITMAP_WORDS * 64; b++)
++	    {
++	      if (t->e[i].w[b >> 6] & ((std::uint64_t) 1 << (b & 63)))
++		{
++		  state += (first ? "" : ",") + std::to_string ((long long) t->e[i].page * 1000 + b);
++		  first = false;
++		}
++	    }
++	}
++      state += "]";
++    }
++  } tla_sc ((int) (w - m_bm_workers) + 1, part, &table);
++#endif
+   /* an entry of the part being read */
+   auto keep = [&table] (std::uint32_t page, int word, std::uint64_t bits) -> int
+   {
+@@ -7668,7 +7728,15 @@ scan_bitmap_marks::take_over (THREAD_ENTRY *thread_p, scan_bitmap_worker *taker,
+   scan_bitmap_worker *base = nullptr;
+ 
+   *error_code = NO_ERROR;
+-  if (!m_bm_over_taken.compare_exchange_strong (expected, true))
++#if defined (TLA_TRACE)
++  std::uint64_t tla_t0 = tla_trace_now_ ();
++#endif
++  const bool tla_won = m_bm_over_taken.compare_exchange_strong (expected, true);
++#if defined (TLA_TRACE)
++  tla_bm_emit ("OverTry", tla_t0, ("\"w\":" + std::to_string (tla_bm_w_)).c_str (),
++	       tla_won ? "\"won\":true" : "\"won\":false");
++#endif
++  if (!tla_won)
+     {
+       return false;
+     }
+@@ -7736,6 +7804,9 @@ scan_bitmap_marks::next_over (THREAD_ENTRY *thread_p, OID *oid)
+ void
+ scan_bitmap_marks::close_worker (THREAD_ENTRY *thread_p, scan_bitmap_worker *w)
+ {
++#if defined (TLA_TRACE)
++  tla_bm_scope tla_sc ("Close", (int) (w - m_bm_workers) + 1);
++#endif
+   if (w->over != nullptr)
+     {
+       qfile_close_list (thread_p, w->over);
+diff --git a/src/query/scan_manager.h b/src/query/scan_manager.h
+index 301055814..79a50703b 100644
+--- a/src/query/scan_manager.h
++++ b/src/query/scan_manager.h
+@@ -53,6 +53,15 @@
+ #include <atomic>
+ #include <cstdint>
+ #include <vector>
++#if defined (TLA_TRACE)
++/* tla/query/bitmap_heap_steps/trace (dev4-review-workspace): one record per model action, written by
++ * tla_bm_emit () (scan_manager.c, the one TU that owns the trace files).  tla_bm_w_: the model worker (1..N) of the
++ * calling thread, set by claim_worker (). */
++#include <cstdio>
++#include "tla_trace.h"
++inline thread_local int tla_bm_w_ = 0;
++extern void tla_bm_emit (const char *ev, std::uint64_t t0, const char *args, const char *state);
++#endif
+ 
+ // forward definitions
+ struct indx_info;
+@@ -1045,7 +1054,11 @@ class scan_bitmap_marks
+     /* a worker's own tables, temp files and list for both steps */
+     scan_bitmap_worker *claim_worker ()
+     {
+-      return &m_bm_workers[m_bm_claim.fetch_add (1, std::memory_order_relaxed) % m_bm_nworkers];
++      scan_bitmap_worker *tla_w = &m_bm_workers[m_bm_claim.fetch_add (1, std::memory_order_relaxed) % m_bm_nworkers];
++#if defined (TLA_TRACE)
++      tla_bm_w_ = (int) (tla_w - m_bm_workers) + 1;
++#endif
++      return tla_w;
+     }
+     /* index step: record one OID. sector_hint: the caller's last sector, kept by the caller. */
+     int mark (THREAD_ENTRY *thread_p, scan_bitmap_worker *w, const OID *oid, int *sector_hint);
+@@ -1054,7 +1067,18 @@ class scan_bitmap_marks
+     /* heap step: the next partition nobody took; false: none left */
+     bool take_partition (std::uint32_t *part)
+     {
++#if defined (TLA_TRACE)
++      std::uint64_t tla_t0 = tla_trace_now_ ();
++#endif
+       *part = m_bm_next_part.fetch_add (1, std::memory_order_relaxed);
++#if defined (TLA_TRACE)
++      {
++	char tla_a[32], tla_s[32];
++	snprintf (tla_a, sizeof (tla_a), "\"w\":%d", tla_bm_w_);
++	snprintf (tla_s, sizeof (tla_s), "\"part\":%u", *part < m_bm_nparts ? *part : m_bm_nparts);
++	tla_bm_emit ("TakePart", tla_t0, tla_a, tla_s);
++      }
++#endif
+       return *part < m_bm_nparts;
+     }
+     std::uint32_t parts_of_partition () const

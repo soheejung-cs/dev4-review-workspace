@@ -344,7 +344,9 @@ def _build_and_run(a, sha, wt, db, srcroot):
             continue
         ecc, eflags = flags_for(db, srcroot, rel, a.mode)
         eobj = os.path.join(out, 'extra_' + re.sub(r'[^A-Za-z0-9_.]', '_', rel) + '.o')
-        r = sh([ecc, *retarget(eflags, srcroot, wt), '-c', esrc, '-o', eobj], check=False)
+        # --cflags 도 extra 에 — 도움말대로(2026-11-20: 빠져 있어 extra 의 TLA_TRACE 계측이 꺼진 채 링크됐다)
+        r = sh([ecc, *retarget(eflags, srcroot, wt), *shlex.split(getattr(a, 'cflags', '') or ''), '-c', esrc, '-o', eobj],
+               check=False)
         log.append(f'$ compile extra {rel} rc={r.returncode}\n{r.stderr[-2000:]}')
         if r.returncode:
             open(os.path.join(out, 'build.log'), 'w').write('\n'.join(log))
