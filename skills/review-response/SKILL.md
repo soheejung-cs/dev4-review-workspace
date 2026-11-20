@@ -71,7 +71,7 @@ gh api graphql -f query="mutation{resolveReviewThread(input:{threadId:\"$TID\"})
 ```
 PR 본문 갱신은 `gh api -X PATCH repos/CUBRID/cubrid/pulls/<n> -F body=@file` (`gh pr edit` 는 이 서버에서 조용히 실패 — H-25).
 **CI 트리거(`/run all`)는 PR 작성자 쪽이 단다 — 에이전트가 작성자의 PR 을 대응하면 에이전트가, 리뷰 반영 커밋을 push 한 뒤 한 번**(조건·예외의 정본: claude-workspace `PR브랜치-규칙`(claude-workspace `skills/cubrid-pr/PR브랜치-규칙.md`) §0, 2026-11-02). TC 답안을 고쳤으면 `/run all` 전에 `tc/pr-<n>` push 가 끝나 있어야 하고, 같은 PR 의 런이 돌고 있으면 기다린다(새 `/run` 이 도는 런을 취소한다).
-새 `/run all` 은 언제나(TC 만 고쳤어도) 엔진·두 TC 리포의 `tc/pr-<n>` 셋을 upstream develop 에 merge(force-push 없음)·push 해 셋 다 뒤처짐 0 을 확인한 뒤 단다(사용자 지시 2026-11-03, 2026-11-20 모든 `/run all` 로 넓힘 — 정본 `PR브랜치-규칙`(claude-workspace `skills/cubrid-pr/PR브랜치-규칙.md`) §0-3). CI 본문(런 Summary)의 `/run rerun <run_id>` 는 사용자가 rerun 을 말할 때만, 그때는 셋을 맞추지 않는다(사용자 지시 2026-11-20 — 엔진 merge 는 rerun 을 거절당하게 하고 TC merge 는 develop 에서 바뀐 케이스까지 다시 돌게 한다) — gha-ci 스킬 §1-6, `gha_rerun_cmd.sh`.
+새 `/run all` 은 언제나(TC 만 고쳤어도) 엔진·두 TC 리포의 `tc/pr-<n>` 셋을 upstream develop 에 merge(force-push 없음)·push 해 셋 다 뒤처짐 0 을 확인한 뒤 단다 — **맞추기가 먼저, `/run all` 은 맨 마지막**: `python3 ~/dev/docs/claude-workspace/tools/run_all.py <PR> --post` 로만 달고(훅 guard 17), 단 뒤에는 런이 끝날 때까지 셋에 push 하지 않는다(큐의 런이 취소된다, 사용자 지시 2026-11-20)(사용자 지시 2026-11-03, 2026-11-20 모든 `/run all` 로 넓힘 — 정본 `PR브랜치-규칙`(claude-workspace `skills/cubrid-pr/PR브랜치-규칙.md`) §0-3). CI 본문(런 Summary)의 `/run rerun <run_id>` 는 사용자가 rerun 을 말할 때만, 그때는 셋을 맞추지 않는다(사용자 지시 2026-11-20 — 엔진 merge 는 rerun 을 거절당하게 하고 TC merge 는 develop 에서 바뀐 케이스까지 다시 돌게 한다) — gha-ci 스킬 §1-6, `gha_rerun_cmd.sh`.
 게시로 끝나지 않는다 — §6(보드·세션기록)과 §7(배운것 append + `/self-evolution`)까지가 대응이다.
 
 ## 5. TC PR(cubrid-testcases-private-ex `tc/pr-<n>`) 의 답글
