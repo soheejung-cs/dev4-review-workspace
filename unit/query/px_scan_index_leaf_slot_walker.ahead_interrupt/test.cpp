@@ -78,6 +78,7 @@ namespace wk
     bool filtered;		/* the key filter is false */
     int filter_err;		/* the key filter fails with this error every time */
     int read_err;		/* the key's read fails with this error every time */
+    bool missing;		/* spage_get_record () of its slot fails (-46): a damaged leaf (PR#8667 W12) */
   };
 
   std::vector<fkey> keys;
@@ -229,7 +230,7 @@ spage_get_record (THREAD_ENTRY * thread_p, PAGE_PTR pgptr, PGSLOTID slotid, RECD
   (void) thread_p;
   (void) pgptr;
   (void) ispeeking;
-  if (slotid < 1 || slotid > (int) wk::keys.size ())
+  if (slotid < 1 || slotid > (int) wk::keys.size () || wk::keys[slotid - 1].missing)
     {
       /* slotted_page.c spage_get_record (): no such slot -- ER_SP_UNKNOWN_SLOTID (-46, "slot %d on page %d ... is not
        * allocated") is set and S_DOESNT_EXIST returned */
@@ -819,6 +820,21 @@ TEST_CASE ("W11 a descending walk from a slot inside the leaf (slot 5 of 12) rea
   CHECK (wk::missing_reads == 0);
   CHECK (o.rows == 5);
   CHECK (wk::same_oids (wk::looked_up, oids_backward_from (5)));
+  check_balanced ();
+}
+
+TEST_CASE ("W12 a record that cannot be read inside the leaf (slot 5 of 12, -46) stops the walk with that error as a failed key read does (W5): rows of keys 1-4, S_ERROR, -46, the range's end signaled once (base: the slot is skipped, 11 rows, S_END with -46 left set; a debug build asserts first)", "[contract]")
+{
+  wk::reset ();
+  wk::leaf (12, false, false);
+  wk::keys[5 - 1].missing = true;
+  wk::outcome o = wk::run ();
+
+  CHECK (o.end == S_ERROR);
+  CHECK (o.err == ER_SP_UNKNOWN_SLOTID);
+  CHECK (o.rows == 4);
+  CHECK (wk::signals == 1);
+  CHECK (wk::rows_at_signal == 4);
   check_balanced ();
 }
 
