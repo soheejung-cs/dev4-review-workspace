@@ -11,6 +11,9 @@ UI 명세 — 이 docstring 이 정본이다(2026-10-28 스킬에서 옮김, H-4
   assignee 에 tracked_github 가 있는 open·non-draft PR. assignee 에 추적 ID 가 없으면 작성자로도 잡고(사용자 지시 2026-10-14 —
   assignee 를 비운 PR 이 빠지던 것) 그 행에는 `작성자 기준(assignee 없음)`, board.json `tracked_via: author`. 머지된 것·draft 는
   싣지 않는다 — 기준은 JIRA 가 아니라 GitHub(사용자 지시 2026-09-16).
+  추적 밖 PR: assignee·작성자가 추적 ID 가 아니어도 추적 ID 가 리뷰어인 open·non-draft PR 은 맨 아래 [추적 밖 PR 절]에 따로 싣는다
+  (사용자 지시 2026-11-24 "팀원거 아니어도 밑에 따로 보여야" — hgryoo 의 cubrid#8624 에 soheejung-cs 가 리뷰어로 요청돼 있는데 보드에 없었다).
+  리뷰어 = reviewRequests 의 사람 + latestReviews 를 남긴 사람. 팀 단위 요청은 사람으로 풀지 않는다(지금 리포의 요청은 사람 단위).
 
 [PR 행] (details·agent_reviewed·local_docs·tc_prs)
   - 미해결 리뷰 스레드 수 / 전체 스레드 수, 미해결 스레드를 연 사람별 개수.
@@ -19,7 +22,8 @@ UI 명세 — 이 docstring 이 정본이다(2026-10-28 스킬에서 옮김, H-4
     빼므로, 요청 목록만 보면 코멘트 한 번 남기고 승인하지 않은 리뷰어가 사라진다(2026-09-21). 재요청되면 다시 `미착수`.
     그 아래 reviewDecision.
   - TC 신호등(사용자 지시 2026-11-10 "agent-to-do 보드에 있는 테스트 결과 보는 걸 review-to-do 에도" — 2026-09 의 "CI 는 보지 않음" 을
-    대체): 엔진 PR 행의 `TC 테스트` 열에 헤드 커밋의 `gha-ci: test_sql|medium|shell` 을 초록(통과)·노랑(도는 중)·빨강(실패)·회색(런 없음)으로.
+    대체): 엔진 PR 행의 `TC 테스트` 열에 헤드 커밋의 `gha-ci: test_sql|medium|shell|sql_by_cci`(표시 `cci`, 2026-11-24 사용자 지시로 다시 싣는다)
+    를 초록(통과)·노랑(도는 중)·빨강(실패)·회색(런 없음)으로.
     헤드에 결과가 없으면 앞 커밋 5개의 가장 최근 결과, 런이 큐에 있으면 노랑. 링크는 도는 런·앞 커밋 결과면 그 런, 아니면 PR checks.
     그 밖의 체크(code-style·cppcheck·Check TC PRs …)는 싣지 않는다 — ci_summary() 는 남아 있지만 render 가 쓰지 않는다.
   - 연동된 TC PR: JIRA 키(또는 제목의 `cubrid#<n>`)가 같은 cubrid-testcases / -private-ex PR 을 엔진 PR 하위에 — 미해결 수·미착수 리뷰어.
@@ -28,6 +32,7 @@ UI 명세 — 이 docstring 이 정본이다(2026-10-28 스킬에서 옮김, H-4
 [머리 통계·사람별 표] (사용자 지시 2026-10-06)
   머리 통계는 '미완료 PR' 하나 — 미완료 = 머지 가능이 아닌 것 = 미해결 스레드가 남았거나 승인자가 0. `18 / 전체 21` 꼴.
   사람별 표는 사람마다 `내 PR`(assignee — 작성자가 움직일 차례) / `내가 리뷰어`(미착수·승인 전 — 내 차례) / `머지 대기`(승인 끝·미해결 0, 회색).
+  `내가 리뷰어` 는 추적 밖 PR 도 센다(2026-11-24). 머리 통계 '미완료 PR' 은 추적 PR 만 센다.
 
 [툴바] (사용자 지시 2026-10-06, 클라이언트 JS — 재생성 없이 즉시 바뀐다)
   - 「사람으로 모아 보기 — 담당자 + 리뷰어」 버튼 줄: 사람을 누르면 그 사람이 리뷰어(미착수·승인 전·승인자)이거나 담당자(assignee)인
@@ -53,6 +58,13 @@ UI 명세 — 이 docstring 이 정본이다(2026-10-28 스킬에서 옮김, H-4
 
 [연동 대상 없는 TC PR 절]
   엔진 PR 에 붙지 못한 TC PR. 본문 행과 같은 data-* 속성을 붙여 툴바의 사람 필터가 여기에도 걸린다(사용자 지시 2026-10-13).
+  추적 밖 TC PR(작성자는 추적 밖, 추적 ID 가 리뷰어)도 붙을 엔진 PR 이 없으면 여기에 온다.
+
+[추적 밖 PR 절] (사용자 지시 2026-11-24, pr_row — 사람별 절과 같은 행)
+  추적 ID 가 리뷰어인 추적 밖 엔진 PR 중 그 추적 ID 가 아직 응답할 몫(미착수·승인 전)이 있는 것 — 추적 ID 가 승인을 마친 것은 싣지 않는다.
+  열·data-* 속성·붉은 행 판정이 사람별 절과 같아 툴바에서 사람을 고르면 그 사람이 리뷰어인 행만 남는다.
+  연동된 TC PR: 추적 TC PR 을 먼저 추적 행에, 못 붙으면 이 행에 붙이고, 이 행의 TC PR 은 작성자도 대개 추적 밖이라 list_prs 가 이미 받은
+  open·non-draft 목록(ALL_OPEN)에서 JIRA 키·`cubrid#<n>` 으로 더 찾는다(스레드·리뷰어만 읽는다 — record(light=True)).
 """
 import sys, json, os, re, subprocess, datetime, html
 from urllib.parse import quote
@@ -78,25 +90,54 @@ BOTS = {'greptile-apps', 'chatgpt-codex-connector', 'github-actions', 'cubrid-su
 def sh(*a):
     return subprocess.check_output(a, universal_newlines=True)
 
+def sh_retry(*a, tries=3):
+    """목록 질의용 — GitHub GraphQL 의 일시 실패(시간 초과·502)에 보드 갱신 한 번이 통째로 죽지 않게 두 번 더 묻는다."""
+    for k in range(tries):
+        try:
+            return sh(*a)
+        except subprocess.CalledProcessError:
+            if k == tries - 1:
+                raise
+            import time
+            time.sleep(5 * (k + 1))
+
+ALL_OPEN = {}   # repo -> open·non-draft PR 원본 — 추적 밖 엔진 PR 의 TC PR 을 찾을 때 gh 에 다시 묻지 않는다
+
 def list_prs(repo):
-    js = sh('gh', 'pr', 'list', '--repo', repo, '--state', 'open', '--limit', '300', '--json',
-            'number,title,url,isDraft,assignees,author,createdAt,updatedAt,headRefName,statusCheckRollup')
-    out = []
+    """(추적 PR, 추적 밖 PR). 추적 밖 = assignee·작성자는 추적 ID 가 아니지만 추적 ID 가 리뷰어(요청됨·리뷰함)인 것."""
+    js = sh_retry('gh', 'pr', 'list', '--repo', repo, '--state', 'open', '--limit', '300', '--json',
+                  'number,title,url,isDraft,assignees,author,createdAt,updatedAt,headRefName,statusCheckRollup')
+    # 리뷰어 필드는 따로 묻는다 — 한 질의에 statusCheckRollup 과 같이 실으면 cubrid(open 196)에서 GraphQL 이 실패했다(2026-11-24, 재시도로는 통과)
+    revjs = sh_retry('gh', 'pr', 'list', '--repo', repo, '--state', 'open', '--limit', '300', '--json', 'number,reviewRequests,latestReviews')
+    revs_of = {q['number']: q for q in json.loads(revjs)}
+    out, outside = [], []
+    ALL_OPEN[repo] = []
     for p in json.loads(js):
+        p.update({k: v for k, v in revs_of.get(p['number'], {}).items() if k != 'number'})
         if p.get('isDraft'):
             continue
         ass = [a['login'] for a in p.get('assignees', [])]
+        p['repo'] = repo; p['assignee_logins'] = ass
+        ALL_OPEN[repo].append(p)
         hit = [a for a in ass if a in TRACKED]
         via = 'assignee'
         # assignee 에 추적 ID 가 없으면 작성자(author)로도 잡는다 — assignee 를 비워 둔 PR 이 보드에서 빠지던 것(사용자 지시 2026-10-14).
         # open·non-draft 조건은 같다. 행에는 '작성자 기준' 을 표시한다.
         if not hit and (p.get('author') or {}).get('login') in TRACKED:
             hit = [p['author']['login']]; via = 'author'
-        if not hit:
+        if hit:
+            p['tracked'] = hit; p['tracked_via'] = via
+            out.append(p)
             continue
-        p['repo'] = repo; p['tracked'] = hit; p['assignee_logins'] = ass; p['tracked_via'] = via
-        out.append(p)
-    return out
+        # 추적 밖이라도 추적 ID 가 리뷰어면 따로 싣는다(사용자 지시 2026-11-24 "팀원거 아니어도 밑에 따로 보여야").
+        # 리뷰어 = 요청된 사람(팀 요청은 풀지 않는다) + 최신 리뷰를 남긴 사람 — details() 의 미착수·승인 전과 같은 범위.
+        revs = {(r or {}).get('login') for r in (p.get('reviewRequests') or [])}
+        revs |= {((r or {}).get('author') or {}).get('login') for r in (p.get('latestReviews') or [])}
+        rhit = [c for c in TRACKED if c in revs]
+        if rhit:
+            p['tracked'] = []; p['tracked_via'] = 'reviewer'; p['tracked_reviewers'] = rhit
+            outside.append(p)
+    return out, outside
 
 def details(repo, num):
     owner, name = repo.split('/')
@@ -143,7 +184,8 @@ def details(repo, num):
             'decision': d.get('reviewDecision') or '-', 'mergeable': d.get('mergeable') or '-',
             'ci': ci, 'ci_stale': ci_stale}
 
-GHA_CTX = re.compile(r'gha-ci: test_(sql|medium|shell)$')
+# sql_by_cci 도 싣는다(사용자 지시 2026-11-24 "cci 결과도 보드에 다시 표시해 주는 것으로 바꿔 줘 이제 봐도 됨" — 11-11 의 'CCI 보지 마' 를 푼다)
+GHA_CTX = re.compile(r'gha-ci: test_(sql|medium|shell|sql_by_cci)$')
 
 # gha-ci 는 `/run` 코멘트(issue_comment)로 develop 위에서 돌아 PR 브랜치로는 런을 못 찾는다 — 런 제목 "PR #N · …" 으로
 # 묶는다. 코멘트마다 생기는 skipped 런은 뺀다. 보드 생성마다 한 번만 읽는다(agent-board-gen.py 와 같은 규칙).
@@ -171,12 +213,12 @@ def ci_lights(r):
     run = gha_run(r['number'])
     waiting = run is not None and run.get('status') != 'completed'
     out = ''
-    for s in ('sql', 'medium', 'shell'):
+    for s in ('sql', 'medium', 'shell', 'sql_by_cci'):
         st = r['ci'].get(s, '')
         if not st and waiting:
             st = 'PENDING'   # 런이 큐에 있어 아직 pending 상태를 달지 않았다
         cls, word = CI_LIGHT.get(st, ('none', '런 없음'))
-        out += '<span class="light light-%s" title="%s: %s"><i></i>%s</span>' % (cls, s, word, s)
+        out += '<span class="light light-%s" title="%s: %s"><i></i>%s</span>' % (cls, s, word, 'cci' if s == 'sql_by_cci' else s)
     href = ('https://github.com/CUBRID/cubrid/actions/runs/%d' % run['databaseId'] if run and (r['ci_stale'] or waiting)
             else 'https://github.com/CUBRID/cubrid/pull/%d/checks' % r['number'])
     return '<a class="lights" href="%s" target="_blank" rel="noopener">%s</a>' % (esc(href), out)
@@ -241,39 +283,77 @@ def tc_prs(num):
             pass
     return out
 
+def record(p, light=False):
+    """board.json 의 PR 레코드. light=True 는 스레드·리뷰어만 읽는다 — 추적 밖 엔진 PR 에 붙는 TC PR(행에는 미해결 수·미착수만 쓴다)."""
+    d = details(p['repo'], p['number'])
+    key = jira_key(p['title'])
+    rec = {'repo': p['repo'], 'number': p['number'], 'title': p['title'], 'url': p['url'], 'author': p['author']['login'],
+           'assignees': p['assignee_logins'], 'tracked': p.get('tracked', []), 'tracked_via': p.get('tracked_via', 'assignee'), 'created': p['createdAt'][:10], 'updated': p['updatedAt'][:10],
+           'jira': key, 'docs': [] if light else local_docs(key, p['number']), 'linked_tc': [], **d}
+    if p.get('tracked_reviewers'):
+        rec['tracked_reviewers'] = p['tracked_reviewers']
+    rec['agent_n'], rec['agent_last'], rec['agent_kinds'] = (0, '', []) if light else agent_reviewed(p['repo'], p['number'])
+    if p['repo'] != 'CUBRID/cubrid':
+        m = re.search(r'cubrid#(\d+)', p['title'])
+        rec['engine_pr'] = int(m.group(1)) if m else None
+    return rec
+
+def tc_home(t, homes):
+    """TC PR 이 붙을 엔진 PR 행 — JIRA 키가 같거나 제목이 cubrid#<n> 을 가리키는 것 (사용자 지시 2026-09-16)"""
+    return next((r for r in homes if (t.get('engine_pr') and r['number'] == t['engine_pr']) or (t['jira'] and t['jira'] == r['jira'])), None)
+
 def main():
-    prs = []
+    prs, outs = [], []
     for repo in REPOS:
-        prs += list_prs(repo)
-    rows, tcs = [], []
-    for p in prs:
-        d = details(p['repo'], p['number'])
-        key = jira_key(p['title'])
-        rec = {'repo': p['repo'], 'number': p['number'], 'title': p['title'], 'url': p['url'], 'author': p['author']['login'],
-               'assignees': p['assignee_logins'], 'tracked': p['tracked'], 'tracked_via': p.get('tracked_via', 'assignee'), 'created': p['createdAt'][:10], 'updated': p['updatedAt'][:10],
-               'jira': key, 'docs': local_docs(key, p['number']), 'linked_tc': [], **d}
-        rec['agent_n'], rec['agent_last'], rec['agent_kinds'] = agent_reviewed(p['repo'], p['number'])
-        if p['repo'] == 'CUBRID/cubrid':
-            rows.append(rec)
-        else:
-            m = re.search(r'cubrid#(\d+)', p['title'])
-            rec['engine_pr'] = int(m.group(1)) if m else None
-            tcs.append(rec)
-    # 연동: JIRA 키가 같거나 제목이 cubrid#<n> 을 가리키는 TC PR 을 엔진 PR 하위에 붙인다 (사용자 지시 2026-09-16)
+        mine, other = list_prs(repo)
+        prs += mine; outs += other
+    recs = [record(p) for p in prs]
+    rows = [r for r in recs if r['repo'] == 'CUBRID/cubrid']
+    tcs = [r for r in recs if r['repo'] != 'CUBRID/cubrid']
+    # 추적 밖 PR 은 추적 ID 가 아직 응답할 몫(미착수·승인 전)이 있는 것만 싣는다 — 추적 ID 가 이미 승인했으면 그 사람의 할 일이 아니고,
+    # 작성자도 추적 밖이라 머지 대기로 남길 까닭이 없다(첫 생성에서 shparkcubrid 가 승인만 한 PR 7개가 절을 채웠다, 2026-11-24)
+    orecs = []
+    for p in outs:
+        rec = record(p, light=True)
+        rec['tracked_reviewers'] = [c for c in TRACKED if c in set(rec['requested'] + rec['pending_approval'])]
+        if not rec['tracked_reviewers']:
+            continue
+        if rec['repo'] == 'CUBRID/cubrid':   # 엔진 행은 사람별 절의 행처럼 리뷰 문서·에이전트 리뷰 열도 채운다
+            rec['docs'] = local_docs(rec['jira'], rec['number'])
+            rec['agent_n'], rec['agent_last'], rec['agent_kinds'] = agent_reviewed(rec['repo'], rec['number'])
+        orecs.append(rec)
+    outside = [r for r in orecs if r['repo'] == 'CUBRID/cubrid']
+    tcs += [r for r in orecs if r['repo'] != 'CUBRID/cubrid']
+    # 연동: 추적 행에 먼저, 못 붙으면 추적 밖 행에
     for t in tcs:
-        home = next((r for r in rows if (t['engine_pr'] and r['number'] == t['engine_pr']) or (t['jira'] and t['jira'] == r['jira'])), None)
+        home = tc_home(t, rows) or tc_home(t, outside)
         if home is not None:
             home['linked_tc'].append(t); t['linked'] = True
         else:
             t['linked'] = False
+    # 추적 밖 엔진 PR 의 TC PR 은 작성자도 대개 추적 밖이라 위 목록에 없다 — 이미 받은 open·non-draft 목록에서 더 찾는다
+    seen = {(t['repo'], t['number']) for t in tcs}
+    for repo in REPOS:
+        if repo == 'CUBRID/cubrid' or not outside:
+            continue
+        for p in ALL_OPEN.get(repo, []):
+            if (repo, p['number']) in seen:
+                continue
+            m = re.search(r'cubrid#(\d+)', p['title'])
+            probe = {'engine_pr': int(m.group(1)) if m else None, 'jira': jira_key(p['title'])}
+            home = tc_home(probe, outside)
+            if home is not None:
+                t = record(p, light=True); t['linked'] = True
+                home['linked_tc'].append(t)
     orphans = [t for t in tcs if not t.get('linked')]
     rows.sort(key=lambda r: (r['tracked'][0], -r['unresolved'], r['updated']))
+    outside.sort(key=lambda r: (-r['unresolved'], r['updated']))
     now = datetime.datetime.now().strftime('%Y-%m-%d %H:%M KST')
     os.makedirs(OUT, exist_ok=True)
-    dump = lambda: json.dump({'generated': now, 'tracked': TRACKED, 'prs': rows, 'unlinked_tc_prs': orphans}, open(os.path.join(OUT, 'board.json'), 'w', encoding='utf-8'), ensure_ascii=False, indent=1)
+    dump = lambda: json.dump({'generated': now, 'tracked': TRACKED, 'prs': rows, 'unlinked_tc_prs': orphans, 'outside_prs': outside}, open(os.path.join(OUT, 'board.json'), 'w', encoding='utf-8'), ensure_ascii=False, indent=1)
     dump()
-    open(os.path.join(OUT, 'index.html'), 'w', encoding='utf-8').write(render(rows, now, orphans))
-    print('%s review board: %d PRs (tracked %d ids) -> %s/index.html' % (now, len(rows), len(TRACKED), OUT))
+    open(os.path.join(OUT, 'index.html'), 'w', encoding='utf-8').write(render(rows, now, orphans, outside))
+    print('%s review board: %d PRs + %d outside (tracked %d ids) -> %s/index.html' % (now, len(rows), len(outside), len(TRACKED), OUT))
 
 def esc(s):
     return html.escape(str(s))
@@ -363,7 +443,38 @@ TOOLBAR_JS = """<script>
 })();
 </script>"""
 
-def render(rows, now, orphans=()):
+PR_TABLE_HEAD = ('<table><tr><th>PR</th><th>제목 / JIRA</th><th>미해결</th><th>리뷰어</th><th class="col-mine">에이전트 리뷰</th><th>갱신</th>'
+                 '<th>TC 테스트</th><th>연동된 테스트케이스</th><th class="col-mine">리뷰 문서(내부망)</th></tr>')
+
+def pr_row(r):
+    """엔진 PR 행 하나 — 사람별 절과 추적 밖 절이 같이 쓴다. data-* 속성으로 툴바의 사람 필터·붉은 행 판정(paint)이 걸린다."""
+    owner = r['tracked'][0] if r['tracked'] else None
+    unres = ('<span class="%s">%d</span> / %d' % ('bad' if r['unresolved'] else 'ok', r['unresolved'], r['threads_total']))
+    if r['unresolved_by']:
+        unres += '<div class="muted" style="font-size:11px">' + ', '.join('%s %d' % (esc(a), n) for a, n in sorted(r['unresolved_by'].items(), key=lambda x: -x[1])) + '</div>'
+    rev = ''.join('<span class="pill %s">%s %s</span>' % (esc(st), esc(a), {'APPROVED': '✓', 'CHANGES_REQUESTED': '✗', 'COMMENTED': '…', 'DISMISSED': '–'}.get(st, st)) for a, st, _ in r['latest_reviews'] if a not in BOTS)
+    rev += ''.join('<span class="pill req">%s 미착수</span>' % esc(a) for a in r['requested'])
+    rev += ''.join('<span class="pill pend">%s 승인 전</span>' % esc(a) for a in r.get('pending_approval', []))
+    rev += '<div class="muted" style="font-size:11px">decision: %s</div>' % esc(r['decision'])
+    ag = ('<span class="ok">✓ %s</span><div class="muted" style="font-size:11px">%d건 · %s</div>' % (esc(r['agent_last']), r['agent_n'], esc('/'.join(r['agent_kinds'])))) if r['agent_n'] else '<span class="warn">아직</span>'
+    tcl = ''.join('<div><a href="%s">%s#%d</a> <span class="muted">미해결 %d/%d%s</span></div>' % (esc(t['url']), esc(t['repo'].split('/')[1].replace('cubrid-testcases','tc')), t['number'], t['unresolved'], t['threads_total'], (' · ' + ','.join(esc(a) + ' 미착수' for a in t['requested'])) if t['requested'] else '') for t in r['linked_tc']) or '<span class="muted">없음</span>'
+    docs = ''.join('<a href="%s%s">%s</a>' % (DOCS_HTTP_BASE, quote(d), esc(d)) for d in r['docs']) or '<span class="muted">없음</span>'
+    others = [a for a in r['assignees'] if a != owner]
+    revs = sorted(set(r.get('requested', []) + r.get('pending_approval', []) + r.get('approvers', [])))
+    pend_revs = sorted(set(r.get('requested', []) + r.get('pending_approval', [])))
+    owns = sorted(set(r.get('assignees', []) + r.get('tracked', [])))   # 담당자 (이현욱 요청 2026-10-07)
+    apprs = sorted(set(r.get('approvers', [])))                          # 승인한 사람
+    ready = (not r['unresolved']) and bool(apprs)                         # 승인 끝·미해결 0 = 머지 대기
+    via = ' · <span class="warn">작성자 기준(assignee 없음)</span>' if r.get('tracked_via') == 'author' else ''
+    if r.get('tracked_via') == 'reviewer':
+        via = ' · <span class="muted">추적 밖 — 리뷰어 %s</span>' % esc(', '.join(r.get('tracked_reviewers', [])))
+    return '<tr class="%s" data-unres="%s" data-ready="%s" data-rev="%s" data-pend="%s" data-own="%s" data-appr="%s"><td class="n"><a href="%s">%s#%d</a></td><td>%s<div class="meta">%s · by %s%s</div></td><td class="n">%s</td><td>%s</td><td class="n col-mine">%s</td><td class="n">%s<div class="muted" style="font-size:11px">생성 %s</div></td><td>%s</td><td class="docs" style="font-size:12px">%s</td><td class="docs col-mine">%s</td></tr>' % (
+        ('unres' if r['unresolved'] else ('ready' if ready else '')), '1' if r['unresolved'] else '0', '1' if ready else '0', esc(','.join(revs)), esc(','.join(pend_revs)), esc(','.join(owns)), esc(','.join(apprs)),
+        esc(r['url']), esc(r['repo'].split('/')[1]), r['number'],
+        esc(r['title']), esc(r['jira'] or '-'), esc(r['author']), ((' · assignees +' + ','.join(others)) if others else '') + via,
+        unres, rev, ag, esc(r['updated']), esc(r['created']), ci_lights(r), tcl, docs)
+
+def render(rows, now, orphans=(), outside=()):
     by = {}
     for r in rows:
         by.setdefault(r['tracked'][0], []).append(r)
@@ -401,7 +512,7 @@ def render(rows, now, orphans=()):
     .hidden{display:none}
     """
     h = ['<!doctype html><html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>review-to-do</title><style>%s</style></head><body><div class="wrap">' % css]
-    h.append('<h1>review-to-do</h1><div class="meta">스냅샷 %s · assignee(없으면 작성자) ∈ {%s} · open · non-draft · 미해결 스레드는 리뷰 코멘트 기준 · TC 테스트 = gha-ci test_sql·medium·shell(헤드 커밋) · TC PR 은 JIRA 키/cubrid#n 으로 엔진 PR 하위에 연동</div>' % (now, ', '.join(TRACKED)))
+    h.append('<h1>review-to-do</h1><div class="meta">스냅샷 %s · assignee(없으면 작성자) ∈ {%s} · open · non-draft · 미해결 스레드는 리뷰 코멘트 기준 · TC 테스트 = gha-ci test_sql·medium·shell·sql_by_cci(cci)(헤드 커밋) · TC PR 은 JIRA 키/cubrid#n 으로 엔진 PR 하위에 연동 · 추적 밖이라도 추적 ID 가 리뷰어인 PR 은 맨 아래 따로</div>' % (now, ', '.join(TRACKED)))
     # 머리 통계는 '미완료 PR 건수' 하나만 (사용자 지시 2026-10-06)
     # 미완료 = 머지 가능이 아닌 것 = 미해결 스레드가 남았거나 승인자가 0
     tot_open = sum(1 for r in rows if r['unresolved'] or not r.get('approvers'))
@@ -420,7 +531,7 @@ def render(rows, now, orphans=()):
     # 본인이 assignee 인 것(=작성자가 움직일 차례)과 본인이 리뷰어인 것(=내가 움직일 차례)을 나눈다.
     people = list(TRACKED)
     mine = {c: {'own': [], 'rev': [], 'ready': []} for c in people}
-    for r in rows:
+    for r in list(rows) + list(outside):   # 추적 밖 PR 은 tracked 가 비어 '내가 리뷰어' 에만 든다(2026-11-24)
         done = (not r['unresolved']) and bool(r.get('approvers'))   # 승인 끝·미해결 0 = 머지 대기
         for c in r.get('tracked', []):
             if c in mine:
@@ -445,29 +556,9 @@ def render(rows, now, orphans=()):
         h.append('<section class="who"><h2>@%s <span class="meta">%d PR</span></h2>' % (esc(who), len(rs)))
         if not rs:
             h.append('<div class="muted">추적 대상 없음 (open·non-draft·assignee 또는 작성자 기준)</div></section>'); continue
-        h.append('<table><tr><th>PR</th><th>제목 / JIRA</th><th>미해결</th><th>리뷰어</th><th class="col-mine">에이전트 리뷰</th><th>갱신</th><th>TC 테스트</th><th>연동된 테스트케이스</th><th class="col-mine">리뷰 문서(내부망)</th></tr>')
+        h.append(PR_TABLE_HEAD)
         for r in rs:
-            unres = ('<span class="%s">%d</span> / %d' % ('bad' if r['unresolved'] else 'ok', r['unresolved'], r['threads_total']))
-            if r['unresolved_by']:
-                unres += '<div class="muted" style="font-size:11px">' + ', '.join('%s %d' % (esc(a), n) for a, n in sorted(r['unresolved_by'].items(), key=lambda x: -x[1])) + '</div>'
-            rev = ''.join('<span class="pill %s">%s %s</span>' % (esc(st), esc(a), {'APPROVED': '✓', 'CHANGES_REQUESTED': '✗', 'COMMENTED': '…', 'DISMISSED': '–'}.get(st, st)) for a, st, _ in r['latest_reviews'] if a not in BOTS)
-            rev += ''.join('<span class="pill req">%s 미착수</span>' % esc(a) for a in r['requested'])
-            rev += ''.join('<span class="pill pend">%s 승인 전</span>' % esc(a) for a in r.get('pending_approval', []))
-            rev += '<div class="muted" style="font-size:11px">decision: %s</div>' % esc(r['decision'])
-            ag = ('<span class="ok">✓ %s</span><div class="muted" style="font-size:11px">%d건 · %s</div>' % (esc(r['agent_last']), r['agent_n'], esc('/'.join(r['agent_kinds'])))) if r['agent_n'] else '<span class="warn">아직</span>'
-            tcl = ''.join('<div><a href="%s">%s#%d</a> <span class="muted">미해결 %d/%d%s</span></div>' % (esc(t['url']), esc(t['repo'].split('/')[1].replace('cubrid-testcases','tc')), t['number'], t['unresolved'], t['threads_total'], (' · ' + ','.join(esc(a) + ' 미착수' for a in t['requested'])) if t['requested'] else '') for t in r['linked_tc']) or '<span class="muted">없음</span>'
-            docs = ''.join('<a href="%s%s">%s</a>' % (DOCS_HTTP_BASE, quote(d), esc(d)) for d in r['docs']) or '<span class="muted">없음</span>'
-            others = [a for a in r['assignees'] if a != r['tracked'][0]]
-            revs = sorted(set(r.get('requested', []) + r.get('pending_approval', []) + r.get('approvers', [])))
-            pend_revs = sorted(set(r.get('requested', []) + r.get('pending_approval', [])))
-            owns = sorted(set(r.get('assignees', []) + r.get('tracked', [])))   # 담당자 (이현욱 요청 2026-10-07)
-            apprs = sorted(set(r.get('approvers', [])))                          # 승인한 사람
-            ready = (not r['unresolved']) and bool(apprs)                         # 승인 끝·미해결 0 = 머지 대기
-            h.append('<tr class="%s" data-unres="%s" data-ready="%s" data-rev="%s" data-pend="%s" data-own="%s" data-appr="%s"><td class="n"><a href="%s">%s#%d</a>%s</td><td>%s<div class="meta">%s · by %s%s</div></td><td class="n">%s</td><td>%s</td><td class="n col-mine">%s</td><td class="n">%s<div class="muted" style="font-size:11px">생성 %s</div></td><td>%s</td><td class="docs" style="font-size:12px">%s</td><td class="docs col-mine">%s</td></tr>' % (
-                ('unres' if r['unresolved'] else ('ready' if ready else '')), '1' if r['unresolved'] else '0', '1' if ready else '0', esc(','.join(revs)), esc(','.join(pend_revs)), esc(','.join(owns)), esc(','.join(apprs)),
-                esc(r['url']), esc(r['repo'].split('/')[1]), r['number'], '<div class="muted" style="font-size:11px">%s</div>' % esc(r['tracked'][0]) if len(rs) and who != r['tracked'][0] else '',
-                esc(r['title']), esc(r['jira'] or '-'), esc(r['author']), ((' · assignees +' + ','.join(others)) if others else '') + (' · <span class="warn">작성자 기준(assignee 없음)</span>' if r.get('tracked_via') == 'author' else ''),
-                unres, rev, ag, esc(r['updated']), esc(r['created']), ci_lights(r), tcl, docs))
+            h.append(pr_row(r))
         h.append('</table></section>')
     if orphans:
         # 본문 PR 행과 같은 data-own/data-rev 속성을 붙여 툴바의 사람 필터가 여기에도 걸리게 한다 — 사람을 클릭하면
@@ -485,6 +576,14 @@ def render(rows, now, orphans=()):
             h.append('<tr class="%s" data-unres="%s" data-ready="%s" data-rev="%s" data-pend="%s" data-own="%s" data-appr="%s"><td class="n"><a href="%s">%s#%d</a></td><td>%s</td><td>%s</td><td class="n">%d/%d</td><td>%s</td></tr>' % (
                 ('unres' if t['unresolved'] else ('ready' if ready else '')), '1' if t['unresolved'] else '0', '1' if ready else '0', esc(','.join(revs)), esc(','.join(pend_revs)), esc(','.join(owns)), esc(','.join(apprs)),
                 esc(t['url']), esc(t['repo'].split('/')[1]), t['number'], esc(t['title']), esc(', '.join(owns)), t['unresolved'], t['threads_total'], rev or '-'))
+        h.append('</table></section>')
+    if outside:
+        # 추적 밖 PR — 작성자·담당자가 추적 ID 가 아니어도 추적 ID 가 리뷰어인 것 (사용자 지시 2026-11-24 "팀원거 아니어도 밑에 따로")
+        h.append('<section class="who"><h2>추적 밖 PR — 추적 ID 가 리뷰어 <span class="meta">%d PR</span></h2>' % len(outside))
+        h.append('<div class="meta" style="margin:-4px 0 8px">작성자·담당자는 추적 ID 가 아니지만 추적 ID 가 리뷰어(요청됨·리뷰함)인 open·non-draft PR · 머리의 미완료 PR 수에는 넣지 않고 사람별 표의 내가 리뷰어에는 넣는다</div>')
+        h.append(PR_TABLE_HEAD)
+        for r in outside:
+            h.append(pr_row(r))
         h.append('</table></section>')
     h.append(render_headless())
     h.append(TOOLBAR_JS)
