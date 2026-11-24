@@ -287,3 +287,34 @@ TEST_CASE ("P7 a failed conversion is an error and leaves no value", "[contract]
   CHECK (DB_IS_NULL (unitseam_rhs_value (p.leaf)));
   unitseam_vd_free (vd);
 }
+
+/* PR#8661 review (beyondykk9, expr_compile.c:3350): the build pins a host variable only when the term's decided
+ * comparison converts the right side, but the leaf reads the comparison of the term the server unpacked; if the two
+ * disagree, the pin used to read through a NULL compare (or converter) and crash in release.  It is an error now. */
+TEST_CASE ("P8 a pinned leaf whose comparison has no converter is an error and leaves no value", "[contract]")
+{
+  void *regu = unitseam_hostvar_regu (0, DB_TYPE_INTEGER);
+  void *no_conv = unitseam_compare (NULL, DB_TYPE_DOUBLE);
+  void *const compares[2] = { NULL, no_conv };
+  DB_VALUE vals[1];
+
+  db_make_int (&vals[0], 1);
+  for (int i = 0; i < 2; i++)
+    {
+      void *leaf = unitseam_leaf (regu, compares[i], DB_TYPE_DOUBLE, true);
+      void *vd = unitseam_vd (vals, 1, 51 + i);
+
+      g_conv_calls = 0;
+      g_er_set_calls = 0;
+      er_clear ();
+      CHECK (unitseam_rhs_use (leaf, vd) != NO_ERROR);
+      CHECK (g_conv_calls == 0);
+      CHECK (g_er_set_calls == 1);
+      CHECK (er_errid () != NO_ERROR);
+      CHECK (DB_IS_NULL (unitseam_rhs_value (leaf)));
+      unitseam_vd_free (vd);
+      unitseam_free (leaf);
+    }
+  free (no_conv);
+  free (regu);
+}
