@@ -340,7 +340,11 @@ TEST_CASE ("CBRD-28163 d: [X(WRITE), Y(WRITE)] -- Y stays blocked at the front, 
   CHECK (unit_bcb_latch_mode (w.bcb) == PGBUF_LATCH_READ);
   CHECK (unit_bcb_fcnt (w.bcb) == 1);
   CHECK_FALSE (woken (y));
-  CHECK (ut::lock_calls () == 0);
+  /* develop 79eab331e (CBRD-27739, #8611) looks at the waiter the grant loop stops at under its entry lock first --
+   * at most once, and given back; before it the loop never locked a waiter it did not grant */
+  CHECK (ut::counts (y).lock == ut::counts (y).unlock);
+  CHECK (ut::counts (y).lock <= 1);
+  CHECK (ut::lock_calls () == ut::counts (y).lock);
   CHECK (w.blocked_reader_writer_left ());
   CHECK (unit_bcb_waiter_exists (w.bcb));	/* a new READ must not overtake the writer */
 }
@@ -421,7 +425,11 @@ TEST_CASE ("CBRD-28163 f: [X(WRITE), F(FLUSH)] -- the grant loop stops at F, [F]
   CHECK (unit_bcb_latch_mode (w.bcb) == PGBUF_LATCH_READ);
   CHECK (unit_bcb_fcnt (w.bcb) == 1);
   CHECK_FALSE (woken (f));
-  CHECK (ut::lock_calls () == 0);
+  /* develop 79eab331e (CBRD-27739, #8611) looks at the waiter the grant loop stops at under its entry lock first --
+   * at most once, and given back; before it the loop never locked a waiter it did not grant */
+  CHECK (ut::counts (f).lock == ut::counts (f).unlock);
+  CHECK (ut::counts (f).lock <= 1);
+  CHECK (ut::lock_calls () == ut::counts (f).lock);
 }
 
 TEST_CASE ("CBRD-28163 f (base defect, PASS = reproduced): [X(WRITE), F(FLUSH)] -- waiter_exists stays set with only "
@@ -458,7 +466,11 @@ TEST_CASE ("CBRD-28163 f2: [X(WRITE), F(FLUSH), Y(READ)] -- the loop stops at F,
   CHECK (unit_bcb_fcnt (w.bcb) == 1);
   CHECK_FALSE (woken (f));
   CHECK_FALSE (woken (y));
-  CHECK (ut::lock_calls () == 0);
+  /* develop 79eab331e (CBRD-27739, #8611) looks at the waiter the grant loop stops at under its entry lock first --
+   * at most once, and given back; before it the loop never locked a waiter it did not grant */
+  CHECK (ut::counts (f).lock == ut::counts (f).unlock);
+  CHECK (ut::counts (f).lock <= 1);
+  CHECK (ut::lock_calls () == ut::counts (f).lock);
   CHECK (w.blocked_reader_writer_left ());
   CHECK (unit_bcb_waiter_exists (w.bcb));	/* the check walks past the flush waiter */
 }
@@ -515,7 +527,10 @@ TEST_CASE ("CBRD-28163 h: [X(WRITE), Y1(READ, 2), Y2(READ, 3), W(WRITE)] -- Y1 a
   CHECK_FALSE (woken (wr));
   CHECK (entry_lock_balanced (y1, 1));
   CHECK (entry_lock_balanced (y2, 1));
-  CHECK (ut::counts (wr).lock == 0);
+  /* develop 79eab331e (CBRD-27739, #8611) looks at the waiter the grant loop stops at under its entry lock first --
+   * at most once, and given back; before it the loop never locked a waiter it did not grant */
+  CHECK (ut::counts (wr).lock == ut::counts (wr).unlock);
+  CHECK (ut::counts (wr).lock <= 1);
   CHECK (w.blocked_reader_writer_left ());
   CHECK (unit_bcb_waiter_exists (w.bcb));
 }
