@@ -146,18 +146,19 @@ def details(repo, num):
       reviewRequests(first:30){nodes{requestedReviewer{... on User{login} ... on Team{name}}}}
       latestReviews(first:30){nodes{author{login} state submittedAt}}
       reviewDecision mergeable
-      commits(last:6){nodes{commit{oid status{contexts{context state}}}}}
+      commits(last:6){nodes{commit{oid status{contexts{context state targetUrl}}}}}
     }}}''' % (owner, name, num)
     d = json.loads(sh('gh', 'api', 'graphql', '-f', 'query=' + q))['data']['repository']['pullRequest']
     # TC 신호등(사용자 지시 2026-11-10, agent-todo 보드의 것을 여기에도): 헤드 커밋의 `gha-ci: test_sql|medium|shell` 상태.
     # 헤드에 없으면(런을 건 뒤 push) 앞 커밋 5개 중 가장 최근 결과를 쓴다 — 같은 쿼리로 받아 PR 마다 호출을 늘리지 않는다
-    ci, ci_stale = {}, None
+    ci, ci_stale, ci_runs = {}, None, []   # ci_runs: 보이는 상태를 단 런 id 들(ci_lights 가 큐의 새 런과 견준다, board.json 에 실리므로 list)
     commits = [n['commit'] for n in ((d.get('commits') or {}).get('nodes') or [])]
     for k, c in enumerate(reversed(commits)):
-        got = {m.group(1): (x.get('state') or '').upper()
-               for x in ((c.get('status') or {}).get('contexts') or []) for m in [GHA_CTX.match(x.get('context') or '')] if m}
-        if got:
-            ci, ci_stale = got, (c['oid'] if k else None)
+        xs = [(m.group(1), x) for x in ((c.get('status') or {}).get('contexts') or [])
+              for m in [GHA_CTX.match(x.get('context') or '')] if m]
+        if xs:
+            ci, ci_stale = {s: (x.get('state') or '').upper() for s, x in xs}, (c['oid'] if k else None)
+            ci_runs = sorted({run_id(x.get('targetUrl')) for _, x in xs} - {None})
             break
     threads = d['reviewThreads']['nodes']
     unresolved = [t for t in threads if not t['isResolved']]
@@ -182,7 +183,7 @@ def details(repo, num):
             'unresolved_by': by_author, 'requested': req, 'latest_reviews': latest,
             'approvers': approvers, 'pending_approval': pending,
             'decision': d.get('reviewDecision') or '-', 'mergeable': d.get('mergeable') or '-',
-            'ci': ci, 'ci_stale': ci_stale}
+            'ci': ci, 'ci_stale': ci_stale, 'ci_runs': ci_runs}
 
 # sql_by_cci 도 싣는다(사용자 지시 2026-11-24 "cci 결과도 보드에 다시 표시해 주는 것으로 바꿔 줘 이제 봐도 됨" — 11-11 의 'CCI 보지 마' 를 푼다)
 GHA_CTX = re.compile(r'gha-ci: test_(sql|medium|shell|sql_by_cci)$')
@@ -190,20 +191,74 @@ GHA_CTX = re.compile(r'gha-ci: test_(sql|medium|shell|sql_by_cci)$')
 # gha-ci 는 `/run` 코멘트(issue_comment)로 develop 위에서 돌아 PR 브랜치로는 런을 못 찾는다 — 런 제목 "PR #N · …" 으로
 # 묶는다. 코멘트마다 생기는 skipped 런은 뺀다. 보드 생성마다 한 번만 읽는다(agent-board-gen.py 와 같은 규칙).
 _GHA_RUNS = None
+_LAST_SKIP = {}      # PR 번호 → 가장 최근 skipped 런의 생성 시각(코멘트마다 런이 하나씩 생기고 /run 이 아니면 skipped)
+_WINDOW_START = ''   # 읽은 런 목록(최근 300런)의 가장 이른 생성 시각 — 그보다 앞 코멘트는 런을 만들었는지 알 수 없다
 def gha_run(num):
-    global _GHA_RUNS
+    global _GHA_RUNS, _WINDOW_START
     if _GHA_RUNS is None:
         _GHA_RUNS = {}
         try:
             runs = json.loads(sh('gh', 'run', 'list', '--repo', 'CUBRID/cubrid', '--workflow', 'gha-ci.yml', '--limit', '300',
-                                 '--json', 'databaseId,status,conclusion,displayTitle'))
+                                 '--json', 'databaseId,status,conclusion,displayTitle,createdAt'))
         except Exception:
             runs = []
+        _WINDOW_START = min((r.get('createdAt') or '' for r in runs), default='')
         for r in runs:   # 최신순
             m = re.match(r'PR #(\d+) ', r.get('displayTitle') or '')
             if m and r.get('conclusion') != 'skipped':
                 _GHA_RUNS.setdefault(int(m.group(1)), r)
+            elif m:
+                _LAST_SKIP.setdefault(int(m.group(1)), r.get('createdAt') or '')
     return _GHA_RUNS.get(num)
+
+def run_id(url):
+    m = re.search(r'/actions/runs/(\d+)', url or '')
+    return int(m.group(1)) if m else None
+
+def kst(ts):
+    try:
+        return (datetime.datetime.strptime(ts, '%Y-%m-%dT%H:%M:%SZ') + datetime.timedelta(hours=9)).strftime('%m-%d %H:%M')
+    except Exception:
+        return ts
+
+# 마지막 실행 런 뒤에 단 `/run …` 코멘트가 런을 만들지 못했으면(skipped) (시각, 코멘트 url, 사유)를 낸다(agent-board-gen.py 와
+# 같은 규칙). gha-ci 의 gate 는 startsWith(body, '/run') 이고 작성자가 OWNER·MEMBER·COLLABORATOR 여야 한다(gha-ci.yml L191-192)
+# — 웹 화면에서 줄바꿈으로 시작한 '/run all' 은 아무 알림 없이 건너뛰어지고, 보드는 앞 런의 결과를 계속 보여 준다(사용자 2026-11-24
+# "run all을 돌렸으면 새걸로 나와야하는데 왜 옛날 기록이 보일까?" — #8587 17:56 코멘트). 코멘트는 마지막 skipped 런이 마지막
+# 실행 런보다 새로울 때만 읽는다(코멘트마다 런이 생기므로 그렇지 않으면 그 뒤 코멘트가 없다).
+_RUN_SKIPPED = {}
+def run_skipped(num):
+    if num in _RUN_SKIPPED:
+        return _RUN_SKIPPED[num]
+    _RUN_SKIPPED[num] = None
+    since = (gha_run(num) or {}).get('createdAt') or ''
+    last_skip = _LAST_SKIP.get(num) or ''
+    if not last_skip or last_skip <= since:
+        return None
+    q = 'repos/CUBRID/cubrid/issues/%d/comments?per_page=100' % num + ('&since=' + since if since else '')
+    try:
+        rows = sh('gh', 'api', '--paginate', q, '--jq',
+                  '.[] | select((.body // "") | test("^\\\\s*/run")) | '
+                  '[.created_at, .html_url, ((.body // "") | startswith("/run")), .author_association] | @tsv')
+    except Exception:
+        return None
+    cands = [l.split('\t') for l in rows.splitlines() if l.count('\t') == 3]
+    cands = [c for c in cands if c[0] > since]
+    if not cands:
+        return None
+    at, url, starts, assoc = cands[-1]
+    if last_skip < at:   # 그 코멘트 뒤에 생긴 skipped 런이 없다 — 막 달아 런이 아직 안 생겼다
+        return None
+    if not _WINDOW_START or at < _WINDOW_START:   # 목록보다 앞 코멘트 — 그것이 만든 런이 목록 밖일 수 있다
+        return None
+    if starts != 'true':
+        why = '본문이 /run 으로 시작하지 않는다(앞에 줄바꿈·공백) — 첫 글자부터 /run 으로 다시 단다'
+    elif assoc not in ('OWNER', 'MEMBER', 'COLLABORATOR'):
+        why = '작성자 권한(%s)이 gate 조건(OWNER·MEMBER·COLLABORATOR)에 없다' % assoc
+    else:
+        why = 'gate 가 건너뛰었다(원인 미상 — 런 목록을 볼 것)'
+    _RUN_SKIPPED[num] = (at, url, '%s 의 /run 코멘트가 런을 만들지 못했다: %s. 신호등은 그 앞 런의 결과다' % (kst(at), why))
+    return _RUN_SKIPPED[num]
 
 # 통과 초록, 도는 중 노랑, 실패 빨강, 런 없음 회색 — 앞 커밋 결과를 써도 '이전 head' 표시는 달지 않는다(agent-todo 보드와 같게)
 CI_LIGHT = {'SUCCESS': ('ok', '통과'), 'PENDING': ('run', '도는 중'), 'EXPECTED': ('run', '도는 중'),
@@ -212,14 +267,21 @@ CI_LIGHT = {'SUCCESS': ('ok', '통과'), 'PENDING': ('run', '도는 중'), 'EXPE
 def ci_lights(r):
     run = gha_run(r['number'])
     waiting = run is not None and run.get('status') != 'completed'
+    # 큐의 새 런이 아직 상태를 달지 않았는데 보이는 결과가 그보다 앞 런의 것이면(develop 을 머지해 헤드가 바뀌어 앞 커밋에서
+    # 빌려 왔거나, 같은 헤드에 /run 을 다시 달았다) 옛 결과 대신 '도는 중'으로 보인다(사용자 2026-11-24 "왜 옛날 기록이 보일까?").
+    ci = {} if waiting and run['databaseId'] not in r.get('ci_runs', ()) else r['ci']
+    skip = run_skipped(r['number'])
     out = ''
     for s in ('sql', 'medium', 'shell', 'sql_by_cci'):
-        st = r['ci'].get(s, '')
+        st = ci.get(s, '')
         if not st and waiting:
             st = 'PENDING'   # 런이 큐에 있어 아직 pending 상태를 달지 않았다
         cls, word = CI_LIGHT.get(st, ('none', '런 없음'))
         out += '<span class="light light-%s" title="%s: %s"><i></i>%s</span>' % (cls, s, word, 'cci' if s == 'sql_by_cci' else s)
-    href = ('https://github.com/CUBRID/cubrid/actions/runs/%d' % run['databaseId'] if run and (r['ci_stale'] or waiting)
+    if skip:   # 런을 못 만든 /run 코멘트 — 신호등은 그 앞 런의 결과이므로 경고를 붙이고 링크는 그 코멘트로
+        out += '<span class="light light-skip" title="%s"><i></i>/run 안 돎</span>' % esc(skip[2])
+    href = (skip[1] if skip
+            else 'https://github.com/CUBRID/cubrid/actions/runs/%d' % run['databaseId'] if run and (r['ci_stale'] or waiting)
             else 'https://github.com/CUBRID/cubrid/pull/%d/checks' % r['number'])
     return '<a class="lights" href="%s" target="_blank" rel="noopener">%s</a>' % (esc(href), out)
 
@@ -483,7 +545,7 @@ def render(rows, now, orphans=(), outside=()):
     @media (prefers-color-scheme:dark){:root{--bg:#0e1218;--surface:#161b23;--ink:#e7ebf0;--muted:#8a95a3;--line:#2a323c;--gate:#46b3a8;--warn:#d98b45;--bad:#e06c70;--soft:#1b2128;--sig-ok:#5CB878;--sig-run:#F2C94C;--sig-bad:#E07B6E;--sig-none:#4A5249}}
     /* TC 신호등 (agent-todo 보드의 agent-board-style.css 와 같은 꼴) */
     .lights{display:inline-flex;gap:8px;text-decoration:none;color:var(--muted)}.light{display:inline-flex;align-items:center;gap:4px;font-size:11px;font-family:"IBM Plex Mono",monospace}
-    .light i{width:9px;height:9px;border-radius:50%;background:var(--sig-none)}.light-ok i{background:var(--sig-ok)}.light-run i{background:var(--sig-run)}.light-bad i{background:var(--sig-bad)}
+    .light i{width:9px;height:9px;border-radius:50%;background:var(--sig-none)}.light-ok i{background:var(--sig-ok)}.light-run i{background:var(--sig-run)}.light-bad i{background:var(--sig-bad)}.light-skip{color:var(--sig-bad);font-weight:600}.light-skip i{background:var(--sig-bad);border-radius:2px}
     body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.55 "IBM Plex Sans KR",system-ui,sans-serif}
     .wrap{max-width:1180px;margin:0 auto;padding:28px 20px}
     h1{font-size:24px;margin:0 0 4px;letter-spacing:-.02em} h2{font-size:17px;margin:28px 0 10px;display:flex;gap:10px;align-items:baseline}
