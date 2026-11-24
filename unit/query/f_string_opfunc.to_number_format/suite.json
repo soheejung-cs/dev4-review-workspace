@@ -1,0 +1,26 @@
+{
+ "name": "PR#8709 (CBRD-28298) db_to_number () -- a NULL format value (VARCHAR NULL, or the NULL literal folded by the parser) gives NULL in the user format branch; no user format ignores the argument; source checks stay first",
+ "file": "src/object/object_domain.c",
+ "mode": "server",
+ "seams": [],
+ "appendix": "",
+ "test": "test.cpp",
+ "requires": [
+  "db_to_number"
+ ],
+ "watch": [
+  "src/query/string_opfunc.c",
+  "src/query/string_opfunc.h",
+  "src/query/fetch_arith_ops.c",
+  "src/base/language_support.c"
+ ],
+ "fakes": "As unit/query/f_string_opfunc.string_append (same TU set and fakes, copied). The number_lang argument is built with lang_set_flag_from_lang (NULL, has_user_format, false). N1 runs in a forked child so a crash shows as a FAIL.",
+ "note": "Ran 2026-11-24: head d98f4e36a 5/5 PASS; base e3bbe664b 3/5 (N1 child SIGSEGV, N2 ER_QSTR_INVALID_DATA_TYPE -621) -- removing the fix is the mutation, both NULL cases catch it.",
+ "origin": {
+  "pr": 8709,
+  "jira": "CBRD-28298",
+  "finding": "self-review contract",
+  "reviewed_head": "d98f4e36a",
+  "date": "2026-11-24"
+ }
+}
