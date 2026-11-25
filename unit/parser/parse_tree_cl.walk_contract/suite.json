@@ -1,0 +1,40 @@
+{
+ "name": "PR#8750 (CBRD-28372) G1 -- parser_walk_tree () / parser_walk_leaves () 걷기 모드 계약: 모드는 세운 노드에만, STOP 은 걷기를 끝내고 들어간 노드의 post 만 돈다(되살리면 그 노드 뒤에서 이어감), PT_SKIP_WALK, pre 의 NULL 반환, post 가 세운 모드",
+ "requires": [
+  "pt_walk_private",
+  "parser_walk_leaves"
+ ],
+ "file": "src/parser/parse_tree_cl.c",
+ "mode": "cs",
+ "seams": [],
+ "appendix": "",
+ "test": "test.cpp",
+ "extra": [
+  "src/parser/parse_tree.c",
+  "src/parser/keyword.c",
+  "src/parser/scanner_support.c",
+  "src/base/language_support.c",
+  "src/base/intl_support.c",
+  "src/base/chartype.c",
+  "src/object/object_domain.c",
+  "src/object/object_primitive.c",
+  "src/query/domain_rules.c",
+  "src/compat/db_macro.c",
+  "src/base/memory_alloc.c",
+  "src/base/system_parameter.c"
+ ],
+ "watch": [
+  "src/parser/parse_tree_cl.c",
+  "src/parser/parse_tree.h"
+ ],
+ "fakes": "진짜: parse_tree_cl.c(TU: pt_walk_private·parser_walk_tree·parser_walk_leaves·pt_apply_expr·pt_apply_name) + parse_tree.c(parser_create_parser·parser_new_node). 트리: PT_EXPR(PT_PLUS, arg1/arg2)와 PT_NAME 을 parser_new_node 로, 노드 id 는 line_number. 가짜: cubregex::get_engine_name·envvar_get/_trim_char·init_builtin_calendar_names·db_date_locale_init·pt_free_dblink_remote_cols(parse_tree_cl.print_roundtrip 과 같음), er_set/er_errid/er_clear(값만 보관). PT_SKIP_WALK 는 base 에 없어 PT_LIST_WALK + 1 로 둔다(base 에서는 모르는 모드 = 자식·목록 모두 안 걷고 누수).",
+ "origin": {
+  "pr": 8750,
+  "jira": "CBRD-28372",
+  "finding": "G1 판정 — 계약 고정(지적 G1-01 의 W7·W8 근거)",
+  "date": "2026-11-25",
+  "reviewed_head": "7f7cfbd7e",
+  "base": "58d118755",
+  "result": "2026-11-25: head 7f7cfbd7e 13/13 PASS. base 58d118755 3/13 PASS(W2·W6·W7) — W1·W3·W9·W11 누수, W4·W5·W10 STOP 뒤 pre·post 호출, W8 조상 post 되살림 때 그 next 목록을 걸음, W12 post 가 보는 모드, W13 parser_walk_leaves 의 or_next 루프가 STOP 을 넘어감 = PR 본문 AS-IS 와 일치."
+ }
+}
