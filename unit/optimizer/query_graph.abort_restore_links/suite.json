@@ -1,0 +1,32 @@
+{
+ "name": "PR#8664 (CBRD-28204) qo_expr_segs restores the link it cut on qo_abort (K0/K1 contract), qo_discover_sort_limit_nodes' hand cut of the ORDER BY column around qo_expr_segs is not restored (C0 control, F2 defect)",
+ "requires": [
+  "qo_expr_segs",
+  "qo_discover_sort_limit_nodes"
+ ],
+ "file": "src/optimizer/query_graph.c",
+ "mode": "cs",
+ "seams": [
+  "lookup_node"
+ ],
+ "appendix": "hooks.cpp",
+ "test": "test.cpp",
+ "extra": [],
+ "watch": [
+  "src/optimizer/query_graph.h",
+  "src/optimizer/optimizer.h",
+  "src/optimizer/query_bitset.c"
+ ],
+ "fakes": "진짜: query_graph.c(qo_expr_segs·set_seg_expr·set_seg_node·qo_seg_nodes·qo_discover_sort_limit_nodes(훅)·qo_abort, head 는 qo_detach_link/qo_reattach_link), bitset(query_bitset.c 를 test.cpp 에 #include). 이음매: lookup_node -- 실제는 함수 인덱스 식이 아니면 QO_ASSERT (aux->node_type == PT_NAME); 무장하면 그 실패처럼 qo_abort (), 아니면 NULL(바깥 범위, set_seg_node 가 아무것도 안 더함). 가짜: parser_walk_tree(노드와 next 목록에 pre/post -- 이름 노드는 자식 없음, 방문 기록), pt_continue_walk(parse_tree_cl.c:1281 본문), pt_get_select_list(PT_SELECT 의 list), pt_has_analytic/pt_has_aggregate(이름 열은 없음 false), pt_get_query_limit_value(쓸 수 있는 LIMIT, NO_ERROR -- 값은 이 경로에서 안 읽음), er_set(한 단계). 장면: SELECT c1, c2, c3 FROM o, i ORDER BY 1 LIMIT 10 -- 파티션 1개·노드 2개·항 0개.",
+ "note": "2026-11-25 head 1801b1330: K0·K1·C0 PASS, F2 PASS(결함 있음). base 051a19c35: K0·C0 PASS, K1 FAIL(base 의 qo_expr_segs 는 포기 때 next 를 못 되돌림 -- PR 이 고친 것), F2 PASS(결함 있음, base 동일). 변이 fix_f2_sort_limit.diff(qo_discover_sort_limit_nodes 의 손 끊기를 qo_detach_link 로) 적용 head: F2 FAIL(안쪽 NULL 기록 뒤 바깥 기록이 c2 를 되돌림 -- LIFO 복원), K0·K1·C0 PASS. stub 호출 0.",
+ "origin": {
+  "pr": 8664,
+  "jira": "CBRD-28204",
+  "finding": "G1-02 (+ [contract] for the PR's qo_expr_segs change)",
+  "comment": null,
+  "date": "2026-11-25",
+  "reviewed_head": "1801b1330",
+  "base": "051a19c35",
+  "artifact": "harness-out/8664/1801b1330/unit/F2_sort_limit/"
+ }
+}
