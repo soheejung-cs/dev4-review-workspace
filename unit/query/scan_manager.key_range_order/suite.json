@@ -1,0 +1,32 @@
+{
+ "name": "index scan key range order per pass (PR#8718, CBRD-28283): scan_get_index_oidset () reads the key ranges of an IN list (R_KEYLIST) or an OR of ranges (R_RANGELIST) in the values' ascending order, and reverses them at the first open of a pass of a MIN/MAX only scan marked min_max_only_desc_pass (the pass that takes MAX from its first row) -- after duplicate elimination / range merging, over the merged count, skipping a last range with no row in the same call; the skipped descending ORDER BY / GROUP BY reversal stays; each first open decides the order afresh (MIN pass, MAX pass, restored pass)",
+ "file": "src/query/scan_manager.c",
+ "mode": "server",
+ "seams": [
+  "scan_get_index_oidset",
+  "scan_regu_key_to_index_key"
+ ],
+ "test": "test.cpp",
+ "requires": [
+  "scan_get_index_oidset",
+  "reverse_key_list"
+ ],
+ "watch": [
+  "src/query/scan_manager.h",
+  "src/xasl/access_spec.hpp",
+  "src/query/query_executor.c",
+  "src/query/query_aggregate.cpp"
+ ],
+ "fakes": "Real: scan_get_index_oidset () (static: the seam only unstatics it), check_key_vals () and its std::stable_sort, eliminate_duplicated_keys (), merge_key_ranges (), reverse_key_list (), scan_key_compare (), compare_val_op (), range_to_rop ()/rop_to_range (). scan_regu_key_to_index_key () (seam): the real one's outputs for KEY_RANGE i from the test's list -- an IN list item EQ_NA turned GE_LE with key2 key1's clone (pr_clone_value ()), a BETWEEN GE_LE with key1 > key2 marked NA_NA, num_index_term 1, key1_bound/key2_bound copied; a multi-column index's key a DB_TYPE_MIDXKEY owning a malloc'd buffer (need_clear, as scan_dbvals_to_midxkey () leaves it), a single-column one an INTEGER. btree_prepare_bts ()/btree_range_scan (): one row per integer value (minus a 'no row' set), a call reads every row of the key range in indx_info->use_desc_index's direction into the OID buffer (OID pageid = value) and ends the range (BTREE_END_OF_SCAN: C_vpid/O_vpid NULL, is_scan_started false). domain_key_ranges_element_compare () / pr_midxkey_compare_resolved (): integer comparison of the first column (the comparison XASL generation decides for INTEGER columns; no DESC turn-around, as scan_key_compare () passes dom_is_desc NULL). pr_clear_value (): the real one's NULL/INTEGER/MIDXKEY branches (frees the buffer when need_clear, value NULL, need_clear false), counting the buffers alive. SCAN_ID/INDX_INFO/thread entry calloc'd: S_INDX_SCAN, curr_keyno -1 (scan_start_scan ()), key_vals NULL-made as the XASL unpack leaves them, no key limit (NULL pointers), no covering, no multi range opt, iscan_oid_order off. min_max_only_desc_pass and the turn-around of qexec_intprt_fnc () (use_desc_index and the mark flipped, curr_keyno -1 as S_GO_BACKWARD sets it) are set by the test; the mark is written through SFINAE, so the suite compiles where the member is absent (base).",
+ "note": "2026-11-25 head a4a513237: 8/8 PASS. base 5eb6d8310 (develop, no min_max_only_desc_pass): R1 R7 PASS, R2-R6 R8 FAIL -- the MAX pass reads 1 (or the lowest range) first: the CBRD-28283 defect (MAX of cb in (1, 5, 9) = 1). Sensitivity mutant on head (mutants/mut_no_desc_pass_reverse.diff, the PR's `|| iscan_id->min_max_only_desc_pass` dropped): R2 R3 R4 R5 R6 R8 FAIL, R1 R7 PASS. An equivalent mutant (reversing over key_info.key_cnt instead of the merged key_cnt) changes nothing: check_key_vals () sorts the NULL-made stale tail first and the reversal puts it back last -- not kept as a sensitivity check. stub calls at run time: none.",
+ "origin": {
+  "pr": 8718,
+  "jira": "CBRD-28283",
+  "head": "a4a5132376866f19f6a71885781927a0bbc54c26",
+  "base": "5eb6d831001d5ba6db64ac67672bbb6c1721084a",
+  "finding": "contract suite (harness-review 3-1 (c), no finding)",
+  "comment": null,
+  "artifacts": "/home/cubrid/dev/utils/harness-out/8718/a4a513237/unit/key_range_order/ (out/, out-mut-*/, mutants/, mutants_equivalent/)",
+  "date": "2026-11-25"
+ }
+}

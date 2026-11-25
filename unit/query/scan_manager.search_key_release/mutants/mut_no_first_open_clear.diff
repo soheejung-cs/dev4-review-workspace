@@ -1,0 +1,12 @@
+--- a/src/query/scan_manager.c
++++ b/src/query/scan_manager.c
+@@ -2107,9 +2107,6 @@
+       /* make DB_VALUE key values from KEY_VALS key ranges */
+       for (i = 0; i < key_cnt; i++)
+ 	{
+-	  /* a pass that stopped before its last key's end still holds the keys, and a multi-column key owns a buffer */
+-	  pr_clear_value (&key_vals[i].key1);
+-	  pr_clear_value (&key_vals[i].key2);
+ 	  /* initialize DB_VALUE first for error case */
+ 	  key_vals[i].range = NA_NA;
+ 	  db_make_null (&key_vals[i].key1);

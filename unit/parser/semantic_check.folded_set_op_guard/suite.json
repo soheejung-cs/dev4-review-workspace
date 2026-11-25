@@ -1,0 +1,50 @@
+{
+ "name": "PR#8696 (CBRD-28231) pt_semantic_check_local -- the UNION / INTERSECTION / DIFFERENCE case stops when pt_semantic_type () folded the set operation (an operand known empty only after its CTE is folded): the operand left, the NULL value or the SELECT DISTINCT from a derived table of the operand left is returned as it is and no set-operation field of it is read (no collation inference); a set operation that is not folded, a root left a set operation by a fold below it, and a DIFFERENCE root are still checked",
+ "requires": [
+  "pt_semantic_check_local",
+  "pt_check_union_is_foldable",
+  "pt_fold_union"
+ ],
+ "file": "src/parser/semantic_check.c",
+ "mode": "cs",
+ "seams": [
+  "pt_check_order_by",
+  "pt_get_select_list_coll_compat"
+ ],
+ "appendix": "hooks.cpp",
+ "test": "test.cpp",
+ "extra": [
+  "src/parser/parse_tree.c",
+  "src/parser/parse_tree_cl.c",
+  "src/base/language_support.c",
+  "src/base/intl_support.c",
+  "src/base/chartype.c",
+  "src/object/object_domain.c",
+  "src/object/object_primitive.c",
+  "src/query/domain_rules.c",
+  "src/compat/db_macro.c",
+  "src/base/memory_alloc.c",
+  "src/base/system_parameter.c"
+ ],
+ "watch": [
+  "src/parser/parse_tree.h",
+  "src/parser/semantic_check.h",
+  "src/parser/type_checking.c",
+  "src/parser/query_result.c",
+  "src/parser/view_transform.c",
+  "src/parser/parse_tree_cl.c"
+ ],
+ "fakes": "진짜: semantic_check.c(TU: pt_semantic_check_local -- hooks.cpp 의 ut_semantic_check_local 이 걷기 한 걸음처럼 SEMANTIC_CHK_INFO(top_node = 문장)로 부른다 --, pt_check_union_is_foldable, pt_fold_union, pt_fold_union_needs_derived, pt_set_operation_select_list, pt_orderby_matches_select_list, pt_fold_union_collation, pt_fold_union_as_derived, pt_check_into_clause), parse_tree.c + parse_tree_cl.c, language_support.c + intl_support.c + chartype.c, object_domain.c + object_primitive.c + domain_rules.c, db_macro.c, memory_alloc.c, system_parameter.c. seam: pt_check_order_by(semantic_check.c:15308) = 호출만 세고 NO_ERROR; pt_get_select_list_coll_compat(semantic_check.c:18601, 루트 집합 연산의 콜레이션 추론 첫 단계 11746) = 노드·열 수를 기록하고 PT_UNION_COMP(콜레이션 없는 열이면 진짜도 이 값) -- 진짜는 노드의 union_.arg1/arg2 를 걷는다, 집합 연산이 아닌 노드에 불리면 그 호출이 곧 결함(TU 의 SEMAN_COMPATIBLE_INFO 는 구조체 태그 seman_compatible_info 로 같은 심볼, TU 지역 enum 반환은 int 값 1). 가짜: pt_semantic_type(type_checking.c:20198) = 이 트리의 노드 종류에 대한 형 검사 걷기 -- parser_walk_tree 후위 순서(pt_apply_union_stmt: WITH -> arg1 -> arg2 -> 집합 연산, pt_apply_with_clause/pt_apply_cte: 비재귀 부분)로, 질의는 pt_eval_type 의 게이트(type_checking.c:8357-8362: PT_IS_SUBQUERY/UNION/CTE 부질의 && pt_false_where -> pt_to_false_subquery 다른 갈래 = NULL 값 is_false_where, next·위치·alias·hidden 유지 7463-7491), 집합 연산은 그 접기(8435-8440: 진짜 pt_check_union_is_foldable + 진짜 pt_fold_union); pt_false_where·pt_false_search_condition = type_checking.c:7125-7270 그대로, 단 pt_is_single_tuple 은 HAS_AGG 표시만 본다(이 트리엔 집계 없음); pt_get_select_list = query_result.c:403(SELECT 는 목록·'*' 면 NULL, 집합 연산은 남긴 목록 또는 arg1 의 것 -- 진짜는 두 갈래 형을 합친다, 그 밖은 default: NULL); mq_rewrite_query_as_derived = view_transform.c:6637(SELECT a_1.. FROM (질의 사본, parser_copy_tree) d3201(a_1..), a_k 는 k 번째 열의 형; mq_reset_ids_in_statement 생략) -- 사본이어야 pt_fold_union_as_derived 의 parser_free_tree (active) 뒤에도 파생 테이블이 산다; g_query_string·_len(csql_grammar.y 전역, C 링키지), er_*, pt_parser_line_col(위치 0), pt_free_dblink_remote_cols, init_builtin_calendar_names·db_date_locale_init, envvar_*, cubregex::get_engine_name = fold_union_text 와 같다. 트리: WITH c AS (SELECT x FROM db_root WHERE <상수 거짓>) -- CTE 질의는 아직 SELECT 라 첫 pt_check_union_is_foldable 은 NOTHING(PT_IS_FALSE_WHERE_VALUE 는 값이 된 CTE 만 본다), 형 검사 걷기에서 CTE 질의 -> 그것을 읽는 갈래 -> 집합 연산 순으로 접힌다(PR 본문 Q11~13·TC 63행 꼴).",
+ "note": "base a617e19b7 는 접힌 노드를 집합 연산으로 읽는다: S2(남는 갈래 SELECT)·S3(파생 테이블 위 SELECT DISTINCT)·S5(DIFFERENCE ALL -> 첫 갈래)는 is_leaf_node 가 select.group_by(NULL) 자리라 0, arg1 이 select.list 자리라 pt_get_select_list(PT_NAME) = NULL, 콜레이션 추론이 그 SELECT 에 불린다(g_coll_calls 1 -> FAIL). S6(INTERSECTION -> NULL 값)은 union_.arg1 이 PT_VALUE 의 host_var_index(-1) 바이트 = 0xffffffff00000000 이라 pt_get_select_list 에서 SIGSEGV(클라이언트 크래시 그대로) -- 그래서 맨 뒤에 둔다(앞 케이스는 보고된다). S1·S1b(접히지 않음)·S4(아래 집합 연산만 접힘, 루트는 집합 연산)는 base 도 PASS. 변이(bb9575015 위): mutants/m1_union_only_guard.diff(가드를 !PT_IS_UNION 하나로) -> S1b 만 FAIL(DIFFERENCE 루트가 콜레이션 추론을 건너뜀). 가짜 걷기의 충실도 교차 확인: variants/realwalk_test.cpp 는 같은 케이스를 진짜 형 검사 걷기(type_checking.c 를 extra 로 -- 진짜 pt_semantic_type·pt_eval_type_pre/pt_eval_type·pt_false_where·pt_to_false_subquery, + parser_support.c·parse_dbi.c·object_domain_convert.cpp·numeric_opfunc.c, 가짜는 pt_is_single_tuple(xasl_generation.c:4261 그대로)·pt_find_entity(name_resolution.c:7390-7411 그대로) 추가)로 돌린다 -- 2026-11-25 head 7/7, base 3/7 로 test.cpp 와 케이스마다 같은 결과(S6 SIGSEGV 포함), stub 호출 0. unit_regress 는 test.cpp 만 돌린다(형 검사 쪽 변경과 가드를 떼어 보려고); 수동 실행은 --test variants/realwalk_test.cpp --extra <위 목록 + suite extra>.",
+ "origin": {
+  "pr": 8696,
+  "jira": "CBRD-28231",
+  "finding": "contract suite (harness-review 3-1(c)) -- 바뀐 함수의 접힌 집합 연산 가드 고정, 결함 재현 아님. G1-03(새 주석이 파생 테이블 위 SELECT DISTINCT 결과를 빠뜨림)의 그 결과도 S3 이 가드에 걸리는 것을 보인다",
+  "comment": null,
+  "date": "2026-11-25",
+  "reviewed_head": "bb9575015",
+  "base": "a617e19b7",
+  "artifact": "harness-out/8696/bb9575015/unit/semantic_check.folded_set_op_guard/",
+  "result": "2026-11-25: head bb9575015 7/7 PASS, base a617e19b7 3/7(S1·S1b·S4 PASS; S2·S3·S5 FAIL = 콜레이션 추론이 접힌 SELECT 에 불림; S6 SIGSEGV rc=-11 = NULL 값을 집합 연산으로 읽음), stub 호출 0. 변이 m1 -> S1b FAIL(나머지 6 PASS)."
+ }
+}

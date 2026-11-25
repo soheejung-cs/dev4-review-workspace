@@ -1,0 +1,11 @@
+--- a/src/parser/semantic_check.c	2026-11-25 20:18:21.716294613 +0900
++++ b/src/parser/semantic_check.c	2026-11-25 20:18:21.735294613 +0900
+@@ -11704,7 +11704,7 @@
+ 	  break;
+ 	}
+ 
+-      if (!PT_IS_UNION (node) && !PT_IS_INTERSECTION (node) && !PT_IS_DIFFERENCE (node))
++      if (!PT_IS_UNION (node))	/* m1: UNION only */
+ 	{
+ 	  /* the type checking folded the set operation into a value or one of its operands (pt_fold_union ()), which
+ 	   * it does when an operand is known to be empty only after its CTE is folded: nothing is left to check */

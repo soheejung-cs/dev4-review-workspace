@@ -1,0 +1,11 @@
+--- a/src/query/scan_manager.c
++++ b/src/query/scan_manager.c
+@@ -2156,7 +2156,7 @@
+        * desc. */
+       if ((indx_infop->range_type == R_KEYLIST || indx_infop->range_type == R_RANGELIST)
+ 	  && ((indx_infop->orderby_desc && indx_infop->orderby_skip)
+-	      || (indx_infop->groupby_desc && indx_infop->groupby_skip) || iscan_id->min_max_only_desc_pass))
++	      || (indx_infop->groupby_desc && indx_infop->groupby_skip)))
+ 	{
+ 	  /* reverse the key lists if we have a reverse order by or group by which is skipped, or a pass of a min/max only
+ 	   * scan that takes MAX */

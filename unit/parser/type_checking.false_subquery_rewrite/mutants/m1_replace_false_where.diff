@@ -1,0 +1,11 @@
+--- a/src/parser/type_checking.c	2026-11-25 20:10:39.548310843 +0900
++++ b/src/parser/type_checking.c	2026-11-25 20:10:39.571310842 +0900
+@@ -7385,7 +7385,7 @@
+ 
+       /* rewrite WHERE as false unless it is: the query may be false by another clause (HAVING, a folded derived
+        * table or CTE in its FROM), and the WHERE it had then refers to the FROM list removed above */
+-      if (!pt_false_search_condition (parser, subq->where))
++      if (true)		/* m1: replace even a WHERE already false */
+ 	{
+ 	  parser_free_tree (parser, subq->where);
+ 	  subq->where = parser_new_node (parser, PT_VALUE);

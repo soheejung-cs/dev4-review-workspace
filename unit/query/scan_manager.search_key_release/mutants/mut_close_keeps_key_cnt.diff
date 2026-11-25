@@ -1,0 +1,10 @@
+--- a/src/query/scan_manager.c
++++ b/src/query/scan_manager.c
+@@ -5190,7 +5190,6 @@
+ 	{
+ 	  isidp->key_vals = NULL;
+ 	}
+-      isidp->key_cnt = 0;
+ 
+       /* free allocated memory for the scan */
+       if (isidp->bt_attr_ids)

@@ -1,0 +1,21 @@
+--- a/src/query/scan_manager.c
++++ b/src/query/scan_manager.c
+@@ -2623,11 +2623,14 @@
+   KEY_VAL_RANGE *key_vals;
+   int i;
+ 
+-  key_vals = isidp->key_vals;
+-  for (i = 0; i < isidp->key_cnt; i++)
++  if (isidp->curr_keyno >= 0 && isidp->curr_keyno < isidp->key_cnt)
+     {
+-      pr_clear_value (&key_vals[i].key1);
+-      pr_clear_value (&key_vals[i].key2);
++      key_vals = isidp->key_vals;
++      for (i = 0; i < isidp->key_cnt; i++)
++	{
++	  pr_clear_value (&key_vals[i].key1);
++	  pr_clear_value (&key_vals[i].key2);
++	}
+     }
+ }
+ 

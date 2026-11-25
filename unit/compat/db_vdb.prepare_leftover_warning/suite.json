@@ -1,0 +1,37 @@
+{
+ "name": "PR#8696 (CBRD-28231) do_process_prepare_statement -- after the subquery walk only an error (er_errid_if_has_error) fails an SQL-level PREPARE: a warning the compilation left (ER_OBJ_NO_COMPONENTS of an ALL class without subclasses, not cleared by a statement folded to false) lets it pack and register the name; a failing walk still fails it, after a warning too, deletes the name once on a pushed error level and closes the subsession once",
+ "requires": [
+  "do_process_prepare_statement"
+ ],
+ "file": "src/compat/db_vdb.c",
+ "mode": "cs",
+ "seams": [
+  "db_open_buffer_local",
+  "db_compile_statement_local",
+  "db_close_session_local"
+ ],
+ "appendix": "hooks.cpp",
+ "test": "test.cpp",
+ "watch": [
+  "src/compat/db_session.h",
+  "src/compat/db_query.h",
+  "src/compat/db_query.c",
+  "src/base/error_manager.c",
+  "src/base/error_context.cpp",
+  "src/communication/network_interface_cl.c",
+  "src/compat/db_info.c"
+ ],
+ "fakes": "진짜: db_vdb.c(TU: do_process_prepare_statement -- hooks.cpp 의 ut_process_prepare --, 빈 kept-tree 목록 위 db_prepared_tree_remove/_unlink/_close, db_check_single_query, is_allowed_as_prepared_statement(_with_hv), set_prepare_info_into_list, do_process_prepare_subquery_pre). seam(같은 TU): db_open_buffer_local(db_vdb.c:1098) = 케이스의 부세션(SELECT 하나, 호스트 변수 없음 -- DB_SESSION·PARSER_CONTEXT calloc)을 돌려주고 받은 글을 기록; db_compile_statement_local(1609) = 케이스가 정한 것을 오류 문맥에 남기고 문장 번호 1(WARNING 이면 db_info.c:701 db_get_subclasses 가 하위 클래스 없는 클래스(ALL, name_resolution.c:7663)에 남기는 er_set (ER_WARNING_SEVERITY, ER_OBJ_NO_COMPONENTS)); db_close_session_local(5874) = 세기만(해제 안 함). 가짜: 오류 문맥(error_manager.c/error_context.cpp) = 현재 er_message(err_id, severity) 스택 -- er_set = set_error(error_context.cpp:151-161), er_errid = err_id(error_manager.c:1868-1884, 초기화된 경우), er_errid_if_has_error = er_is_error_severity(FATAL/ERROR/SYNTAX, 3278-3293)면 err_id 아니면 NO_ERROR(1894-1901), er_clear = clear_error(NO_ERROR·ER_WARNING_SEVERITY, 141-148), er_stack_push = 새 빈 수준(push_error_stack 278), er_stack_pop = 아래 수준으로(pop_error_stack_and_destroy 296); parser_walk_tree(parse_tree_cl.c:1252) = 문장 노드에 pre 함수 한 번(이 문장엔 부질의 없음), walk_fails 면 set_prepare_subquery_info(db_vdb.c:4095)가 malloc 실패 때 남기는 er_set (ER_ERROR_SEVERITY, ER_OUT_OF_VIRTUAL_MEMORY); pt_node_to_cmd_type = parse_dbi.c:2756-2790; db_init_prepare_info = db_query.c:414-435 그대로; db_pack_prepare_info(db_query.c:444) = malloc 24 바이트·크기 24; csession_create_prepared_statement / csession_delete_prepared_statement(network_interface_cl.c) = 호출 기록, delete 는 서버가 모르는 이름에 답하듯 자기 오류(ER_FAILED)를 남긴다 -- 호출자의 er_stack_push/pop 이 그것을 호출자 오류와 가르는지 P3 이 본다.",
+ "note": "base a617e19b7 는 er_errid () 로 본다: P2(경고만 남음)에서 err = ER_OBJ_NO_COMPONENTS(-226)로 cleanup -- 포장·등록 없이 이름 삭제, 반환 -226 -> FAIL = 이 PR 이 고친 동작. P1(아무것도 안 남음)·P3(걷기 실패)·P4(경고 뒤 걷기 실패 -- 오류가 경고를 덮어 실패)는 base 도 PASS. 변이(bb9575015 위): mutants/m1_walk_unchecked.diff(걷기 뒤 검사를 없앰) -> P3·P4 만 FAIL(경고만 봐주는 것이지 오류까지 봐주는 것이 아님을 두 경계가 가린다). 경고가 실제로 남는 경로(이름 해석의 ALL 클래스 + 거짓으로 접힌 문장)는 PR 의 TC 가 SQL 로 보인다 -- 여기서는 db_compile_statement_local 가짜가 남긴다.",
+ "origin": {
+  "pr": 8696,
+  "jira": "CBRD-28231",
+  "finding": "contract suite (harness-review 3-1(c)) -- 바뀐 함수의 PREPARE 오류 판정 고정, 결함 재현 아님",
+  "comment": null,
+  "date": "2026-11-25",
+  "reviewed_head": "bb9575015",
+  "base": "a617e19b7",
+  "artifact": "harness-out/8696/bb9575015/unit/db_vdb.prepare_leftover_warning/",
+  "result": "2026-11-25: head bb9575015 4/4 PASS, base a617e19b7 3/4(P2 FAIL: -226, 포장·등록 0회), stub 호출 0. 변이 m1 -> P3·P4 FAIL(P1·P2 PASS)."
+ }
+}

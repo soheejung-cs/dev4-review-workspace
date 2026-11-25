@@ -1,0 +1,32 @@
+{
+ "name": "MIN/MAX only index scan: which pass reads its key ranges from the last (PR#8718, CBRD-28283) -- qexec_open_scan () marks INDX_SCAN_ID::min_max_only_desc_pass exactly when the spec is ACCESS_SPEC_FLAG_ONLY_MIN_MAX_SCAN and use_desc_index != part_key_descending (the pass that takes MAX from its first row, qdata_evaluate_aggregate_list ()), after scan_open_index_scan () (which leaves it false) and before the parallel open; a spec that is no MIN/MAX scan is never marked and its agg_list is not read; each open decides from its own directions",
+ "file": "src/query/query_executor.c",
+ "mode": "server",
+ "seams": [
+  "qexec_open_scan"
+ ],
+ "test": "test.cpp",
+ "requires": [
+  "qexec_open_scan",
+  "ACCESS_SPEC_FLAG_ONLY_MIN_MAX_SCAN"
+ ],
+ "watch": [
+  "src/xasl/access_spec.hpp",
+  "src/query/scan_manager.h",
+  "src/query/scan_manager.c",
+  "src/query/query_aggregate.cpp",
+  "src/parser/xasl_generation.c"
+ ],
+ "fakes": "Real: qexec_open_scan () (static: unstatic'd by the seam), qexec_set_expr_share_spec () (no predicate: returns), qexec_spec_is_for_update () (no FOR UPDATE flag: false, no parameter read), the inline perfmon_inc_stat () (not tracking). scan_open_index_scan (): what qexec_open_scan () reads of the real one's result -- type S_INDX_SCAN, status S_OPENED, the mark false (scan_manager.c sets min_max_only_desc_pass = false in the open) -- NO_ERROR, the min_max_optimzied_scan argument recorded. scan_open_parallel_index_scan () (extern \"C\", px_scan.hpp): records the mark it is handed, leaves the scan serial (S_INDX_SCAN, the fallback qexec_open_scan () handles), NO_ERROR. mvcc_is_mvcc_disabled_class (): false. ACCESS_SPEC_TYPE/XASL_NODE/INDX_INFO/AGGREGATE_TYPE/QFILE_LIST_ID calloc'd: TARGET_CLASS, ACCESS_METHOD_INDEX, DB_NOT_PARTITIONED_CLASS, no predicate, not cached, a BUILDVALUE block whose agg_list carries part_key_descending, the list file without a temp file (no reopen). The mark is read and written through SFINAE, false where the member is absent (base).",
+ "note": "2026-11-25 head a4a513237: 3/3 PASS. base 5eb6d8310 (develop, no such member, read false): P2 PASS, P1 P3 FAIL (no pass is marked). Sensitivity mutant on head (mutants/mut_mark_before_open.diff, the assignment moved before scan_open_index_scan (), whose reset then clears it): P1 P3 FAIL, P2 PASS. Not reached: qexec_intprt_fnc ()'s two flips of the mark with use_desc_index (the block / scan / predicate / aggregate loop would all be fakes) -- G1-02 checked them statically. stub calls at run time: none.",
+ "origin": {
+  "pr": 8718,
+  "jira": "CBRD-28283",
+  "head": "a4a5132376866f19f6a71885781927a0bbc54c26",
+  "base": "5eb6d831001d5ba6db64ac67672bbb6c1721084a",
+  "finding": "contract suite (harness-review 3-1 (c), no finding); the contract G1-02 asks to write next to the field",
+  "comment": null,
+  "artifacts": "/home/cubrid/dev/utils/harness-out/8718/a4a513237/unit/min_max_desc_pass/ (out/, out-mut-*/, mutants/)",
+  "date": "2026-11-25"
+ }
+}

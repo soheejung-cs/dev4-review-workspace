@@ -1,0 +1,37 @@
+{
+ "name": "index scan search keys across passes (PR#8718, CBRD-28283; CBRD-28203's paths): whichever way a non-covering scan of a multi-column index goes from a pass that stopped before its last key's end to the next (MIN/MAX turn-around S_GO_BACKWARD, NL semi/anti inner rewind scan_reset_scan_block (), started partition switch scan_switch_index_partition ()) at most one pass's key buffers are alive, none after scan_end_scan () -- also when the scan ends right after a rewind or a switch with no pass in between (curr_keyno -1) -- none freed twice, and a closed scan whose reopen fails at the root page fix ends without touching a key slot",
+ "file": "src/query/scan_manager.c",
+ "mode": "server",
+ "seams": [
+  "scan_regu_key_to_index_key",
+  "scan_next_index_lookup_heap",
+  "scan_next_index_scan",
+  "scan_switch_index_attr_caches"
+ ],
+ "test": "test.cpp",
+ "requires": [
+  "scan_clear_index_key_vals",
+  "scan_get_index_oidset",
+  "scan_switch_index_partition"
+ ],
+ "watch": [
+  "src/query/scan_manager.h",
+  "src/xasl/access_spec.hpp",
+  "src/storage/btree.h",
+  "src/storage/btree_load.h",
+  "src/object/object_primitive.h",
+  "src/query/query_executor.c"
+ ],
+ "fakes": "Real: scan_next_index_scan () (static: unstatic'd), call_get_next_index_oidset (), scan_get_index_oidset (), check_key_vals () and eliminate_duplicated_keys (), scan_reset_scan_block (), scan_switch_index_partition () (*btid_int_cached true: no root page fix; started: status S_STARTED + scancache_inited + caches_inited), scan_init_scan_id (), scan_set_upddel_target (), scan_end_scan (), scan_clear_index_key_vals (), scan_init_iss (), scan_init_index_key_limit (), scan_close_scan (), scan_free_iscan_oid_buf_list (), scan_open_index_scan () up to its root page fix, BTREE_RESET_SCAN/BTREE_INIT_SCAN and btree_load.h's inline btree_clear_key_value ()/btree_init_temp_key_value (). scan_regu_key_to_index_key () (seam): the real one's outputs for an equality on the first column of a multi-column index -- key1 a DB_TYPE_MIDXKEY owning a malloc'd buffer (need_clear, scan_dbvals_to_midxkey ()), key2 its clone (pr_clone_value (): a second buffer), EQ_NA turned GE_LE, num_index_term 1, bounds copied. btree_prepare_bts ()/btree_range_scan (): one row per value (OID pageid = value), all of a key range in one call in the scan's direction, the range ends (BTREE_END_OF_SCAN). scan_next_index_lookup_heap () (seam): S_SUCCESS (the row qualifies). pr_midxkey_compare_resolved (): integer comparison of the first column. pr_clear_value (): the real one's NULL/MIDXKEY branches (free when need_clear, NULL, need_clear false) counting buffers alive and frees of a buffer not alive; a pointer under 4096 (&key_vals[i].key1 of a NULL key_vals) is counted, not dereferenced. scan_switch_index_attr_caches () (seam): NO_ERROR (the attribute caches move, no key). heap_scancache_switch_class ()/heap_scancache_end (): NO_ERROR. btree_scan_clear_key (): the real one's clear of bts->cur_key (never set here; the B-tree's own current key is not modeled). btree_range_scan_free_matched_idx (): nothing. pgbuf_fix_release (): NULL (the reopen's root page fix fails). logtb_find_current_isolation (): read committed. css_get_max_conn (): 100 (MAX_NTRANS of the OID buffer reuse list that scan_close_scan () returns the scan's buffer to; each case malloc's its own). prm_Def: a zeroed table of the real size (asm label) for scan_open_index_scan ()'s static oracle_style_empty_string. The turn-around of qexec_intprt_fnc () (use_desc_index and the mark flipped, bts_reset_scan (), position S_GO_BACKWARD) is done by the test. #063: the only allocations on these paths are the keys (OID buffer the test's, no covering list, no multi range opt).",
+ "note": "2026-11-25 head a4a513237: 8/8 PASS. base 5eb6d8310 (develop): K1 FAIL (the MIN/MAX turn-around: 12 buffers alive after the second pass, 6 left after scan_end_scan () -- the CBRD-28283 leak), K8 FAIL (scan_close_scan () keeps key_cnt 3 and the last pass left curr_keyno 1: the failed reopen's scan_end_scan () reads 6 slots of the NULL key_vals -- the real pr_clear_value () would crash; a latent develop crash on that error path, which the PR closes), K2-K7 PASS (develop released at the rewind / switch, PR at the next first open or the end). Sensitivity mutants on head (mutants/*.diff): mut_no_first_open_clear (the two pr_clear_value () at the first open dropped) -> K1 K2 K4 FAIL; mut_end_clear_conditional (develop's curr_keyno condition back in scan_clear_index_key_vals ()) -> K3 K5 FAIL; mut_close_keeps_key_cnt (key_cnt = 0 dropped from scan_close_scan ()) -> K8 FAIL. stub calls at run time: none.",
+ "origin": {
+  "pr": 8718,
+  "jira": "CBRD-28283",
+  "head": "a4a5132376866f19f6a71885781927a0bbc54c26",
+  "base": "5eb6d831001d5ba6db64ac67672bbb6c1721084a",
+  "finding": "contract suite (harness-review 3-1 (c), no finding); dynamic model of the two release paths G1-01 asks to run on a debug server (rewind, HASH partition switch)",
+  "comment": null,
+  "artifacts": "/home/cubrid/dev/utils/harness-out/8718/a4a513237/unit/search_key_release/ (out/, out-mut-*/, mutants/)",
+  "date": "2026-11-25"
+ }
+}

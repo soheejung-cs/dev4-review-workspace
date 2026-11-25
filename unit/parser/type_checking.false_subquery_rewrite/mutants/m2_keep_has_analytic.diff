@@ -1,0 +1,11 @@
+--- a/src/parser/type_checking.c	2026-11-25 20:10:39.552310843 +0900
++++ b/src/parser/type_checking.c	2026-11-25 20:10:39.573310842 +0900
+@@ -7458,7 +7458,7 @@
+        * (pt_has_aggregate ()) would return a row for its empty input, and one taken as an analytic one
+        * (pt_has_analytic ()) finds no function to evaluate and fails */
+       PT_SELECT_INFO_CLEAR_FLAG (node, PT_SELECT_INFO_HAS_AGG);
+-      PT_SELECT_INFO_CLEAR_FLAG (node, PT_SELECT_INFO_HAS_ANALYTIC);
++      /* m2: HAS_ANALYTIC left */
+     }
+   else
+     {

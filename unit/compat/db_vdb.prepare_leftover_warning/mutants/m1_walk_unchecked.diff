@@ -1,0 +1,11 @@
+--- a/src/compat/db_vdb.c	2026-11-25 20:21:51.949287231 +0900
++++ b/src/compat/db_vdb.c	2026-11-25 20:21:51.966287230 +0900
+@@ -4277,7 +4277,7 @@
+ 		    NULL);
+   /* a warning left by the compilation is not a failure of the walk: e.g. name resolution leaves ER_OBJ_NO_COMPONENTS
+    * for a class without subclasses (ALL class), and a statement folded to false does not go on to clear it */
+-  if ((err = er_errid_if_has_error ()) != NO_ERROR)
++  if ((err = NO_ERROR) != NO_ERROR)	/* m1: the walk's failure is not checked */
+     {
+       goto cleanup;
+     }
