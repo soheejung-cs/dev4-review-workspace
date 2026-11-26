@@ -1,0 +1,49 @@
+{
+ "name": "PR#8440 (CBRD-27351) mq_share_settle_groups () run on a subquery before the statement -- with the result cache on, do_prepare_subquery () gives do_prepare_select () (and, on an XASL cache miss, parser_generate_xasl ()) the QUERY_CACHE subquery node of the statement tree: the settle counts the subquery's members only and narrows them to the columns they read (mq_share_restore_pre (), n_kept == n_members), and the later settles of the whole statement pick from the narrowed as_attr_list and cannot widen it back -- one group whose donor (the subquery's member, the select list walked before FROM) selects k, sy while the outer member selects k, sx, sy and reads sx at the position of sy; controls: the plain subquery and the statement settled only as a whole keep one column list, the WHERE form reads right",
+ "requires": [
+  "mq_share_settle_groups",
+  "mq_share_view_refs"
+ ],
+ "file": "src/parser/view_transform.c",
+ "mode": "cs",
+ "seams": [
+  "mq_fetch_attributes",
+  "mq_fetch_subqueries"
+ ],
+ "appendix": "hooks.cpp",
+ "test": "test.cpp",
+ "extra": [
+  "src/parser/parse_tree.c",
+  "src/parser/parse_tree_cl.c",
+  "src/parser/parser_support.c",
+  "src/base/language_support.c",
+  "src/base/intl_support.c",
+  "src/base/chartype.c",
+  "src/object/object_domain.c",
+  "src/object/object_primitive.c",
+  "src/query/domain_rules.c",
+  "src/compat/db_macro.c",
+  "src/base/memory_alloc.c",
+  "src/base/system_parameter.c"
+ ],
+ "watch": [
+  "src/parser/parse_tree.h",
+  "src/parser/parse_tree_cl.c",
+  "src/parser/parser_support.c",
+  "src/parser/xasl_generation.c",
+  "src/query/execute_statement.c"
+ ],
+ "fakes": "진짜: view_transform.c(TU: mq_share_view_refs·mq_share_collect_pre/post·mq_share_view_is_safe·mq_share_view_attrs·mq_share_body_keeps_columns·mq_share_select_keeps_columns·mq_is_pushable_subquery·mq_is_removable_select_list·mq_rewrite_vclass_spec_as_derived·mq_vspec_select_list·mq_share_group_covers·mq_share_select_list·mq_get_references·mq_reset_ids_and_references·mq_share_settle_groups 와 다섯 walk(reset·settle·kept·restore·mark)·mq_share_narrow_cols·mq_remove_select_list_for_inline_view·mq_lambda), parse_tree.c + parse_tree_cl.c(parser_new_node·parser_copy_tree·parser_walk_tree -- pt_apply_select 의 list→from→where 순서가 제공자를 정한다), parser_support.c(pt_name·pt_name_equal·pt_has_define_vars·pt_has_analytic·pt_has_aggregate·pt_make_integer_value 등). seam: mq_fetch_attributes(뷰 캐시 attrs, oid 먼저 -- mq_virtual_queries ()) = [v(OID_ATTR, OBJECT), k, sx, sy]; mq_fetch_subqueries(뷰 캐시의 번역된 질의) = select k, sum (x), sum (y) from t group by k(HAS_AGG, GROUP BY 는 PT_SORT_SPEC). 가짜: db_is_vclass(db_virt.c: 케이스의 뷰 객체만 1), pt_str_compare(name_resolution.c 본문), pt_is_result_reuse_safe(xasl_generation.c: 이 본문에 거르는 식 없음 = true), pt_true_search_condition(type_checking.c:7318 본문 그대로), 언어·er_* 가짜는 parser/view_transform.share_spec_ids 와 같다. 트리: 이름 해석 뒤 꼴(spec id = 주소, 진입·flat·range 이름이 그 id, 열 이름 resolved = range 이름), QUERY_CACHE 는 scanner_support.c:613-616 처럼 info.query.hint. 단계(호출자 이름): 번역 = mq_share_view_refs(문장) → 부질의 SELECT 의 i1·i2, 그다음 문장 SELECT 의 o 를 mq_substitute_subquery_in_statement 의 NON_PUSHABLE 갈래(3088-3097)처럼 파생 테이블로(문장 사본 대신 원본에 -- 같은 id·같은 그룹 포인터), 뷰 본문을 파생 테이블에 합치는 mq_substitute_select_in_statement(3128)는 돌리지 않는다(좁히기는 파생 select list 의 폭·as_attr_list·제거 가능 판정만 읽고, 이 본문에는 힌트·DISTINCT·CONNECT BY·:=·WITH·CTE 가 없어 판정이 같다). settle: T = mq_translate_helper(10038), P-sub = do_prepare_subquery→do_prepare_select(부질의 노드, next 유지, subquery_cached=1 -- execute_statement.c:16881·16957·16969·16525), X-sub = 같은 부질의의 parser_generate_xasl(next 끊음, xasl_generation.c:29506-29507·29543 -- XASL 캐시 미스), P = do_prepare_select(문장), X = parser_generate_xasl(문장). 멤버가 읽는 위치는 자기 as_attr_list 의 위치를 제공자 파생 테이블에서(xasl_generation.c:5610-5611·17582-17595) -- 이 단계(XASL)는 실행하지 않고 as_attr_list 위치 대조로 단정한다.",
+ "note": "base 714ae28b7 에는 공유 코드(mq_share_*)가 없다 -- 수동 실행은 hooks 의 mq_share_view_refs 에서 compile-error, unit_regress 는 requires 로 건너뛴다(신설 코드라 base 비교 없음). 변이(14b4f25b5 위): mutants/fix_d2_01_collect_query_cache.diff(지적 proposal (1) -- mq_share_collect_pre () 가 QUERY_CACHE 부질의를 상관 부질의처럼 모으지 않음) -> F1a~F1d FAIL(그룹이 생기지 않음), C0~C3 PASS. proposal (2)(do_prepare_select 가드 + share_groups 비움)는 execute_statement.c·xasl_generation.c 라 이 TU 로 변이를 돌릴 수 없다 -- 대신 F1d 가 그 가드 뒤에도 parser_generate_xasl () 의 settle(29543)이 같은 좁히기를 남긴다는 것을 보인다. C2·C3 는 proposal (1) 아래에서 그룹이 없어 공허하게 PASS 한다(C0·C1 은 힌트 없는 부질의라 그대로 그룹 셋).",
+ "origin": {
+  "pr": 8440,
+  "jira": "CBRD-27351",
+  "finding": "D2-01 (harness-out/8440/14b4f25b5/findings.D2.json)",
+  "comment": null,
+  "date": "2026-11-26",
+  "reviewed_head": "14b4f25b5",
+  "base": "714ae28b7",
+  "artifact": "harness-out/8440/14b4f25b5/unit/D2-01/",
+  "result": "2026-11-26: head 14b4f25b5 8/8 PASS -- C0~C3 계약, [defect] F1a(P-sub 뒤 i1·i2 = k,sy / o = k,sx,sy, 그룹 n_members 2)·F1b(T·P-sub·X-sub·P·X 뒤 그룹 셋, 제공자 i1 = k,sy(파생 select list 도 k,sy), o 는 sx 를 위치 2 = 제공자의 sy 에서 읽음)·F1c(부질의 settle 이 돌려준 목록과 문장 settle 이 돌려준 목록이 같은 그룹)·F1d(P-sub 없이 X-sub 만으로도 같음) 재현, stub 호출 0. base 714ae28b7 compile-error(공유 코드 없음, unit_regress 는 requires 로 건너뜀). 변이 mutants/fix_d2_01_collect_query_cache.diff: C0~C3 PASS, F1a~F1d FAIL(=닫힘). 라이브러리 꼴(unitseam.run_suite = unit_regress 경로)로도 head 8/8, base requires 로 건너뜀."
+ }
+}

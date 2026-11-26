@@ -1,0 +1,13 @@
+--- a/src/parser/view_transform.c
++++ b/src/parser/view_transform.c
+@@ -17120,7 +17120,9 @@
+ 
+   for (MQ_SHARE_REF * ref = view->refs; ref != NULL && *shareable; ref = ref->next)
+     {
+-      PT_NODE *names = mq_get_references (parser, statement, ref->spec);
++      /* the names that read ref->spec are under the SELECT whose FROM holds it: asking the whole statement would
++       * bind to ref->spec the names of another copy of the same spec (a CTE with the INLINE hint read twice) */
++      PT_NODE *names = mq_get_references (parser, (ref->select != NULL) ? ref->select : statement, ref->spec);
+ 
+       for (PT_NODE * name = names; name != NULL && *shareable; name = name->next)
+ 	{

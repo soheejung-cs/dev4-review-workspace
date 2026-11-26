@@ -1,0 +1,15 @@
+--- a/src/parser/view_transform.c	2026-11-26 16:28:45.919744319 +0900
++++ b/src/parser/view_transform.c	2026-11-26 16:28:45.941744318 +0900
+@@ -16911,7 +16911,11 @@
+       info->selects = select;
+     }
+ 
+-  if (PT_IS_QUERY (node) && node != info->root && node->info.query.correlation_level != 0)
++  /* CBRD-27351: a subquery with the QUERY_CACHE hint is also compiled and run by itself for the result cache
++   * (do_prepare_subquery ()), apart from the rest of the statement: its references are not shared, as those of a
++   * correlated subquery */
++  if (PT_IS_QUERY (node) && node != info->root
++      && (node->info.query.correlation_level != 0 || (node->info.query.hint & PT_HINT_QUERY_CACHE)))
+     {
+       MQ_SHARE_CORR *corr = (MQ_SHARE_CORR *) parser_alloc (parser, sizeof (MQ_SHARE_CORR));
+       if (corr == NULL)

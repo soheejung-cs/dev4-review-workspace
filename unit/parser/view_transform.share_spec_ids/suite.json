@@ -1,0 +1,46 @@
+{
+ "name": "PR#8440 (CBRD-27351) mq_share_view_refs () -- the column gathering of a share group (mq_share_view_attrs ()) asks mq_get_references () with the whole statement, whose mq_reset_ids () binds every name of the statement carrying the spec's id to that spec: two copies of one view spec (a CTE with the INLINE hint read twice, parser_copy_tree keeps the id) end with one copy's entity and column names on the other copy's spec, and that copy fails to translate ('class spec not found'); controls: distinct ids share and stay bound, develop's call scoped to the SELECT keeps both copies bound",
+ "requires": [
+  "mq_share_view_refs"
+ ],
+ "file": "src/parser/view_transform.c",
+ "mode": "cs",
+ "seams": [
+  "mq_fetch_attributes",
+  "mq_fetch_subqueries"
+ ],
+ "appendix": "hooks.cpp",
+ "test": "test.cpp",
+ "extra": [
+  "src/parser/parse_tree.c",
+  "src/parser/parse_tree_cl.c",
+  "src/parser/parser_support.c",
+  "src/base/language_support.c",
+  "src/base/intl_support.c",
+  "src/base/chartype.c",
+  "src/object/object_domain.c",
+  "src/object/object_primitive.c",
+  "src/query/domain_rules.c",
+  "src/compat/db_macro.c",
+  "src/base/memory_alloc.c",
+  "src/base/system_parameter.c"
+ ],
+ "watch": [
+  "src/parser/parse_tree.h",
+  "src/parser/parse_tree_cl.c",
+  "src/parser/parser_support.c"
+ ],
+ "fakes": "진짜: view_transform.c(TU: mq_share_view_refs·mq_share_collect_pre/post·mq_share_is_view_spec·mq_share_view_is_safe·mq_share_view_attrs·mq_share_body_keeps_columns·mq_get_references·mq_reset_ids·mq_reset_all_ids·mq_get_references_node·mq_insert_symbol·mq_translate_tree·mq_substitute_subquery_list_in_statement·mq_substitute_subquery_in_statement), parse_tree.c + parse_tree_cl.c(parser_copy_tree: *new_node = *old_node, 996), parser_support.c(pt_name·pt_find_spec 831-842·pt_name_equal·pt_has_define_vars). seam: mq_fetch_attributes(14875: 뷰 캐시 attrs, oid 먼저 -- mq_virtual_queries 9542·9578-9582) = [v(OID_ATTR, OBJECT), k, s]; mq_fetch_subqueries(8777: 뷰 캐시의 번역된 질의) = select k, s from t. 가짜: db_is_vclass(db_virt.c: 케이스의 뷰 객체만 1), pt_str_compare(name_resolution.c 본문: CASE_INSENSITIVE 면 intl_identifier_casecmp), pt_is_result_reuse_safe(xasl_generation.c: 케이스의 뷰 본문에 거르는 식 없음 = true), er_has_error·er_errid_if_has_error(현재 단계의 오류), 나머지 언어·er_* 가짜는 parser/xasl_generation.session_variable_mark 와 같다. 트리는 이름 해석이 남기는 꼴(spec id = 스펙 주소, 진입 이름·flat 이름·range var 가 그 id -- name_resolution.c:4912·7869-7893)로 만들고, CTE 인라인처럼 본문을 parser_copy_tree 로 두 번 복사한다(view_transform.c:7117). view_transform.c 줄 번호는 14b4f25b5, 다른 파일은 2472da664 와 같다.",
+ "note": "base 714ae28b7 에는 공유 코드(mq_share_view_refs)가 없다 -- 수동 실행은 hooks 의 mq_share_view_refs 에서 compile-error, unit_regress 는 requires 로 base 를 건너뛴다(신설 코드라 base 비교 없음; develop 의 대응 호출 -- mq_get_references () 를 스펙이 든 SELECT 로 -- 은 C2 가 보인다). 변이(14b4f25b5 위): mutants/a01_fix.diff(mq_share_view_attrs () 의 mq_get_references () 를 ref->select 범위로) -> C0~C2 PASS, D1~D3 FAIL(=닫힘), D1 의 두 사본은 같은 그룹에 남고 각자 자기 스펙에 묶인다. 2026-11-26 케이스 이름을 'PR8440 D<n>:' 에서 'PR8440 A-01 D<n>:' 으로 바꾸고 view_transform.c 줄 번호를 14b4f25b5 로 맞췄다(동작 단정은 그대로).",
+ "origin": {
+  "pr": 8440,
+  "jira": "CBRD-27351",
+  "finding": "A-01 (harness-out/8440/2472da664/findings.A.json; 14b4f25b5 에서 다시 확인 -- findings.D1.json)",
+  "comment": null,
+  "date": "2026-11-25",
+  "reviewed_head": "14b4f25b5",
+  "base": "714ae28b7",
+  "artifact": "harness-out/8440/14b4f25b5/unit/view_transform.share_spec_ids/",
+  "result": "2026-11-25: head 2472da664 6/6 PASS -- C0·C1·C2 계약, [defect] D1(사본 a 의 flat 이름·열 이름이 사본 b 주소)·D2(공유 포기해도 같음)·D3(그 사본 mq_translate_tree -> NULL, 'System error (class spec not found) ... (line: 3074)') 재현, stub 호출 0. base 는 requires 로 적용 안 됨(mq_share_view_refs 없음 -- develop 의 대응 호출은 C2 가 보인다). | 2026-11-26: head 14b4f25b5 6/6 PASS -- D1~D3 여전히 재현(D3 'class spec not found' line 3079, 새 head 줄), stub 호출 0. 변이(--patch mutants/a01_fix.diff: mq_share_view_attrs () 의 mq_get_references () 를 ref->select 범위로): C0~C2 PASS, D1~D3 FAIL(=고쳐짐), D1 의 그룹은 유지(두 사본이 같은 그룹, 각자 자기 스펙에 묶임). | 2026-11-26 정리(라이브러리 이관용): 케이스 이름 'PR8440 A-01 D<n>:', view_transform.c 줄 번호를 14b4f25b5 로 -- 라이브러리 꼴(unitseam.run_suite = unit_regress 경로) head 14b4f25b5 6/6 PASS·stub 0, base 714ae28b7 는 requires 로 건너뜀, 변이 다시 돌려 C0~C2 PASS·D1~D3 FAIL."
+ }
+}
