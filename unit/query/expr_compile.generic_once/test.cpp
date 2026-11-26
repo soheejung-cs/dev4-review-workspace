@@ -671,3 +671,62 @@ TEST_CASE ("a copy into a COLLATE relabel step's slot that runs out of memory fa
   expr_prog_free (p);
   exec_unbind ();
 }
+
+/* ---- CBRD-28250 (PR#8775): a kernel step between two generic steps.  A kernel that converts or combines cells of one
+ * value for the execution (the CAST the parser wraps a function argument in, integer arithmetic) gives one value too,
+ * so the generic step over it computes once per execution; the kernel itself keeps running.  On the base the generic
+ * step over a kernel computes on every evaluation. */
+
+static REGU_VARIABLE *
+cast_to (TP_DOMAIN * dom, REGU_VARIABLE * operand)
+{
+  return arith (T_CAST, dom, NULL, operand);
+}
+
+TEST_CASE ("CBRD-28250: a generic step over a CAST of a once-per-execution step computes once per execution too "
+	   "(the shape of the bound over CONCAT (CAST (NULLIF (?, '') AS CHAR), '%'), with a cast the unit links: INT to BIGINT)", "[contract]")
+{
+  exec_bind (7, "pay", NULL);
+  int idx = -1;
+  REGU_VARIABLE *cat = arith (T_CONCAT, D (DB_TYPE_INTEGER), hv (0), lit_str ("%"));
+  EXPR_PROG *p = compile1 (arith (T_LIKE_LOWER_BOUND, D (DB_TYPE_INTEGER), cast_to (D (DB_TYPE_BIGINT), cat), NULL),
+			   &idx);
+  REQUIRE (p != NULL);
+  CHECK (unitseam_generic_slots (p) == 2);
+  std::vector<std::string> values;
+  CHECK (calls_per_eval (p, idx, T_LIKE_LOWER_BOUND, { 7, 7, 8, 8 }, &values) == std::vector<int> ({ 1, 0, 1, 0 }));
+  CHECK (values == std::vector<std::string> ({ "INT:1", "INT:1", "INT:1", "INT:1" }));
+  expr_prog_free (p);
+  exec_unbind ();
+}
+
+TEST_CASE ("CBRD-28250: a generic step over a CAST of a column computes on every evaluation -- the kernel's cell is "
+	   "a value per row", "[contract]")
+{
+  db_make_int (&g_attrs[3].v, 4);
+  exec_bind (7, NULL, NULL);
+  int idx = -1;
+  EXPR_PROG *p = compile1 (arith (T_LIKE_LOWER_BOUND, D (DB_TYPE_INTEGER),
+				  cast_to (D (DB_TYPE_BIGINT), attr (3, D (DB_TYPE_INTEGER))), NULL), &idx);
+  REQUIRE (p != NULL);
+  CHECK (unitseam_generic_slots (p) == 0);
+  CHECK (calls_per_eval (p, idx, T_LIKE_LOWER_BOUND, { 7, 7, 7 }) == std::vector<int> ({ 1, 1, 1 }));
+  expr_prog_free (p);
+  exec_unbind ();
+}
+
+TEST_CASE ("CBRD-28250: a generic step over integer arithmetic of a once-per-execution step and a column computes on "
+	   "every evaluation", "[contract]")
+{
+  db_make_int (&g_attrs[2].v, 5);
+  exec_bind (7, "pay", NULL);
+  int idx = -1;
+  REGU_VARIABLE *cat = arith (T_CONCAT, D (DB_TYPE_INTEGER), hv (0), lit_str ("%"));
+  REGU_VARIABLE *sum = arith (T_ADD, D (DB_TYPE_INTEGER), cat, attr (2, D (DB_TYPE_INTEGER)));
+  EXPR_PROG *p = compile1 (arith (T_LIKE_LOWER_BOUND, D (DB_TYPE_INTEGER), sum, NULL), &idx);
+  REQUIRE (p != NULL);
+  CHECK (unitseam_generic_slots (p) == 1);
+  CHECK (calls_per_eval (p, idx, T_LIKE_LOWER_BOUND, { 7, 7, 7 }) == std::vector<int> ({ 1, 1, 1 }));
+  expr_prog_free (p);
+  exec_unbind ();
+}

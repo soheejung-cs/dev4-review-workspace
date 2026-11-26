@@ -1,5 +1,5 @@
 {
- "name": "PR#8623 식 컴파일 — generic 스텝 실행당 한 번(CBRD-28120): 실행 동안 한 값인 피연산자만 읽는 generic 스텝이 그 실행의 첫 평가에서만 몸통을 부르고 이후엔 슬롯을 답함, 실행 식별자 없으면 매번, 리터럴도 실행마다 다시(프로그램 수명 동안 굳지 않음), 열·비캐시 연산자(SYS_GUID)·피연산자를 직접 읽는 몸통(COALESCE)은 행마다, CONCAT '?' 규칙의 skip 표시를 남기지 않음, generic 위의 generic, 슬롯 복제의 할당 실패(PR#8623 리뷰 — once-per-execution generic·COLLATE relabel 이 NULL 을 남기지 않고 실패)",
+ "name": "PR#8623 식 컴파일 — generic 스텝 실행당 한 번(CBRD-28120): 실행 동안 한 값인 피연산자만 읽는 generic 스텝이 그 실행의 첫 평가에서만 몸통을 부르고 이후엔 슬롯을 답함, 실행 식별자 없으면 매번, 리터럴도 실행마다 다시(프로그램 수명 동안 굳지 않음), 열·비캐시 연산자(SYS_GUID)·피연산자를 직접 읽는 몸통(COALESCE)은 행마다, CONCAT '?' 규칙의 skip 표시를 남기지 않음, generic 위의 generic, 슬롯 복제의 할당 실패(PR#8623 리뷰 — once-per-execution generic·COLLATE relabel 이 NULL 을 남기지 않고 실패) · CBRD-28250(PR#8775): 커널(CAST) 위 generic 도 실행당 한 번, 행을 읽는 CAST·열과 더한 산술 위 generic 은 행마다",
  "file": "src/query/expr_compile.c",
  "mode": "server",
  "seams": [],
@@ -29,7 +29,7 @@
   "src/query/regu_var.hpp"
  ],
  "fakes": "expr_compile.generic_step 의 가짜(er_set/er_errid/er_clear, prm_Def 부팅 기본값 — oracle_style_empty_string false 라 T_CONCAT 규칙이 'L?r', 0 으로 채운 스레드 엔트리, heap_attrinfo_access, area_alloc/area_free, lang_Collations)에서 develop 이 없앤 부분(domain_plan.h, plan_item, CAST·plan 산술 몸통 흉내)을 뺐다. fetch_arith_op: 모든 opcode 에 기록 몸통 하나 — 받은 피연산자('-' 안 읽음·'n' NULL·'v' 값)를 로그하고 값 개수를 INT 로 답한다(T_INCR/T_DECR 는 RAW_LEFT). qexec_execute_mainblock: 부질의 리프가 없어 닿으면 assert. 실행 = VAL_DESCR.xasl_state->query_id(0 이면 xasl_state 없음). db_private_alloc_release/db_private_free_release: malloc/free, g_alloc_fail_in 으로 n 번째 할당을 hl_lea_alloc 처럼 실패(ER_OUT_OF_VIRTUAL_MEMORY 설정 + NULL). g_body_string: 몸통이 VARCHAR 'pay' 를 답한다(복제가 할당한다).",
- "note": "head f36c4bd70 6/6 PASS, base 2e67e1d94 5 FAIL(실행당 한 번은 새 동작) · 1 PASS(행마다 남는 케이스). 변이(2026-11-18): expr_k_generic () 의 skip 지우기를 바로 돌아오기 뒤로(skip_late) → CONCAT 케이스만 FAIL('B33:v---' — 앞 실행의 skip 표시가 남아 다음 실행이 오른쪽 피연산자를 버림), 나머지 PASS. 2026-11-20 리뷰 T0(greptile·xmilex-git, pr_clone_value 가 setval 오류를 버림): [defect] 2건(once·relabel) head 77a306b9c PASS(결함 재현: 오류가 세워진 채 NULL 로 성공, 같은 실행의 다음 평가는 몸통 없이 NULL) · [contract] 2건 FAIL, 수정 diff(expr_slot_clone) 적용본은 [defect] FAIL · [contract] PASS, 기존 6건은 둘 다 PASS.",
+ "note": "head f36c4bd70 6/6 PASS, base 2e67e1d94 5 FAIL(실행당 한 번은 새 동작) · 1 PASS(행마다 남는 케이스). 변이(2026-11-18): expr_k_generic () 의 skip 지우기를 바로 돌아오기 뒤로(skip_late) → CONCAT 케이스만 FAIL('B33:v---' — 앞 실행의 skip 표시가 남아 다음 실행이 오른쪽 피연산자를 버림), 나머지 PASS. 2026-11-20 리뷰 T0(greptile·xmilex-git, pr_clone_value 가 setval 오류를 버림): [defect] 2건(once·relabel) head 77a306b9c PASS(결함 재현: 오류가 세워진 채 NULL 로 성공, 같은 실행의 다음 평가는 몸통 없이 NULL) · [contract] 2건 FAIL, 수정 diff(expr_slot_clone) 적용본은 [defect] FAIL · [contract] PASS, 기존 6건은 둘 다 PASS. 2026-11-26 CBRD-28250(PR#8775 자기 리뷰 3-1(c)): [contract] 3건 — CAST(INT→BIGINT, 단위가 링크한 변환; 문자열 변환은 db_char_string_coerce 스텁에서 abort) 위 generic 은 head 10d127721 PASS·base f58282341 FAIL(매 평가 계산), 열 CAST·열과 더한 산술 위 generic 은 둘 다 PASS(행마다). 정수 덧셈+리터럴 꼴은 단위 구성에서 덧셈이 generic 으로 컴파일돼(base 도 slot 3) 커널 경로를 안 지나 뺐다 — 산술 커널 사슬은 SQL 로 확인(scratch CBRD-28250/repro/arith_pr.out: CHAR_LENGTH→add_int→cast→CONCAT once).",
  "origin": {
   "pr": 8623,
   "jira": "CBRD-28120",
@@ -39,5 +39,13 @@
  },
  "defects_fixed_in": {
   "PR#8623 T0": "b02c917b5"
- }
+ },
+ "history": [
+  {
+   "pr": 8775,
+   "jira": "CBRD-28250",
+   "date": "2026-11-26",
+   "added": "[contract] 3건"
+  }
+ ]
 }
