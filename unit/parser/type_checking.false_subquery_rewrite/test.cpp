@@ -374,7 +374,14 @@ TEST_CASE ("PR8696 C1: an outer-join derived table false by its HAVING (GROUP BY
   PT_NODE *r = t.to_false (q);
 
   REQUIRE (r == q);
-  CHECK (count_nulls (r->info.query.q.select.list) == 2);	/* visible columns only, as before */
+  /* 7e96de28e: the hidden column is kept, as hidden -- a derived table takes hidden columns into its columns */
+  CHECK (count_nulls (r->info.query.q.select.list) == 3);
+  int hidden = 0;
+  for (PT_NODE * c = r->info.query.q.select.list; c != NULL; c = c->next)
+    {
+      hidden += c->flag.is_hidden_column ? 1 : 0;
+    }
+  CHECK (hidden == 1);
   CHECK (is_empty_table (r->info.query.q.select.from));
   CHECK (r->info.query.q.select.group_by == NULL);
   CHECK (r->info.query.q.select.having == NULL);
