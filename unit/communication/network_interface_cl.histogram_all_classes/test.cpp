@@ -43,12 +43,16 @@ template < typename R, typename ... A > struct arity <R (*)(A ...)>
   static constexpr int value = sizeof ... (A);
 };
 
-static constexpr int H_ARITY = arity < decltype (&update_histogram_for_all_classes) >::value;	/* 1 old base, 2 PR#8194 head, 3 develop (#8166), 4 PR#8194 rebased */
+static constexpr int H_ARITY = arity < decltype (&update_histogram_for_all_classes) >::value;	/* 1 old base, 2 PR#8194 head, 3 develop (#8166), 4 PR#8194 rebased, 5 develop (with_fullscan) */
 
 template < typename F > static int
 call_h (F f, int seed, MOP * skip, int n)
 {
-  if constexpr (arity < F >::value == 4)
+  if constexpr (arity < F >::value == 5)
+    {
+      return f (0, seed, skip, n, (INT64) 0);	/* develop since CBRD-27836: with_fullscan first, run start last */
+    }
+  else if constexpr (arity < F >::value == 4)
     {
       return f (seed, skip, n, (INT64) 0);	/* PR#8194 rebased on develop: skip list + run start */
     }
@@ -152,10 +156,12 @@ struct HistCall
 };
 
 static std::vector < HistCall > g_hist;
+static std::vector < std::string > g_stats;	/* sm_update_statistics calls */
 static std::vector < LIST_MOPS * >g_listed, g_freed;
 static const char *g_fail_name;	/* the helper fails for this class */
 static int g_fail_rc;
 static const char *g_nofind_name;	/* db_find_class fails for this name */
+static const char *g_deleted_name;	/* ws_is_deleted is true for the MOP of this name (CBRD-28234) */
 static int g_last_er;
 static bool g_list_fails;
 
@@ -166,11 +172,13 @@ reset ()
 {
   db_init ();
   g_hist.clear ();
+  g_stats.clear ();
   g_listed.clear ();
   g_freed.clear ();
   g_fail_name = NULL;
   g_fail_rc = NO_ERROR;
   g_nofind_name = NULL;
+  g_deleted_name = NULL;
   g_last_er = NO_ERROR;
   g_list_fails = false;
   memset (g_au_storage, 0, sizeof (g_au_storage));
@@ -245,6 +253,22 @@ er_errid (void)
   return g_last_er;
 }
 
+/* error_manager.c: clears the error of the thread */
+void
+er_clear (void)
+{
+  g_last_er = NO_ERROR;
+}
+
+/* work_space.c: true when the MOP is marked deleted -- here when another transaction dropped the class
+ * (CBRD-28234: the fetch of the name finds the class gone and marks the MOP) */
+int
+ws_is_deleted (MOP mop)
+{
+  FakeClass *c = by_mop (mop);
+  return (c != NULL && g_deleted_name != NULL && strcmp (c->name, g_deleted_name) == 0) ? 1 : 0;
+}
+
 /* execute_schema.c: the all-columns histogram build -- recorded; fails for g_fail_name */
 int
 update_or_drop_histogram_helper (PARSER_CONTEXT * parser, DB_OBJECT * const obj, bool quiet,
@@ -262,6 +286,16 @@ update_or_drop_histogram_helper (PARSER_CONTEXT * parser, DB_OBJECT * const obj,
     {
       return g_fail_rc;
     }
+  return NO_ERROR;
+}
+
+/* schema_manager.c: the statistics of a class without a histogram scan (an excluded class, or the helper
+ * answering ER_OBJ_INVALID_ARGUMENTS) -- recorded as "<name>:stats" in the same list as the histograms */
+int
+sm_update_statistics (MOP classop, bool with_fullscan, struct class_attr_ndv *provided_ndv)
+{
+  FakeClass *c = by_mop (classop);
+  g_stats.push_back (c ? c->name : "?");
   return NO_ERROR;
 }
 
@@ -346,7 +380,7 @@ hist_names ()
 }
 
 #define NEW_CODE_ONLY() \
-  do { if (H_ARITY != 3 && H_ARITY != 4) { FAIL ("no skip list in this revision (new code, not on the PR base)"); } } while (0)
+  do { if (H_ARITY != 3 && H_ARITY != 4 && H_ARITY != 5) { FAIL ("no skip list in this revision (new code, not on the PR base)"); } } while (0)
 
 /* ================================================================================================ */
 
@@ -437,6 +471,56 @@ TEST_CASE ("a listed class that cannot be found again: its error; LIST_MOPS rele
   REQUIRE (g_listed.size () == 1);
   REQUIRE (g_freed.size () == 1);
   CHECK (g_freed[0] == g_listed[0]);
+}
+
+/* ---- CBRD-28234: a class dropped by another transaction after the list was taken and before its turn ---- */
+
+TEST_CASE ("CBRD-28234: a class dropped before its turn (lookup fails, MOP deleted) is skipped: the pass goes on, "
+	   "NO_ERROR, the summary leaves it out", "[contract]")
+{
+  reset ();
+  g_nofind_name = "dba.t2";
+  g_deleted_name = "dba.t2";
+  Out o = run_h (0, NULL, 0);
+
+  CHECK (o.rc == NO_ERROR);
+  CHECK (er_errid () == NO_ERROR);
+  CHECK (hist_names () == "dba.t1,dba.tp,_db_class");
+  CHECK (o.out == "Statistics updated successfully: 3 tables, 4 columns.\n");
+  CHECK (o.err.empty ());
+  CHECK_FALSE (au_ctx ()->disable_auth_check);
+  REQUIRE (g_freed.size () == 1);
+  CHECK (g_freed[0] == g_listed[0]);
+}
+
+TEST_CASE ("CBRD-28234 (boundary): a lookup that fails for a MOP not marked deleted still stops the pass with its "
+	   "error", "[contract]")
+{
+  reset ();
+  g_nofind_name = "dba.t2";
+  g_deleted_name = "dba.t1";	/* another class is marked, not the one that fails */
+  Out o = run_h (0, NULL, 0);
+
+  CHECK (o.rc == ER_LC_UNKNOWN_CLASSNAME);
+  CHECK (hist_names () == "dba.t1");
+  CHECK (o.out.empty ());
+  CHECK (g_freed.size () == 1);
+}
+
+TEST_CASE ("CBRD-28234 (boundary): a class of the skip list dropped before its turn counts as excluded, with no "
+	   "warning that it is not a top-level class", "[contract][new]")
+{
+  NEW_CODE_ONLY ();
+  reset ();
+  g_nofind_name = "dba.t2";
+  g_deleted_name = "dba.t2";
+  MOP skip[1] = { mop_of ("dba.t2") };
+  Out o = run_h (0, skip, 1);
+
+  CHECK (o.rc == NO_ERROR);
+  CHECK (hist_names () == "dba.t1,dba.tp,_db_class");
+  CHECK (o.out == "Statistics updated successfully: 3 tables, 4 columns (1 excluded).\n");
+  CHECK (o.err.empty ());
 }
 
 /* ---- the skip list (new code) ---- */
