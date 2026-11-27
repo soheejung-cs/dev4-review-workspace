@@ -561,3 +561,26 @@ TEST_CASE ("PR8696 E3 (control): pt_eval_type () on an outer-join derived table 
   CHECK (r->info.query.q.select.group_by != NULL);
   CHECK (PT_SELECT_INFO_IS_FLAGED (r, PT_SELECT_INFO_HAS_AGG));
 }
+
+/* ---------------------------------------------------------------- PR#8742 (CBRD-28224) */
+
+TEST_CASE ("PR8742 C7: the NULL value pt_to_false_subquery () makes holds an initialized NULL DB_VALUE, so that it "
+	   "prints as null after a view spec gives the column another type (pt_check_create_view ())", "[contract]")
+{
+  REQUIRE (boot ());
+  tree t;
+  PT_NODE *q = t.select (t.chain ({t.name ("a")}), t.entity ("t"), t.false_value ());
+
+  PT_NODE *r = t.to_false (q);
+
+  REQUIRE (r != NULL);
+  REQUIRE (r->node_type == PT_VALUE);
+  CHECK (r->info.value.is_false_where);
+  CHECK (r->info.value.db_value_is_initialized);
+  CHECK (DB_IS_NULL (&r->info.value.db_value));
+  /* base 31d909869: no DB_VALUE, and a VARCHAR column printed the value as '' -- the view read '' back for NULL */
+  r->type_enum = PT_TYPE_VARCHAR;
+  PARSER_VARCHAR *printed = pt_print_bytes (t.parser, r);
+  REQUIRE (printed != NULL);
+  CHECK (strncmp ((const char *) printed->bytes, "null", 5) == 0);
+}

@@ -115,6 +115,36 @@ pt_free_dblink_remote_cols (PARSER_CONTEXT * parser)
 {
 }
 
+/* parse_dbi.c:1094 pt_value_to_db () (C linkage, parser.h:39-40): PR#8742 (CBRD-28224) calls it on the NULL value of
+ * STATEMENT_SET_FOLD_AS_NULL (semantic_check.c:19670) so that the value prints as null whatever type a view spec gives
+ * it. For a PT_VALUE the real one returns the DB_VALUE it already holds, or makes it (pt_db_value_initialize (): NULL
+ * for PT_TYPE_NULL) and marks it initialized (parse_dbi.c:1249-1263); no other type reaches it here. Without this fake
+ * the auto stub aborted F5 and every case after it (2026-11-27 unit_regress of PR#8742). */
+namespace
+{
+  int g_value_to_db_calls = 0;
+}
+
+extern "C" DB_VALUE *
+pt_value_to_db (PARSER_CONTEXT * parser, PT_NODE * value)
+{
+  g_value_to_db_calls++;
+  if (value == NULL || value->node_type != PT_VALUE)
+    {
+      return NULL;
+    }
+  if (!value->info.value.db_value_is_initialized)
+    {
+      if (value->type_enum != PT_TYPE_NULL)
+	{
+	  return NULL;
+	}
+      db_make_null (&value->info.value.db_value);
+      value->info.value.db_value_is_initialized = 1;
+    }
+  return &value->info.value.db_value;
+}
+
 namespace
 {
   int g_er = NO_ERROR;
@@ -234,6 +264,7 @@ namespace
     g_order_by_checked = NULL;
     g_derived_calls = 0;
     g_derived_fails = false;
+    g_value_to_db_calls = 0;
     g_query_string = NULL;
     g_query_string_len = 0;
     return lang_charset () == INTL_CODESET_UTF8;
@@ -582,4 +613,150 @@ TEST_CASE ("O1 a set operation whose text differs from its arm's: the fold keeps
   REQUIRE (r == a1);
   CHECK (r->sql_user_text == g_other);
   CHECK (r->sql_user_text_len == (int) strlen (g_other));
+}
+
+/* ---------------------------------------------------------------- PR#8742 (CBRD-28224) */
+/* The node that takes the place of a folded set operation is what the set operation was -- a subquery, an operand of
+ * another set operation, a CTE part or the statement -- and no operand of it any more: it takes the set operation's
+ * is_subquery (semantic_check.c:19771-19779 of c67c4b0f9), which pt_select_prints_paren () (parse_tree_cl.c:16596)
+ * reads to wrap a subquery's text in parentheses -- a view spec printed without them cannot be parsed again. The
+ * operand pt_fold_union_unwrap () puts back in place of the SELECT DISTINCT takes that SELECT's (19618-19619). The NULL
+ * value of STATEMENT_SET_FOLD_AS_NULL holds an initialized NULL DB_VALUE (19669-19670): it prints as null when a view
+ * spec gives the column another type (pt_check_create_view ()). base 31d909869: S1, S2, S4, S5, S6, S7 FAIL. */
+
+TEST_CASE ("S1 a set operation that is a subquery folds to its arm: the arm becomes PT_IS_SUBQUERY (PR#8742)",
+	   "[contract]")
+{
+  REQUIRE (boot ());
+  stmt s;
+  s.start (g_text);
+  PT_NODE *a1 = s.select (1);
+  PT_NODE *a2 = s.select (2);
+  PT_NODE *u = s.union_all (a1, a2);
+  u->info.query.is_subquery = PT_IS_SUBQUERY;
+  s.end (u, g_len1);
+
+  PT_NODE *r = pt_fold_union (s.parser, u, STATEMENT_SET_FOLD_AS_ARG1);
+  REQUIRE (r == a1);
+  CHECK (r->info.query.is_subquery == PT_IS_SUBQUERY);
+}
+
+TEST_CASE ("S2 a UNION without ALL that is a subquery folds to a SELECT DISTINCT from a derived table: the SELECT "
+	   "becomes PT_IS_SUBQUERY (PR#8742)", "[contract]")
+{
+  REQUIRE (boot ());
+  stmt s;
+  s.start (g_text);
+  PT_NODE *a1 = s.select (1);
+  PT_NODE *a2 = s.select (2);
+  PT_NODE *u = s.union_all (a1, a2);
+  u->info.query.all_distinct = PT_DISTINCT;
+  u->info.query.is_subquery = PT_IS_SUBQUERY;
+  s.end (u, g_len1);
+
+  PT_NODE *r = pt_fold_union (s.parser, u, STATEMENT_SET_FOLD_AS_ARG2);
+  REQUIRE (r != NULL);
+  REQUIRE (g_derived_calls == 1);
+  REQUIRE (r->node_type == PT_SELECT);
+  REQUIRE (r->info.query.all_distinct == PT_DISTINCT);
+  CHECK (r->info.query.is_subquery == PT_IS_SUBQUERY);
+}
+
+TEST_CASE ("S3 (boundary) an operand of another set operation folds to its arm: the arm stays PT_IS_UNION_SUBQUERY",
+	   "[contract]")
+{
+  REQUIRE (boot ());
+  stmt s;
+  s.start (g_text);
+  PT_NODE *a1 = s.select (1);
+  PT_NODE *a2 = s.select (2);
+  PT_NODE *u = s.union_all (a1, a2);
+  u->info.query.is_subquery = PT_IS_UNION_SUBQUERY;
+  s.end (u, g_len1);
+
+  PT_NODE *r = pt_fold_union (s.parser, u, STATEMENT_SET_FOLD_AS_ARG2);
+  REQUIRE (r == a2);
+  CHECK (r->info.query.is_subquery == PT_IS_UNION_SUBQUERY);
+}
+
+TEST_CASE ("S4 the non-recursive part of a CTE folds to its arm: the arm becomes PT_IS_CTE_NON_REC_SUBQUERY "
+	   "(PR#8742)", "[contract]")
+{
+  REQUIRE (boot ());
+  stmt s;
+  s.start (g_text);
+  PT_NODE *a1 = s.select (1);
+  PT_NODE *a2 = s.select (2);
+  PT_NODE *u = s.union_all (a1, a2);
+  u->info.query.is_subquery = PT_IS_CTE_NON_REC_SUBQUERY;	/* name_resolution.c:10757 */
+  s.end (u, g_len1);
+
+  PT_NODE *r = pt_fold_union (s.parser, u, STATEMENT_SET_FOLD_AS_ARG1);
+  REQUIRE (r == a1);
+  CHECK (r->info.query.is_subquery == PT_IS_CTE_NON_REC_SUBQUERY);
+}
+
+TEST_CASE ("S5 the statement folds to its arm: the arm is the statement now, is_subquery 0 as the statement's "
+	   "(PR#8742)", "[contract]")
+{
+  REQUIRE (boot ());
+  stmt s;
+  s.start (g_text);
+  PT_NODE *a1 = s.select (1);
+  PT_NODE *a2 = s.select (2);
+  PT_NODE *u = s.union_all (a1, a2);
+  u->info.query.is_subquery = (PT_MISC_TYPE) 0;
+  s.end (u, g_len1);
+
+  PT_NODE *r = pt_fold_union (s.parser, u, STATEMENT_SET_FOLD_AS_ARG2);
+  REQUIRE (r == a2);
+  CHECK (r->info.query.is_subquery == (PT_MISC_TYPE) 0);
+}
+
+TEST_CASE ("S6 fold to NULL: the NULL value is_false_where and holds an initialized NULL DB_VALUE (PR#8742)",
+	   "[contract]")
+{
+  REQUIRE (boot ());
+  stmt s;
+  s.start (g_text);
+  PT_NODE *a1 = s.select (1);
+  PT_NODE *a2 = s.select (2);
+  PT_NODE *u = s.union_all (a1, a2);
+  u->info.query.is_subquery = PT_IS_SUBQUERY;
+  s.end (u, g_len1);
+
+  PT_NODE *r = pt_fold_union (s.parser, u, STATEMENT_SET_FOLD_AS_NULL);
+  REQUIRE (r != NULL);
+  REQUIRE (r->node_type == PT_VALUE);
+  CHECK (r->type_enum == PT_TYPE_NULL);
+  CHECK (r->info.value.is_false_where);
+  CHECK (r->info.value.db_value_is_initialized);
+  CHECK (DB_IS_NULL (&r->info.value.db_value));
+  CHECK (g_value_to_db_calls == 1);
+}
+
+TEST_CASE ("S7 pt_fold_union_unwrap: the operand that takes the place of the SELECT DISTINCT takes its is_subquery "
+	   "with its position and next (PR#8742)", "[contract]")
+{
+  REQUIRE (boot ());
+  stmt s;
+  PT_NODE *operand = s.select (3);
+  operand->info.query.is_subquery = PT_IS_UNION_SUBQUERY;	/* the arm's mark, which the derived table keeps */
+  PT_NODE *spec = parser_new_node (s.parser, PT_SPEC);
+  spec->info.spec.derived_table = operand;
+  spec->info.spec.derived_table_type = PT_IS_SUBQUERY;
+  spec->info.spec.id = (UINTPTR) spec;
+  PT_NODE *q = s.select (4);
+  q->info.query.q.select.from = spec;
+  q->info.query.all_distinct = PT_DISTINCT;
+  q->info.query.flag.folded_distinct = 1;
+  q->info.query.is_subquery = PT_IS_SUBQUERY;
+  PT_NODE *next = s.select (9);
+  q->next = next;
+
+  PT_NODE *r = pt_fold_union_unwrap (s.parser, q);
+  REQUIRE (r == operand);
+  CHECK (r->info.query.is_subquery == PT_IS_SUBQUERY);
+  CHECK (r->line_number == 4);
+  CHECK (r->next == next);
 }
