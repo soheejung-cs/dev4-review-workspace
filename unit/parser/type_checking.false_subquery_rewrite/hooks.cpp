@@ -20,3 +20,10 @@ ut_eval_type_node (PARSER_CONTEXT * parser, PT_NODE * node)
   sc_info.donot_fold = false;
   return pt_eval_type (parser, node, &sc_info, &continue_walk);
 }
+
+/* the constant folding of one expression node, as pt_fold_constants_post () calls it (CBRD-28455) */
+PT_NODE *
+ut_fold_const_expr (PARSER_CONTEXT * parser, PT_NODE * expr)
+{
+  return pt_fold_const_expr (parser, expr, NULL);
+}

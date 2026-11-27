@@ -49,6 +49,24 @@
 /* the appendix (hooks.cpp, same TU as pt_to_false_subquery / pt_eval_type) */
 PT_NODE *ut_to_false_subquery (PARSER_CONTEXT * parser, PT_NODE * node);
 PT_NODE *ut_eval_type_node (PARSER_CONTEXT * parser, PT_NODE * node);
+PT_NODE *ut_fold_const_expr (PARSER_CONTEXT * parser, PT_NODE * expr);
+
+/* schema_manager.c sm_remove_qualifier_name () (C++ linkage): the printing at the end of pt_fold_const_expr () strips the
+ * owner from a resolved name -- the part after the first '.', or the name as it is (PR#8803 D1 aborted on the auto stub) */
+/* keyword.c pt_is_keyword () (C linkage, parser.h): the printing quotes a name that is a keyword -- the names of these
+ * cases (c, t, next_term) are none */
+extern "C" bool
+pt_is_keyword (const char *s)
+{
+  return false;
+}
+
+const char *
+sm_remove_qualifier_name (const char *name)
+{
+  const char *dot = (name != NULL) ? strchr (name, '.') : NULL;
+  return (dot != NULL) ? dot + 1 : name;
+}
 
 /* ---------------------------------------------------------------- fakes */
 
@@ -562,25 +580,97 @@ TEST_CASE ("PR8696 E3 (control): pt_eval_type () on an outer-join derived table 
   CHECK (PT_SELECT_INFO_IS_FLAGED (r, PT_SELECT_INFO_HAS_AGG));
 }
 
-/* ---------------------------------------------------------------- PR#8742 (CBRD-28224) */
+/* ---------------------------------------------------------------- CBRD-28455 (PR#8803) */
+/* pt_fold_const_expr () folds x IN / x op SOME / x op ALL over a subquery that returns no row (a NULL value marked
+ * is_false_where, as pt_to_false_subquery () leaves it) to TRUE or FALSE (CBRD-28029). The predicate may be a disjunct of
+ * a CNF term, the rest of the OR on its or_next, which end: frees with it: FALSE must drop out and leave the rest, TRUE
+ * takes the whole OR. base 6c43128bd: D1 and D2 FAIL (the rest of the OR is lost), D3 and D4 PASS. */
+namespace
+{
+  PT_NODE *empty_subquery_value (PARSER_CONTEXT * parser)
+  {
+    PT_NODE *v = parser_new_node (parser, PT_VALUE);
+    v->type_enum = PT_TYPE_NULL;
+    v->info.value.is_false_where = true;
+    return v;
+  }
 
-TEST_CASE ("PR8742 C7: the NULL value pt_to_false_subquery () makes holds an initialized NULL DB_VALUE, so that it "
-	   "prints as null after a view spec gives the column another type (pt_check_create_view ())", "[contract]")
+  PT_NODE *over_empty (tree & t, PT_OP_TYPE op)
+  {
+    PT_NODE *e = parser_new_node (t.parser, PT_EXPR);
+    e->info.expr.op = op;
+    e->info.expr.arg1 = t.name ("c");
+    e->info.expr.arg2 = empty_subquery_value (t.parser);
+    e->type_enum = PT_TYPE_LOGICAL;
+    return e;
+  }
+}
+
+TEST_CASE ("PR8803 D1: c IN (empty) heading an OR with c > 0 on its or_next folds to the rest of the OR, with the "
+	   "next of the predicate", "[contract]")
 {
   REQUIRE (boot ());
   tree t;
-  PT_NODE *q = t.select (t.chain ({t.name ("a")}), t.entity ("t"), t.false_value ());
+  PT_NODE *in = over_empty (t, PT_IS_IN);
+  in->or_next = t.gt (t.name ("c"), 0);
+  PT_NODE *sibling = t.name ("next_term");
+  in->next = sibling;
 
-  PT_NODE *r = t.to_false (q);
+  PT_NODE *r = ut_fold_const_expr (t.parser, in);
+
+  REQUIRE (r != NULL);
+  CHECK (r->node_type == PT_EXPR);
+  CHECK ((r->node_type == PT_EXPR && r->info.expr.op == PT_GT));
+  CHECK (r->or_next == NULL);
+  CHECK (r->next == sibling);
+}
+
+TEST_CASE ("PR8803 D2: c = ANY (empty) heading c > 5 OR c > 0 keeps both disjuncts in order", "[contract]")
+{
+  REQUIRE (boot ());
+  tree t;
+  PT_NODE *any = over_empty (t, PT_EQ_SOME);
+  PT_NODE *first = t.gt (t.name ("c"), 5);
+  first->or_next = t.gt (t.name ("c"), 0);
+  any->or_next = first;
+
+  PT_NODE *r = ut_fold_const_expr (t.parser, any);
+
+  REQUIRE (r != NULL);
+  REQUIRE (r->node_type == PT_EXPR);
+  CHECK (r->info.expr.op == PT_GT);
+  CHECK (r->info.expr.arg2->info.value.data_value.i == 5);
+  REQUIRE (r->or_next != NULL);
+  CHECK (r->or_next->node_type == PT_EXPR);
+  CHECK (r->or_next->info.expr.arg2->info.value.data_value.i == 0);
+  CHECK (r->or_next->or_next == NULL);
+}
+
+TEST_CASE ("PR8803 D3 (control): c NOT IN (empty) heading an OR folds to TRUE, which takes the whole OR", "[contract]")
+{
+  REQUIRE (boot ());
+  tree t;
+  PT_NODE *not_in = over_empty (t, PT_IS_NOT_IN);
+  not_in->or_next = t.gt (t.name ("c"), 0);
+
+  PT_NODE *r = ut_fold_const_expr (t.parser, not_in);
 
   REQUIRE (r != NULL);
   REQUIRE (r->node_type == PT_VALUE);
-  CHECK (r->info.value.is_false_where);
-  CHECK (r->info.value.db_value_is_initialized);
-  CHECK (DB_IS_NULL (&r->info.value.db_value));
-  /* base 31d909869: no DB_VALUE, and a VARCHAR column printed the value as '' -- the view read '' back for NULL */
-  r->type_enum = PT_TYPE_VARCHAR;
-  PARSER_VARCHAR *printed = pt_print_bytes (t.parser, r);
-  REQUIRE (printed != NULL);
-  CHECK (strncmp ((const char *) printed->bytes, "null", 5) == 0);
+  CHECK (r->info.value.data_value.i == 1);
+  CHECK (r->or_next == NULL);
+}
+
+TEST_CASE ("PR8803 D4 (control): c IN (empty) alone folds to FALSE", "[contract]")
+{
+  REQUIRE (boot ());
+  tree t;
+  PT_NODE *in = over_empty (t, PT_IS_IN);
+
+  PT_NODE *r = ut_fold_const_expr (t.parser, in);
+
+  REQUIRE (r != NULL);
+  REQUIRE (r->node_type == PT_VALUE);
+  CHECK (r->info.value.data_value.i == 0);
+  CHECK (r->or_next == NULL);
 }

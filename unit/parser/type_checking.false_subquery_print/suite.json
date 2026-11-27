@@ -1,0 +1,43 @@
+{
+ "name": "PR#8742 (CBRD-28224) pt_to_false_subquery () -- the NULL value of a subquery that returns no row holds an initialized NULL DB_VALUE, so that it prints as null after a view spec gives the column another type",
+ "requires": [
+  "pt_to_false_subquery",
+  "pt_has_false_subquery_operand"
+ ],
+ "file": "src/parser/type_checking.c",
+ "mode": "cs",
+ "seams": [],
+ "appendix": "hooks.cpp",
+ "test": "test.cpp",
+ "extra": [
+  "src/parser/parser_support.c",
+  "src/parser/parse_dbi.c",
+  "src/parser/parse_tree.c",
+  "src/parser/parse_tree_cl.c",
+  "src/base/language_support.c",
+  "src/base/intl_support.c",
+  "src/base/chartype.c",
+  "src/object/object_domain.c",
+  "src/object/object_primitive.c",
+  "src/object/object_domain_convert.cpp",
+  "src/query/domain_rules.c",
+  "src/query/numeric_opfunc.c",
+  "src/compat/db_macro.c",
+  "src/base/memory_alloc.c",
+  "src/base/system_parameter.c"
+ ],
+ "watch": [
+  "src/parser/parse_tree.h",
+  "src/parser/parser_support.c",
+  "src/parser/xasl_generation.c"
+ ],
+ "fakes": "진짜: type_checking.c(TU: pt_to_false_subquery·pt_eval_type -- hooks.cpp 가 직접 부르는 ut_to_false_subquery 와 걷기 한 걸음 ut_eval_type_node(SEMANTIC_CHK_INFO donot_fold=false) --, pt_where_type, pt_false_where, pt_false_search_condition), parser_support.c(pt_name·pt_has_aggregate·pt_has_analytic -- 재작성 뒤 집계·분석 질의로 보지 않는지를 진짜 함수로 확인), parse_dbi.c(pt_value_to_db), parse_tree.c + parse_tree_cl.c(parser_create_parser·parser_new_node·parser_free_tree·parser_append_node·pt_length_of_select_list·parser_walk_tree), language_support.c + intl_support.c + chartype.c(en_US.utf8), object_domain.c + object_domain_convert.cpp + object_primitive.c + numeric_opfunc.c, domain_rules.c, db_macro.c, memory_alloc.c, system_parameter.c. 가짜: pt_is_single_tuple = xasl_generation.c:4261 그대로(GROUP BY 면 false, 아니면 진짜 pt_has_aggregate), er_set/er_errid/er_clear = 오류 칸 하나, pt_parser_line_col = scanner_support.c(lexer 없음, 위치 0 -- 새 노드는 위치 0 이라 C2·E2 가 원래 WHERE 노드를 위치 4242:77 로 구분한다; parser_free_tree 한 노드는 바로 다음 parser_new_node 가 같은 주소로 다시 줄 수 있어 포인터 비교만으로는 '유지'를 가르지 못한다), pt_free_dblink_remote_cols = name_resolution.c(아무것도 안 함), init_builtin_calendar_names·db_date_locale_init = 로캘 부가 표(읽지 않음), envvar_get/envvar_trim_char·cubregex::get_engine_name = 환경 변수 없음·정적 초기화. 트리: 이름 해석·형 검사 뒤 모양 -- 열은 형을 가진 PT_NAME, 술어는 type_enum LOGICAL 인 PT_EXPR(a > 0), 상수 거짓은 pt_where_type always_false 가 남기는 PT_VALUE LOGICAL 0(pt_value_to_db 까지), 접힌 파생 테이블·CTE 는 pt_to_false_subquery 다른 갈래가 남기는 NULL 값(is_false_where), GROUP BY 는 PT_SORT_SPEC. has_outer_spec 은 pt_eval_type_pre(type_checking.c:7586-7592)가 바깥 조인 쪽 파생 테이블에 다는 값을 케이스가 직접 단다.",
+ "note": "PR8742 C7(2026-11-27): head c67c4b0f9 PASS, base 31d909869 FAIL. type_checking.false_subquery_rewrite 에서 옮김 -- PR#8742 가 develop 에 들기 전 리비전에서는 늘 FAIL 이라 그 suite 의 다른 리뷰 표에 'suite 갱신 필요' 로 남았다. PR#8742 의 새 함수 pt_has_false_subquery_operand 를 requires 에 두어, 그 함수가 없는 리비전에서는 '적용 안 됨' 으로 나온다.",
+ "origin": {
+  "pr": 8742,
+  "jira": "CBRD-28224",
+  "date": "2026-11-27",
+  "reviewed_head": "c67c4b0f9",
+  "base": "31d909869"
+ }
+}
