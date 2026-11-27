@@ -7,7 +7,9 @@
 #          $CONC_OUT/db (a database registered elsewhere is used as it is and never deleted — the Jepsen tool's rule).
 #   stop   stop the server and keep the database (a loaded data set for the next run).
 #   pid    the server pid from `cubrid server status`, empty when it is down.
-#   cores  the number of cub_server core files in the system core directory (core_pattern /data/core/core.%e.…).
+#   cores  the number of core files in the system core directory (core_pattern /data/core/core.%e.%p.%h.%t). %e is the
+#          name of the thread that died — a server worker dumps as core.transaction.<pid>… (2026-11-27: counting only
+#          core.cub_server.* missed the first crash this tool found).
 # Daemons write to $CONC_OUT/logs/daemon.log: a daemon started under a pipe holds it open (H-04, H-23).
 # Do not run beside CTP, shell TCs, goto builds or benchmarks: they stop servers and share cub_master (H-05).
 set -u
@@ -21,6 +23,13 @@ mkdir -p "$CONC_OUT/logs"
 dbtxt=${CUBRID_DATABASES:-$CUBRID/databases}/databases.txt
 registered () { awk -v d="$db" '$1 == d { print $2 }' "$dbtxt" 2>/dev/null; }
 server_pid () { cubrid server status 2>/dev/null | sed -n "s/.*Server $db (rel [^,]*, pid \([0-9]*\)).*/\1/p"; }
+
+# A ThreadSanitizer install (goto … tsan, ~/tsan/): every instrumented process the run starts (server, CAS) writes its
+# reports to $CONC_OUT/tsan/tsan.<pid> — a daemon's stderr is not kept.
+case "$(readlink -f "$CUBRID")" in
+    */tsan/*) mkdir -p "$CONC_OUT/tsan"
+              export TSAN_OPTIONS=${TSAN_OPTIONS:-"log_path=$CONC_OUT/tsan/tsan history_size=4 second_deadlock_stack=1"} ;;
+esac
 
 case $cmd in
 up)
@@ -55,7 +64,7 @@ stop)
 pid)
     server_pid ;;
 cores)
-    ls "$CORE_DIR" 2>/dev/null | grep -c '^core\.cub_server\.' ;;
+    ls "$CORE_DIR" 2>/dev/null | grep -c '^core\.' ;;
 *)
     echo "usage: db.sh up|down|pid|cores <dbname>" >&2
     exit 2 ;;

@@ -16,7 +16,10 @@ cd ~/dev/docs/dev4-review-workspace/tools/concurrency-cubrid
 bash run.sh hermitage [시나리오 이름 앞부분]     # DB conchm 을 만들고 끝나면 지운다
 bash run.sh parallel <초> [클라이언트 수=6]      # DB concpx(pt 60만·pu 30만 행)는 남겨 다음 실행이 다시 적재하지 않는다
 bash db.sh down concpx                           # 다 쓰면 지운다
+PI_ACTIONS=error,check bash run.sh parallel 600  # 행동 고르기(기본 error,cancel,timeout,check) — 아는 결함의 길을 비켜 갈 때
+python3 tsan_summary.py <디렉터리>              # TSan 보고서를 두 접근의 프레임으로 묶어 센다
 ```
+- **TSan**: `goto <rev> tsan`(debug + `-fsanitize=thread`, 엔진만 계측, 설치본 `~/tsan/`)으로 전환한 뒤 같은 명령 — `run.sh` 가 실행마다 `$CONC_OUT/tsan/<도구>-<시각>/tsan.<pid>` 로 보고를 받고(`TSAN_OPTIONS`) 끝에 묶은 요약을 로그에 붙인다.
 - 대상은 **활성 설치본**(`~/CUBRID`) — 다른 빌드는 `goto` 로 바꾼 뒤. 자바는 `~/tools/jdk-21`(단일 파일 실행, 시스템 java 8 로는 안 된다), JDBC 는 설치본의 `jdbc/cubrid_jdbc.jar`, 브로커는 `BROKER1`(33000) — 꺼져 있었으면 끝나고 다시 끈다.
 - 결과: `$CONC_OUT`(기본 `~/dev/scratch/concurrency-cubrid`)의 `<도구>-<시각>.log`, 한 회 한 줄 `summary.txt`.
 - **CTP·shell TC·goto 빌드·벤치·Jepsen 과 함께 돌리지 않는다**(서버를 내리고 cub_master·브로커를 같이 쓴다 — H-05). 두 도구끼리도 차례로(끝에 브로커를 끈다).
@@ -26,6 +29,10 @@ bash db.sh down concpx                           # 다 쓰면 지운다
 - 2026-11-27 .51 debug(develop 6c43128bd 기반): 126회 전부 매뉴얼대로 — RC 는 PMP·PMP-write·P4·G-single 허용, RR·SER 는 그것들을 막고(-1158 Serializable conflict) write skew(G2-item·G2)만 허용.
 - 2026-11-27 .51 debug(같은 빌드) ParallelInject 300초·6클라이언트: 오류 주입 627회 모두 직렬과 같은 코드(-181·-539·-427), 취소 307·시간 초과 155 모두 실행 중에 닿음(-4), 확인 489회 모두 기준 답, 롤백 쓰기 885, FINDING 0, 서버 재기동·코어 0. 확인 질의·오류 꼴·취소 대상 모두 SHOW TRACE 로 병렬(`parallel workers` ≥ 1)을 확인했다.
 - ParallelInject: `FINDING` 줄이 결함 후보 — `error-path`(직렬과 병렬의 오류 코드가 다름·한쪽만 오류), 취소·시간 초과 뒤 기준과 다른 답, 예상 밖 오류 코드. `== counts` 의 `error:<꼴>:same<코드>` 가 같은 오류로 끝난 횟수, `cancel:err-4`·`timeout:…` 가 취소가 실행 중에 닿은 횟수.
+
+## 찾은 것
+- 2026-11-27 .51 debug, ParallelInject 클라이언트 12개(6개·5분은 0건): **(1) 시간 초과로 중단된 병렬 질의가 `query_executor::run_jobs ()` 의 인터럽트 지우기 루프에서 끝나지 않는다** — 50분에 8건, debug 서버 로그 20GB+, `cubrid server stop` 안 끝남(`logtb_is_interrupted_tdes ()` 의 시간 초과 갈래가 `*continue_checking` 을 정하지 않는다). **(2) 취소된 병렬 질의 끝의 `m_qlist_count` assert**(`query_executor.c` qexec_execute_query 끝) — 두 번, 두 번째는 2분 만. 기록·재현: 비공개 `projects/동시성시험-20261127/결과-병렬주입.md`·`repro/`.
+- 클라이언트 수가 결과를 바꿨다 — 6개에서는 두 결함 모두 0건. 동시 인터럽트가 겹쳐야 열리는 틈이라, 이 도구는 **클라이언트를 늘려** 돌린다.
 
 ## 효과와 한계
 - Hermitage 는 결함을 찾는 도구가 아니라 **격리 의미의 회귀망·정답표**다(고정 꼴, 두 행). MVCC·잠금·유일 키를 바꾼 PR 에서 돌린다. 생성된 SQL 로 넓히는 것은 격리 오라클(설계문서 `설계문서-격리오라클.md`).

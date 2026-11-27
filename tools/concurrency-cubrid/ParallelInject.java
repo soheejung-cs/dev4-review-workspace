@@ -38,8 +38,10 @@ import java.util.concurrent.atomic.AtomicLong;
  * exit: 0 no finding, 1 a finding, 2 setup error.
  */
 public class ParallelInject {
-    static final int N_PT = 600_000;   // ~90 bytes a row: about 3,300 16K pages, well over parallel_scan_page_threshold 256
-    static final int N_PU = 300_000;   // over the hash join threshold (256 pages) too
+    // ~90 bytes a row: 600k rows are about 3,300 16K pages, well over parallel_scan_page_threshold 256; PI_ROWS shrinks the
+    // data for a slow build (ThreadSanitizer) — keep it over ~50k so that pt still spans more than 256 pages
+    static final int N_PT = Integer.parseInt(System.getenv().getOrDefault("PI_ROWS", "600000"));
+    static final int N_PU = N_PT / 2;  // over the hash join threshold (256 pages) too at the default
     static final String OFF = "NO_PARALLEL_SCAN NO_PARALLEL_HASH_JOIN NO_PARALLEL_SUBQUERY";
     static final int ERR_INTERRUPTED = -4;
 
@@ -334,15 +336,22 @@ public class ParallelInject {
             t.start();
             ts.add(t);
         }
-        for (Thread t : ts) t.join();
+        // a client whose action never returns (the server thread is stuck — 2026-11-27 run 2) must not hang the run:
+        // give each one 120 s past the end, then report it and go on
+        for (Thread t : ts) {
+            t.join(Math.max(1, end - System.currentTimeMillis()) + 120_000);
+            if (t.isAlive()) finding(t.getName() + " did not return 120 s after the end: its action is stuck on the server");
+        }
         stop.set(true);
         w.join(30_000);
         sch.shutdownNow();
         try (Connection c = open()) {
             for (T t : CHECKS) {
-                String o = outcome(c, t.q.sql(false, 0), 0);
+                String o = outcome(c, t.q.sql(false, 0), 300);
                 if (!o.equals(reference.get(t.name))) finding("final check " + t.name + " answered " + abbrev(o));
             }
+        } catch (SQLException e) {
+            finding("final check could not connect: " + e.getErrorCode() + " " + e.getMessage());
         }
         System.out.println("== counts");
         for (Map.Entry<String, AtomicLong> e : new TreeMap<>(count).entrySet()) System.out.printf("  %-34s %d%n", e.getKey(), e.getValue().get());
