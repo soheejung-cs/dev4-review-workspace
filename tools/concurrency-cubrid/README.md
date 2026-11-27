@@ -14,7 +14,7 @@
 ```bash
 cd ~/dev/docs/dev4-review-workspace/tools/concurrency-cubrid
 bash run.sh hermitage [시나리오 이름 앞부분]     # DB conchm 을 만들고 끝나면 지운다
-bash run.sh parallel <초> [클라이언트 수=6]      # DB concpx(pt 60만·pu 30만 행)는 남겨 다음 실행이 다시 적재하지 않는다
+bash run.sh parallel <초> [클라이언트 수=12]     # DB concpx(pt 60만·pu 30만 행)는 남겨 다음 실행이 다시 적재하지 않는다
 bash db.sh down concpx                           # 다 쓰면 지운다
 PI_ACTIONS=error,check bash run.sh parallel 600  # 행동 고르기(기본 error,cancel,timeout,check) — 아는 결함의 길을 비켜 갈 때
 python3 tsan_summary.py <디렉터리>              # TSan 보고서를 두 접근의 프레임으로 묶어 센다

@@ -36,8 +36,23 @@ url="jdbc:cubrid:localhost:$PORT:$db:dba::?logOnException=false&connectTimeout=1
 echo "# $tool $* — $(readlink -f "$CUBRID") $(head -1 "$CUBRID/BUILD_REV" 2>/dev/null) — server pid $pid0" > "$log"
 # a hung client must not hold the run forever: parallel gets its seconds + 15 min, hermitage 30 min
 limit=1800; [ "$tool" = parallel ] && limit=$(( ${1:-0} + 900 ))
-timeout "$limit" "$JAVA" -cp "$JAR" "$here/$main" "$url" "$@" >> "$log" 2>&1
+timeout "$limit" "$JAVA" -cp "$JAR" "$here/$main" "$url" "$@" >> "$log" 2>&1 &
+jpid=$!
+# a stuck server thread in a debug build can flood the error log (2026-11-27: 20 GB in 30 min, a livelock logging every
+# turn): stop the run when the database's current error log passes 2 GB
+( while kill -0 "$jpid" 2>/dev/null; do
+      sz=$(stat -c %s "$(readlink -f "$CUBRID/log/server/${db}_latest.err")" 2>/dev/null)
+      if [ "${sz:-0}" -gt $((2 * 1024 * 1024 * 1024)) ]; then
+          echo "# LOG FLOOD: the server error log passed 2 GB — the run is stopped (a stuck thread logging in a loop?)" >> "$log"
+          kill "$jpid" 2>/dev/null
+          break
+      fi
+      sleep 15
+  done ) &
+wpid=$!
+wait "$jpid"
 rc=$?
+kill "$wpid" 2>/dev/null; wait "$wpid" 2>/dev/null   # reap the watcher quietly (no "Terminated" line)
 pid1=$(bash "$here/db.sh" pid "$db")
 cores1=$(bash "$here/db.sh" cores)
 srv="server pid $pid0 -> ${pid1:-down}, new cores $((cores1 - cores0))"

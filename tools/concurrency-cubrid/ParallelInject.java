@@ -34,7 +34,10 @@ import java.util.concurrent.atomic.AtomicLong;
  * committed state — and every reference answer — stays fixed while scans meet uncommitted versions and vacuum.
  * The run script watches the server pid and the core directory (a debug server also asserts).
  *
- * usage: java -cp cubrid_jdbc.jar ParallelInject.java <jdbc url> <seconds> [client threads]
+ * PI_ACTIONS (environment, default error,cancel,timeout,check) picks the actions — e.g. error,check keeps clear of the
+ * cancel and timeout paths, whose known defects (2026-11-27: m_qlist_count assert after a cancel, run_jobs () livelock
+ * after a timeout) would end a run early.
+ * usage: java -cp cubrid_jdbc.jar ParallelInject.java <jdbc url> <seconds> [client threads = 12]
  * exit: 0 no finding, 1 a finding, 2 setup error.
  */
 public class ParallelInject {
@@ -82,6 +85,8 @@ public class ParallelInject {
     static final List<String> findings = Collections.synchronizedList(new ArrayList<>());
     static final Map<String, String> reference = new ConcurrentHashMap<>();
     static String url;
+    static final java.util.Set<String> ACTIONS = new java.util.HashSet<>(java.util.Arrays.asList(
+            System.getenv().getOrDefault("PI_ACTIONS", "error,cancel,timeout,check").split(",")));
     static int heavyLimit;
 
     static void inc(String k) {
@@ -204,7 +209,7 @@ public class ParallelInject {
     }
 
     static void cancelAction(Connection c, ScheduledExecutorService sch) throws SQLException {
-        boolean byTimeout = ThreadLocalRandom.current().nextInt(3) == 0;
+        boolean byTimeout = !ACTIONS.contains("cancel") || (ACTIONS.contains("timeout") && ThreadLocalRandom.current().nextInt(3) == 0);
         String o;
         AtomicBoolean running = new AtomicBoolean(true);
         java.util.concurrent.ScheduledFuture<?> pending = null;
@@ -289,12 +294,14 @@ public class ParallelInject {
         }
         url = args[0];
         long seconds = Long.parseLong(args[1]);
-        int threads = args.length > 2 ? Integer.parseInt(args[2]) : 6;
+        // 12 by default: the defects of 2026-11-27 needed interrupts of several transactions to overlap — 6 clients for 5 min
+        // found none, 12 clients found three in an hour (rule #178)
+        int threads = args.length > 2 ? Integer.parseInt(args[2]) : 12;
         Class.forName("cubrid.jdbc.driver.CUBRIDDriver");
         try (Connection c = open()) {
             long t0 = System.nanoTime();
             load(c);
-            System.out.printf("data ready (%.0f s)%n", (System.nanoTime() - t0) / 1e9);
+            System.out.printf("data ready (%.0f s), actions %s%n", (System.nanoTime() - t0) / 1e9, ACTIONS);
             System.out.println("== plans (SHOW TRACE) and references");
             for (T t : CHECKS) {
                 String ser = outcome(c, t.q.sql(true, 0), 0), par = outcome(c, t.q.sql(false, 0), 0);
@@ -325,9 +332,11 @@ public class ParallelInject {
                 try (Connection c = open()) {
                     while (System.currentTimeMillis() < end) {
                         int r = ThreadLocalRandom.current().nextInt(10);
-                        if (r < 4) errorAction(c);
-                        else if (r < 7) cancelAction(c, sch);
-                        else checkAction(c);
+                        boolean interrupts = ACTIONS.contains("cancel") || ACTIONS.contains("timeout");
+                        if (r < 4 && ACTIONS.contains("error")) errorAction(c);
+                        else if (r >= 4 && r < 7 && interrupts) cancelAction(c, sch);
+                        else if (ACTIONS.contains("check") || !ACTIONS.contains("error")) checkAction(c);
+                        else errorAction(c);
                     }
                 } catch (SQLException e) {
                     finding("client lost its connection: " + e.getErrorCode() + " " + e.getMessage());

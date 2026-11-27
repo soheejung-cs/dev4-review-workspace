@@ -16,7 +16,9 @@ import sys
 
 SEP = re.compile(r'^={10,}\s*$', re.M)
 KIND = re.compile(r'WARNING: ThreadSanitizer: ([^(\n]+?)\s*(?:\(pid=(\d+)\))?\s*$', re.M)
-FRAME = re.compile(r'^\s+#(\d+)\s+(\S+)\s+(\S+?)(?::(\d+))?(?::\d+)?\s+\(([^)+]+)')
+# '#N <function, a C++ one with its parameter list and spaces> <path>:<line>[:<col>] (<object>+0x<offset>)' or '… <null> (…)'
+FRAME = re.compile(r'^\s+#(\d+)\s+(.*?)\s+(\S+)\s+\(([^()+]+)\+0x[0-9a-f]+\)\s*$')
+LOC = re.compile(r'^(.*?):(\d+)(?::\d+)?$')
 HAS_FRAME = re.compile(r'^\s+#\d+ ', re.M)   # a block with a stack (FRAME matches one line from its start)
 SKIP_FN = re.compile(r'^(__tsan|__interceptor|pthread_|operator |std::|__gnu_cxx|_ZNSt|<null>|__libc|start_thread|clone)')
 SKIP_OBJ = re.compile(r'(libtsan|libc\.so|libstdc\+\+|libpthread|ld-linux)')
@@ -30,10 +32,13 @@ def frames(block):
             if out and not line.strip():
                 break
             continue
-        fn, path, ln, obj = m.group(2), m.group(3), m.group(4), m.group(5)
+        fn, where, obj = m.group(2), m.group(3), m.group(4)
+        loc = LOC.match(where)
+        path, ln = (loc.group(1), loc.group(2)) if loc else (where, '?')
+        fn = re.sub(r'\(.*$', '', fn)          # the parameter list is noise for grouping
         if SKIP_FN.match(fn) or SKIP_OBJ.search(obj):
             continue
-        out.append('%s %s:%s' % (fn, os.path.basename(path), ln or '?'))
+        out.append('%s %s:%s' % (fn, os.path.basename(path), ln))
     return out
 
 
