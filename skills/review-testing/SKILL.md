@@ -20,8 +20,8 @@ description: 리뷰 검증 규율 — 이 PR 에 무엇을 돌릴지(CTP sql/med
 | PR 이 바꾸는 것 | 필수 | 추가 | 판정 기준 |
 |---|---|---|---|
 | **옵티마이저**(조인 순서·선택도·히스토그램·비용 상수·플랜 비교기) | JOB 113 스크리닝(min-of-3) → **플랜 덤프 diff** → 바뀐 질의만 median-of-3 확정(2026-10-21 사용자 결정: 5회 대신 3회) | 바뀐 질의가 집계/스캔 지배면 TPC-H 해당 질의 | 기준 플랜과의 조인 순서 일치 여부(지표) + MAD 기준 시간, 부호 쏠림 시 순서 반전 |
-| **실행기**(스캔·집계·정렬·해시조인·병렬·임시파일) | TPC-H SF10 22 (SSOT r1 계약: 8192M/par6/warmup1+median-of-3) | JOB 은 회귀 유무만(스크리닝) | median + MAD, 결과 정합(행 수·체크섬) |
-| **스토리지·트랜잭션**(락·MVCC·카탈로그·통계 수집·복구) | CTP sql + medium **코어 여부** + **동시성 재현 스크립트**(release·debug) | 관련 shell 디렉터리(`dev4-tc-workspace/tests/shell-tc-index` 로 고른다) · 격리·커밋·복구·브로커/CAS 를 바꾸면 **Jepsen 행렬**(`tools/jepsen-cubrid/run_matrix.sh`, 약 1시간) · 버퍼 최소(16M)+동시 페이지 작업 축(자가진화 #079) | 코어 0 · 시나리오 PASS · debug assert 0 · Jepsen 기대대로(무효는 `a-ser-none`·`b-rc-rmw` 둘만) |
+| **실행기**(스캔·집계·정렬·해시조인·병렬·임시파일) | TPC-H SF10 22 (SSOT r1 계약: 8192M/par6/warmup1+median-of-3) | JOB 은 회귀 유무만(스크리닝) · 병렬 연산자(`src/query/parallel/`)·오류 전파·인터럽트를 바꾸면 **병렬 오류·취소 주입**(`tools/concurrency-cubrid/run.sh parallel 300`) | median + MAD, 결과 정합(행 수·체크섬) · 주입은 FINDING 0·서버 재기동 0 |
+| **스토리지·트랜잭션**(락·MVCC·카탈로그·통계 수집·복구) | CTP sql + medium **코어 여부** + **동시성 재현 스크립트**(release·debug) | 관련 shell 디렉터리(`dev4-tc-workspace/tests/shell-tc-index` 로 고른다) · MVCC·잠금·유일 키를 바꾸면 **Hermitage 표**(`tools/concurrency-cubrid/run.sh hermitage`, 약 75초 — 격리 이상 14꼴 × RC/RR/SER × 접근 경로 3, 기대는 매뉴얼) · 격리·커밋·복구·브로커/CAS 를 바꾸면 **Jepsen 행렬**(`tools/jepsen-cubrid/run_matrix.sh`, 약 1시간) · 버퍼 최소(16M)+동시 페이지 작업 축(자가진화 #079) | 코어 0 · 시나리오 PASS · debug assert 0 · Jepsen 기대대로(무효는 `a-ser-none`·`b-rc-rmw` 둘만) |
 | **파서·타입·함수·SQL 의미** | CTP sql (로컬은 코어만, 답안 정렬은 CI 몫) | medium | 코어 0 |
 | **카탈로그·DDL·권한** | CTP sql + shell 관련 디렉터리 | `_db_*` 뷰 답안 변경 사유 코멘트 | 코어 0, 답안 변경은 의도 기준 |
 | **리팩터링·헤더 정리** | 빌드(release+debug) + CTP sql 코어 | 빌드 시간 비교(PHYS) | 동작 무변경 |
@@ -78,5 +78,6 @@ description: 리뷰 검증 규율 — 이 PR 에 무엇을 돌릴지(CTP sql/med
 
 ## 6. 연동 도구
 - Jepsen for CUBRID: `tools/jepsen-cubrid/`(README) — 한 노드의 격리·원자성·내구성 회귀망(append·wr·bank·set × RC/RR/SERIALIZABLE × kill·pause·CAS kill). **단일 노드에서는 결함을 잘 못 찾는다**(2026-11-04 20회 0건, 사용자 평가) — 엔진 결함은 표적 부하 시험이 찾았다. 의미(문서화된 동작)가 그대로인지 보는 용도로, 트랜잭션 경계를 바꾼 PR 에서만 제안한다.
+- 동시성 시험: `tools/concurrency-cubrid/`(README) — `Hermitage.java`(격리 의미의 회귀망·정답표, 2026-11-27 .51 debug 126회 전부 매뉴얼대로)와 `ParallelInject.java`(병렬 워커 안 오류·취소 — 직렬과 같은 오류 코드인지, 취소 뒤 같은 연결의 답이 기준과 같은지, 롤백만 하는 동시 쓰기 아래). 둘 다 결함 탐색기가 아니라 회귀망이다 — 생성 SQL 로 넓히는 격리 오라클은 설계 중(비공개 `projects/동시성시험-20261127/설계문서-격리오라클.md`).
 - 실패 케이스가 이 PR 과 관련 있는지: `~/dev/docs/dev4-tc-workspace/tools/tc_relevance.py --pr <n> --failed <케이스 경로…>` (`dev4-tc-workspace/tests/shell-tc-index/index.json` 기반, 높음/낮음 + 이유).
 - 규칙 근거: `rules/성능-리뷰-규칙.md` §6(PR 의 측정·플랜 증거를 판정하는 문장).
