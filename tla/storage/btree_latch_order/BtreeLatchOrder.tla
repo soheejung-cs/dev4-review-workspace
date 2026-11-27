@@ -45,6 +45,10 @@ Prog(n) ==
                           U("L2"), U("L1"), U("Root") >>                            \*   btree.c:18874
     [] n = "MERGE"  -> << F("Root", "W"), F("L1", "W"), F("L2", "W"),               \* btree_merge_node_and_advance
                           U("L2"), U("L1"), U("Root") >>                            \*   btree.c:37105 (vacuum / delete)
+    [] n = "MERGER" -> << F("Root", "R"), F("L1", "W"), F("L2", "W"),               \* btree_merge_node_and_advance () first pass:
+                          U("L2"), U("L1"), U("Root") >>                            \*   parent READ (nonleaf_latch_mode), leaf child
+                                                                                    \*   W btree.c:37032, right neighbour W :37105,
+                                                                                    \*   then promote parent (fails -> restart = let go)
     [] n = "HUPD"   -> << F("H", "W"), U("H") >>                                    \* heap insert/update/delete/vacuum on H
     [] n = "HFS1"   -> << F("H", "R") >> \o SubIdx("L1") \o << U("H") >>           \* heap scan: eval_data_filter () with
     [] n = "HFS2"   -> << F("H", "R") >> \o SubIdx("L2") \o << U("H") >>           \*   H held, scan_manager.c:6124
